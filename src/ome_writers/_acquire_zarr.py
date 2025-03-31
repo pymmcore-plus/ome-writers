@@ -5,11 +5,11 @@ import acquire_zarr
 import acquire_zarr as aqz
 import numpy as np
 
-from ome_writers.DimensionInfo import DimensionInfo
-from ome_writers.OMEStream import OMEStream
+from ome_writers.dimensions import DimensionInfo
+from ome_writers._stream_base import OMEStream
 
 
-class AquireZarrStream(OMEStream):
+class AcquireZarrStream(OMEStream):
     def __init__(self) -> None:
         self._aqz = acquire_zarr
         super().__init__()

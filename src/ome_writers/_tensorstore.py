@@ -6,8 +6,8 @@ from typing import Mapping, Self
 
 import numpy as np
 
-from ome_writers.DimensionInfo import DimensionInfo
-from ome_writers.OMEStream import OMEStream
+from ome_writers.dimensions import DimensionInfo
+from ome_writers._stream_base import OMEStream
 
 
 class TensorStoreZarrStream(OMEStream):

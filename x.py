@@ -1,3 +1,5 @@
+"""just a test."""
+
 from __future__ import annotations
 
 import time
@@ -5,8 +7,7 @@ from itertools import product
 
 import numpy as np
 
-from ome_writers import create_stream
-from ome_writers import DimensionInfo
+from ome_writers import DimensionInfo, create_stream
 
 nt = 10
 nz = 10

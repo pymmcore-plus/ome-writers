@@ -1,14 +1,19 @@
 """OME-TIFF and OME-ZARR writer APIs designed for microscopy acquisition."""
 
-from collections.abc import Sequence
+from __future__ import annotations
+
 from importlib.metadata import PackageNotFoundError, version
+from typing import TYPE_CHECKING
 
-import numpy as np
+from ome_writers._acquire_zarr import AcquireZarrStream
 
-from ome_writers.DimensionInfo import DimensionInfo
-from ome_writers.OMEStream import OMEStream
-from ome_writers.AquireZarrStream import AquireZarrStream
-from ome_writers.TensorStoreZarrStream import TensorStoreZarrStream
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    import numpy as np
+
+    from ome_writers._stream_base import OMEStream
+    from ome_writers.dimensions import DimensionInfo
 
 try:
     __version__ = version("ome-writers")
@@ -21,6 +26,5 @@ __email__ = "talley.lambert@gmail.com"
 def create_stream(
     path: str, dtype: np.dtype, dimensions: Sequence[DimensionInfo]
 ) -> OMEStream:
-    # stream = AquireZarrStream()
-    stream = TensorStoreZarrStream()
+    stream = AcquireZarrStream()
     return stream.create(path, dtype, dimensions)
