@@ -1,13 +1,13 @@
-from collections.abc import Sequence
-from itertools import product
 import json
+from collections.abc import Mapping, Sequence
+from itertools import product
 from pathlib import Path
-from typing import Mapping, Self
+from typing import Self
 
 import numpy as np
 
-from ome_writers.dimensions import DimensionInfo
 from ome_writers._stream_base import OMEStream
+from ome_writers.dimensions import DimensionInfo
 
 
 class TensorStoreZarrStream(OMEStream):
@@ -41,7 +41,6 @@ class TensorStoreZarrStream(OMEStream):
 
         self._create_group(self.normalize_path(path), dimensions)
         spec = self._create_spec(dtype, dimensions)
-        print(spec)
         self._store = self._ts.open(spec).result()
         return self
 

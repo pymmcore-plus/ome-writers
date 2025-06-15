@@ -6,21 +6,28 @@ from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING
 
 from ome_writers._acquire_zarr import AcquireZarrStream
+from ome_writers._stream_base import OMEStream
+from ome_writers._tensorstore import TensorStoreZarrStream
+from ome_writers.dimensions import DimensionInfo
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     import numpy as np
 
-    from ome_writers._stream_base import OMEStream
-    from ome_writers.dimensions import DimensionInfo
 
 try:
     __version__ = version("ome-writers")
 except PackageNotFoundError:
     __version__ = "uninstalled"
-__author__ = "Talley Lambert"
-__email__ = "talley.lambert@gmail.com"
+
+__all__ = [
+    "AcquireZarrStream",
+    "DimensionInfo",
+    "OMEStream",
+    "TensorStoreZarrStream",
+    "__version__",
+]
 
 
 def create_stream(

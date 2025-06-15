@@ -1,16 +1,28 @@
-from collections.abc import Sequence
-from typing import Self
+from __future__ import annotations
 
-import acquire_zarr
-import acquire_zarr as aqz
+from typing import TYPE_CHECKING, Self
+
 import numpy as np
 
-from ome_writers.dimensions import DimensionInfo
 from ome_writers._stream_base import OMEStream
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    import acquire_zarr
+
+    from ome_writers.dimensions import DimensionInfo
 
 
 class AcquireZarrStream(OMEStream):
     def __init__(self) -> None:
+        try:
+            import acquire_zarr
+        except ImportError:
+            raise ImportError(
+                "AcquireZarrStream requires the acquire-zarr package: "
+                "pip install acquire-zarr"
+            )
         self._aqz = acquire_zarr
         super().__init__()
         self._stream: acquire_zarr.ZarrStream | None = None
@@ -54,7 +66,7 @@ class AcquireZarrStream(OMEStream):
         self,
         dim: DimensionInfo,
         shard_size_chunks: int = 1,
-    ) -> aqz.Dimension:
+    ) -> acquire_zarr.Dimension:
         return self._aqz.Dimension(
             name=dim.label,
             type=getattr(self._aqz.DimensionType, dim.ome_dim_type.upper()),

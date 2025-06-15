@@ -7,7 +7,7 @@ OME_UNIT = {"um": "micrometer", "ml": "milliliter", "s": "second", None: "unknow
 
 
 class DimensionInfo(NamedTuple):
-    label: Literal["x", "y", "z", "t", "c", "other"]
+    label: Literal["x", "y", "z", "t", "c", "p", "other"]
     size: int
     unit: tuple[float, str] | None = None
     # None or 0 indicates no constraint.
