@@ -38,6 +38,7 @@ dependencies = ["numpy>=2"]
 [dependency-groups]
 test = ["pytest", "pytest-cov"]
 dev = [
+    { include-group = "test" },
     "acquire-zarr>=0.4.0",
     "ipython",
     "mypy",
