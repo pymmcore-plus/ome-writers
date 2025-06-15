@@ -5,10 +5,10 @@ from __future__ import annotations
 from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING
 
-from ome_writers._acquire_zarr import AcquireZarrStream
-from ome_writers._stream_base import OMEStream
-from ome_writers._tensorstore import TensorStoreZarrStream
-from ome_writers.dimensions import DimensionInfo
+from ._acquire_zarr import AcquireZarrStream
+from ._dimensions import DimensionInfo
+from ._stream_base import OMEStream
+from ._tensorstore import TensorStoreZarrStream
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

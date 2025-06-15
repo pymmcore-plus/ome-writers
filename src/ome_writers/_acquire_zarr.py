@@ -4,25 +4,25 @@ from typing import TYPE_CHECKING, Self
 
 import numpy as np
 
-from ome_writers._stream_base import OMEStream
+from ._stream_base import OMEStream
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     import acquire_zarr
 
-    from ome_writers.dimensions import DimensionInfo
+    from ome_writers._dimensions import DimensionInfo
 
 
 class AcquireZarrStream(OMEStream):
     def __init__(self) -> None:
         try:
             import acquire_zarr
-        except ImportError:
+        except ImportError as e:
             raise ImportError(
                 "AcquireZarrStream requires the acquire-zarr package: "
                 "pip install acquire-zarr"
-            )
+            ) from e
         self._aqz = acquire_zarr
         super().__init__()
         self._stream: acquire_zarr.ZarrStream | None = None
@@ -32,10 +32,10 @@ class AcquireZarrStream(OMEStream):
     ) -> Self:
         try:
             data_type = getattr(self._aqz.DataType, np.dtype(dtype).name.upper())
-        except AttributeError:
-            raise ValueError(f"Cannot cast {dtype!r} to an acquire-zarr dtype.")
+        except AttributeError as e:
+            raise ValueError(f"Cannot cast {dtype!r} to an acquire-zarr dtype.") from e
         settings = self._aqz.StreamSettings(
-            store_path=self.normalize_path(path),
+            store_path=self._normalize_path(path),
             data_type=data_type,
             version=self._aqz.ZarrVersion.V3,
         )

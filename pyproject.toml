@@ -33,18 +33,21 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Typing :: Typed",
 ]
-dependencies = []
+dependencies = ["numpy>=2"]
 
-# https://peps.python.org/pep-0621/#dependencies-optional-dependencies
-[project.optional-dependencies]
+[dependency-groups]
 test = ["pytest", "pytest-cov"]
 dev = [
+    "acquire-zarr>=0.4.0",
     "ipython",
     "mypy",
-    "pdbpp",      # https://github.com/pdbpp/pdbpp
-    "pre-commit",
-    "rich",       # https://github.com/Textualize/rich
+    "pdbpp", # https://github.com/pdbpp/pdbpp
+    "pre-commit-uv",
+    "rich", # https://github.com/Textualize/rich
     "ruff",
+    "tensorstore>=0.1.69",
+    "tensorstore-stubs>=0.1.2",
+    "tifffile>=2024.8.30",
 ]
 
 [project.urls]
@@ -56,6 +59,8 @@ repository = "https://github.com/tlambert03/ome-writers"
 line-length = 88
 target-version = "py39"
 src = ["src"]
+fix = true
+unsafe-fixes = true
 
 # https://docs.astral.sh/ruff/rules
 [tool.ruff.lint]
@@ -71,8 +76,9 @@ select = [
     "C4",   # flake8-comprehensions
     "B",    # flake8-bugbear
     "A001", # flake8-builtins
+    "ANN",  # flake8-annotations
     "RUF",  # ruff-specific rules
-    "TCH",  # flake8-type-checking
+    "TC",   # flake8-type-checking
     "TID",  # flake8-tidy-imports
 ]
 ignore = [

@@ -6,8 +6,8 @@ from typing import Self
 
 import numpy as np
 
-from ome_writers._stream_base import OMEStream
-from ome_writers.dimensions import DimensionInfo
+from ._dimensions import DimensionInfo
+from ._stream_base import OMEStream
 
 
 class TensorStoreZarrStream(OMEStream):
@@ -39,7 +39,7 @@ class TensorStoreZarrStream(OMEStream):
         prod = product(*[range(d.size) for d in dimensions if d.label not in "yx"])
         self._indices = dict(enumerate(prod))
 
-        self._create_group(self.normalize_path(path), dimensions)
+        self._create_group(self._normalize_path(path), dimensions)
         spec = self._create_spec(dtype, dimensions)
         self._store = self._ts.open(spec).result()
         return self
