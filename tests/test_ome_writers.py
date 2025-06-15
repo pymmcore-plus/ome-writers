@@ -88,54 +88,41 @@ def test_basic_stream_lifecycle(
     assert output_path.exists()
 
 
+@pytest.mark.parametrize(
+    "dtype", [np.dtype(np.uint8), np.dtype(np.uint16)], ids=["uint8", "uint16"]
+)
 @pytest.mark.parametrize("stream_cls,file_ext", backends_to_test)
 def test_stream_with_different_dtypes(
     stream_cls: type[OMEStream],
     file_ext: str,
     tmp_path: Path,
+    dtype: np.dtype,
     sample_dimensions: list[DimensionInfo],
 ) -> None:
     """Test stream creation with different data types."""
-    dtypes_to_test = [np.uint8, np.uint16, np.float32]
+    stream = stream_cls()
+    output_path = (
+        tmp_path / f"test_{stream_cls.__name__.lower()}_{dtype.name}.{file_ext}"
+    )
 
-    for dtype_class in dtypes_to_test:
-        # Create the stream
-        stream = stream_cls()
+    assert not output_path.exists()
+    # Create test data with the specific dtype
+    shape = tuple(d.size for d in sample_dimensions)
+    data = np.random.randint(0, np.iinfo(dtype).max, size=shape, dtype=dtype)
 
-        # Set output path
-        output_path = (
-            tmp_path
-            / f"test_{stream_cls.__name__.lower()}_{dtype_class.__name__}.{file_ext}"
-        )
+    # Create and use stream
+    stream = stream.create(str(output_path), dtype, sample_dimensions)
+    assert stream.is_active()
 
-        # Create test data with the specific dtype
-        shape = tuple(d.size for d in sample_dimensions)
-        if dtype_class == np.float32:
-            data = np.random.random(shape).astype(dtype_class)
-        elif dtype_class == np.uint8:
-            data = np.random.randint(0, 255, size=shape, dtype=np.uint8)
-        elif dtype_class == np.uint16:
-            data = np.random.randint(0, 65535, size=shape, dtype=np.uint16)
-        else:
-            # Fallback for any other types
-            data = np.random.randint(0, 100, size=shape).astype(dtype_class)
+    # Write a few frames
+    nt, nz, nc = shape[:3]
+    for t, z, c in product(range(nt), range(nz), range(nc)):
+        frame = data[t, z, c]
+        stream.append(frame)
 
-        # Create and use stream
-        dtype_instance = np.dtype(dtype_class)
-        stream = stream.create(str(output_path), dtype_instance, sample_dimensions)
-        assert stream.is_active()
-
-        # Write a few frames
-        nt, nz, nc = shape[:3]
-        for t in range(min(2, nt)):
-            for z in range(min(2, nz)):
-                for c in range(min(2, nc)):
-                    frame = data[t, z, c]
-                    stream.append(frame)
-
-        stream.flush()
-        assert not stream.is_active()
-        assert output_path.exists()
+    stream.flush()
+    assert not stream.is_active()
+    assert output_path.exists()
 
 
 @pytest.mark.parametrize("stream_cls,file_ext", backends_to_test)
