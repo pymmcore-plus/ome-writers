@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 
-class TiffStreamWriter(OMEStream):
+class TiffStream(OMEStream):
     """A concrete OMEStream implementation for writing to OME-TIFF files.
 
     This writer is designed for deterministic acquisitions where the full experiment
@@ -49,6 +49,7 @@ class TiffStreamWriter(OMEStream):
         self._loop_dims_info: list[DimensionInfo] = []
         self._array_dims_info: dict[int, list[DimensionInfo]] = {}
         self._dim_order = "ptzcyx"
+        self._is_active = False
 
     def create(
         self, path: str, dtype: np.dtype, dimensions: Sequence[DimensionInfo]
@@ -73,7 +74,7 @@ class TiffStreamWriter(OMEStream):
         Self
             The instance of the writer, allowing for chaining.
         """
-        if self.is_active():
+        if self.is_active():  # pragma: no cover
             raise RuntimeError("Stream is already active. Please close it first.")
 
         self._path = Path(self._normalize_path(path))
@@ -86,7 +87,7 @@ class TiffStreamWriter(OMEStream):
 
         y_dim = dim_map.get("y")
         x_dim = dim_map.get("x")
-        if not (y_dim and x_dim):
+        if not (y_dim and x_dim):  # pragma: no cover
             raise ValueError("Dimensions must include 'x' and 'y'.")
 
         self._loop_dims_info = [d for d in sorted_dims if d.label not in "yx"]
@@ -157,7 +158,7 @@ class TiffStreamWriter(OMEStream):
         """
         if not self.is_active():
             raise RuntimeError("Stream is not active. Call create() first.")
-        if self._frame_counter >= self._total_frames:
+        if self._frame_counter >= self._total_frames:  # pragma: no cover
             raise RuntimeError(
                 f"Attempted to write frame {self._frame_counter + 1}, but "
                 f"stream is already full with {self._total_frames} frames."
@@ -169,7 +170,7 @@ class TiffStreamWriter(OMEStream):
         index_map = dict(zip((d.label for d in self._loop_dims_info), multi_index))
 
         # 2. Get the correct memmap array and the index within that array
-        p_idx = index_map.get("p", 0)
+        p_idx = int(index_map.get("p", 0))
         memmap_array = self._memmaps[p_idx]
 
         array_dims = [d.label for d in self._array_dims_info[p_idx]]
@@ -184,20 +185,12 @@ class TiffStreamWriter(OMEStream):
         for memmap_array in self._memmaps.values():
             if hasattr(memmap_array, "flush"):
                 memmap_array.flush()
-
-    def close(self) -> None:
-        """Flushes data and releases file resources."""
-        if not self.is_active():
-            return
-
-        self.flush()
-        # The underlying file handles for the memory maps are closed when the
-        # memmap objects are garbage collected. We'll clear the dict here
-        # to release the references and trigger that process.
-        self._memmaps.clear()
-
+        # Mark as inactive after flushing - this is consistent with other backends
         self._is_active = False
-        print(f"Stream closed. {self._frame_counter} frames written.")
+
+    def is_active(self) -> bool:
+        """Return True if the stream is currently active."""
+        return self._is_active
 
     def _generate_ome_metadata(
         self, name: str, axes: str, dimensions: list[DimensionInfo]

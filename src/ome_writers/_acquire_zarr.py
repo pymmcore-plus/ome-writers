@@ -32,7 +32,7 @@ class AcquireZarrStream(OMEStream):
     ) -> Self:
         try:
             data_type = getattr(self._aqz.DataType, np.dtype(dtype).name.upper())
-        except AttributeError as e:
+        except AttributeError as e:  # pragma: no cover
             raise ValueError(f"Cannot cast {dtype!r} to an acquire-zarr dtype.") from e
         settings = self._aqz.StreamSettings(
             store_path=self._normalize_path(path),
@@ -53,9 +53,8 @@ class AcquireZarrStream(OMEStream):
         self._stream.append(frame)
 
     def flush(self) -> None:
-        if self._stream is None:
-            msg = "Stream is closed or uninitialized. Cannot flush."
-            raise RuntimeError(msg)
+        if self._stream is None:  # pragma: no cover
+            raise RuntimeError("Stream is closed or uninitialized. Cannot flush.")
         # Flush the stream to ensure all data is written to disk.
         self._stream = None
 
