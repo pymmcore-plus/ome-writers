@@ -54,8 +54,12 @@ class MultiPositionOMEStream(OMEStream):
         self._position_dim: DimensionInfo | None = None
         # A mapping of indices to (array_key, non-position index)
         self._indices: dict[int, tuple[str, tuple[int, ...]]] = {}
+        # number of times append() has been called
         self._append_count = 0
+        # number of positions in the stream
         self._num_positions = 0
+        # non-position dimensions
+        # (e.g. time, z, c, y, x) that are not
         self._non_position_dims: Sequence[DimensionInfo] = []
 
     def _init_positions(
@@ -88,5 +92,5 @@ class MultiPositionOMEStream(OMEStream):
             msg = "Stream is closed or uninitialized. Call create() first."
             raise RuntimeError(msg)
         array_key, index = self._indices[self._append_count]
-        self._append_count += 1
         self._write_to_backend(array_key, index, frame)
+        self._append_count += 1

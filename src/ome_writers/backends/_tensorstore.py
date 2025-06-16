@@ -6,9 +6,9 @@ from typing import Self
 
 import numpy as np
 
-from ._dimensions import DimensionInfo
-from ._ngff_metadata import ome_meta_v5
-from ._stream_base import MultiPositionOMEStream
+from .._dimensions import DimensionInfo
+from .._ngff_metadata import ome_meta_v5
+from .._stream_base import MultiPositionOMEStream
 
 
 class TensorStoreZarrStream(MultiPositionOMEStream):

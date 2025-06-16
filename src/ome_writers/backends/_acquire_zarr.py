@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING, Self
 
 import numpy as np
 
-from ._ngff_metadata import ome_meta_v5
-from ._stream_base import MultiPositionOMEStream
+from .._ngff_metadata import ome_meta_v5
+from .._stream_base import MultiPositionOMEStream
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

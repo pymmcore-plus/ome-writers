@@ -9,8 +9,8 @@ import numpy as np
 import tifffile
 from typing_extensions import Self
 
-from ._dimensions import DimensionInfo
-from ._stream_base import OMEStream
+from .._dimensions import DimensionInfo
+from .._stream_base import OMEStream
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal, TypeAlias
 
-from ._acquire_zarr import AcquireZarrStream
-from ._tensorstore import TensorStoreZarrStream
-from ._tiff_stream import TiffStream
+from .backends._acquire_zarr import AcquireZarrStream
+from .backends._tensorstore import TensorStoreZarrStream
+from .backends._tiff_stream import TiffStream
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from ._dimensions import DimensionInfo
     from ._stream_base import OMEStream
 
-__all__ = ["create_stream"]
+__all__ = ["create_stream", "init_stream"]
 
 BackendName: TypeAlias = Literal["acquire-zarr", "tensorstore", "tiff"]
 BACKENDS: dict[BackendName, type[OMEStream]] = {
