@@ -229,11 +229,18 @@ def test_data_integrity_roundtrip(
     )
 
 
-@pytest.mark.skipif(
-    not importlib.util.find_spec("tensorstore"),
-    reason="tensorstore not available",
-)
-def test_multi_position_acquisition(tmp_path: Path) -> None:
+# Zarr backends that support multi-position
+zarr_backends_to_test = [
+    (backend_cls, file_ext)
+    for backend_cls, file_ext in backends_to_test
+    if file_ext == "zarr"
+]
+
+
+@pytest.mark.parametrize("stream_cls,file_ext", zarr_backends_to_test)
+def test_multiposition_acquisition(
+    stream_cls: type[OMEStream], file_ext: str, tmp_path: Path
+) -> None:
     """Test multi-position acquisition support with position dimension."""
     dimensions = [
         DimensionInfo(label="p", size=3, chunk_size=1),  # 3 positions
@@ -244,18 +251,24 @@ def test_multi_position_acquisition(tmp_path: Path) -> None:
     ]
 
     # Create the stream
-    stream = TensorStoreZarrStream()
-    output_path = tmp_path / "test_multipos.zarr"
+    stream = stream_cls()
+    output_path = tmp_path / f"test_multipos_{stream_cls.__name__.lower()}.{file_ext}"
     data = np.random.randint(0, 255, size=(32, 32), dtype=np.uint8)
 
     stream = stream.create(str(output_path), data.dtype, dimensions)
     assert stream.is_active()
 
-    # Should create 3 stores for 3 positions
-    assert len(stream._stores) == 3
-    assert "0" in stream._stores
-    assert "1" in stream._stores
-    assert "2" in stream._stores
+    # Should create 3 stores/streams for 3 positions (test using stream name)
+    if stream_cls.__name__ == "TensorStoreZarrStream":
+        # Test that we have the right number of stores
+        assert hasattr(stream, "_stores")
+        assert len(stream._stores) == 3  # type: ignore
+        assert all(str(i) in stream._stores for i in range(3))  # type: ignore
+    elif stream_cls.__name__ == "AcquireZarrStream":
+        # Test that we have the right number of streams
+        assert hasattr(stream, "_streams")
+        assert len(stream._streams) == 3  # type: ignore
+        assert all(str(i) in stream._streams for i in range(3))  # type: ignore
 
     # Write frames for all positions and time/channel combinations
     # Total frames = 3 positions x 2 time x 2 channels = 12 frames
@@ -279,17 +292,24 @@ def test_multi_position_acquisition(tmp_path: Path) -> None:
     with open(output_path / "zarr.json") as f:
         group_meta = json.load(f)
 
-    multiscales = group_meta["attributes"]["ome"]["multiscales"]
-    assert len(multiscales) == 3  # One for each position
+    if stream_cls.__name__ == "TensorStoreZarrStream":
+        # TensorStore generates OME metadata
+        multiscales = group_meta["attributes"]["ome"]["multiscales"]
+        assert len(multiscales) == 3  # One for each position
 
-    # Check that position dimension is excluded from axes
-    for multiscale in multiscales:
-        axes_names = [axis["name"] for axis in multiscale["axes"]]
-        assert "p" not in axes_names  # Position dimension should be excluded
-        assert "t" in axes_names
-        assert "c" in axes_names
-        assert "y" in axes_names
-        assert "x" in axes_names
+        # Check that position dimension is excluded from axes
+        for multiscale in multiscales:
+            axes_names = [axis["name"] for axis in multiscale["axes"]]
+            assert "p" not in axes_names  # Position dimension should be excluded
+            assert "t" in axes_names
+            assert "c" in axes_names
+            assert "y" in axes_names
+            assert "x" in axes_names
+    elif stream_cls.__name__ == "AcquireZarrStream":
+        # AcquireZarr creates basic zarr v3 group without OME metadata
+        assert group_meta["zarr_format"] == 3
+        assert group_meta["node_type"] == "group"
+        # OME metadata would need to be added post-processing
 
 
 # Skip entire test class if no backends are available

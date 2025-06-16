@@ -1,17 +1,16 @@
 import importlib.util
 import json
 from collections.abc import Mapping, Sequence
-from itertools import product
 from pathlib import Path
 from typing import Self
 
 import numpy as np
 
 from ._dimensions import DimensionInfo
-from ._stream_base import OMEStream
+from ._stream_base import MultiPositionOMEStream
 
 
-class TensorStoreZarrStream(OMEStream):
+class TensorStoreZarrStream(MultiPositionOMEStream):
     @classmethod
     def is_available(cls) -> bool:  # pragma: no cover
         """Check if the tensorstore package is available."""
@@ -24,43 +23,21 @@ class TensorStoreZarrStream(OMEStream):
             msg = (
                 "TensorStoreZarrStream requires tensorstore: `pip install tensorstore`."
             )
-            raise ImportError(
-                msg,
-            ) from e
+            raise ImportError(msg) from e
 
         self._ts = tensorstore
         super().__init__()
-        self._count = 0
         self._group_path: Path | None = None
         self._array_paths: dict[str, Path] = {}  # array_key -> path mapping
         self._futures: list = []
         self._stores: dict[str, tensorstore.TensorStore] = {}  # array_key -> store
-        self._indices: dict[int, tuple[str, tuple[int, ...]]] = {}  # count -> key,idx
         self._delete_existing = True
-        self._position_dim: DimensionInfo | None = None
 
     def create(
         self, path: str, dtype: np.dtype, dimensions: Sequence[DimensionInfo]
     ) -> Self:
-        # Separate position dimension from other dimensions
-        position_dims = [d for d in dimensions if d.label == "p"]
-        non_position_dims = [d for d in dimensions if d.label != "p"]
-
-        # Determine number of positions (1 if no position dimension)
-        num_positions = position_dims[0].size if position_dims else 1
-        if position_dims:
-            self._position_dim = position_dims[0]
-
-        # Create indices for all positions and non-position dimensions
-        non_pos_prod = list(
-            product(*[range(d.size) for d in non_position_dims if d.label not in "yx"])
-        )
-        count = 0
-        for pos_idx in range(num_positions):
-            array_key = str(pos_idx)
-            for non_pos_index in non_pos_prod:
-                self._indices[count] = (array_key, non_pos_index)
-                count += 1
+        # Use MultiPositionOMEStream to handle position logic
+        num_positions, non_position_dims = self._init_positions(dimensions)
 
         self._create_group(self._normalize_path(path), dimensions)
 
@@ -90,15 +67,13 @@ class TensorStoreZarrStream(OMEStream):
             "delete_existing": self._delete_existing,
         }
 
-    def append(self, frame: np.ndarray) -> None:
-        if not self._stores:
-            msg = "Stream is closed or uninitialized. Call create() first."
-            raise RuntimeError(msg)
-        array_key, index = self._indices[self._count]
+    def _write_to_backend(
+        self, array_key: str, index: tuple[int, ...], frame: np.ndarray
+    ) -> None:
+        """TensorStore-specific write implementation."""
         store = self._stores[array_key]
         future = store[index].write(frame)
         self._futures.append(future)
-        self._count += 1
 
     def flush(self) -> None:
         # Wait for all writes to finish.
@@ -126,7 +101,7 @@ class TensorStoreZarrStream(OMEStream):
             array_key = str(pos_idx)
             self._array_paths[array_key] = self._group_path / array_key
             # Use non_position_dims for multi-pos, full dims for single pos
-            array_dims[array_key] = non_position_dims if position_dims else dims
+            array_dims[array_key] = non_position_dims if self._position_dim else dims
 
         group_zarr = self._group_path / "zarr.json"
         group_zarr.write_text(json.dumps(self._group_meta(array_dims), indent=2))
