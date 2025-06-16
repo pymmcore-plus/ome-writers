@@ -1,14 +1,21 @@
+from __future__ import annotations
+
 import importlib.util
 import json
-from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import numpy as np
 from typing_extensions import Self
 
-from ome_writers._dimensions import DimensionInfo
 from ome_writers._ngff_metadata import ome_meta_v5
 from ome_writers._stream_base import MultiPositionOMEStream
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    import numpy as np
+
+    from ome_writers._dimensions import DimensionInfo
 
 
 class TensorStoreZarrStream(MultiPositionOMEStream):

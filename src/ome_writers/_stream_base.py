@@ -1,13 +1,19 @@
+from __future__ import annotations
+
 import abc
 from abc import abstractmethod
-from collections.abc import Sequence
 from itertools import product
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import numpy as np
 from typing_extensions import Self
 
-from ._dimensions import DimensionInfo
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    import numpy as np
+
+    from ._dimensions import DimensionInfo
 
 
 class OMEStream(abc.ABC):
