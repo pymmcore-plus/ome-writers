@@ -41,11 +41,23 @@ class AcquireZarrStream(MultiPositionOMEStream):
         self._streams: dict[str, acquire_zarr.ZarrStream] = {}  # array_key -> stream
 
     def create(
-        self, path: str, dtype: np.dtype, dimensions: Sequence[Dimension]
+        self,
+        path: str,
+        dtype: np.dtype,
+        dimensions: Sequence[Dimension],
+        *,
+        overwrite: bool = False,
     ) -> Self:
         # Use MultiPositionOMEStream to handle position logic
         num_positions, non_position_dims = self._init_positions(dimensions)
         self._group_path = Path(self._normalize_path(path))
+
+        # Check if directory exists and handle overwrite parameter
+        if self._group_path.exists() and not overwrite:
+            raise FileExistsError(
+                f"Directory {self._group_path} already exists. "
+                "Use overwrite=True to overwrite it."
+            )
 
         try:
             data_type = getattr(self._aqz.DataType, np.dtype(dtype).name.upper())

@@ -42,10 +42,18 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         self._delete_existing = True
 
     def create(
-        self, path: str, dtype: np.dtype, dimensions: Sequence[Dimension]
+        self,
+        path: str,
+        dtype: np.dtype,
+        dimensions: Sequence[Dimension],
+        *,
+        overwrite: bool = False,
     ) -> Self:
         # Use MultiPositionOMEStream to handle position logic
         num_positions, non_position_dims = self._init_positions(dimensions)
+
+        # Set delete_existing based on overwrite parameter
+        self._delete_existing = overwrite
 
         self._create_group(self._normalize_path(path), dimensions)
 
@@ -53,7 +61,17 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         for pos_idx in range(num_positions):
             array_key = str(pos_idx)
             spec = self._create_spec(dtype, non_position_dims, array_key)
-            self._stores[array_key] = self._ts.open(spec).result()
+            try:
+                self._stores[array_key] = self._ts.open(spec).result()
+            except ValueError as e:
+                if "ALREADY_EXISTS" in str(e):
+                    raise FileExistsError(
+                        f"Array {array_key} already exists at "
+                        f"{self._array_paths[array_key]}. "
+                        "Use overwrite=True to overwrite it."
+                    ) from e
+                else:
+                    raise
 
         return self
 

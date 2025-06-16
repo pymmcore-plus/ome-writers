@@ -22,9 +22,31 @@ class OMEStream(abc.ABC):
 
     @abstractmethod
     def create(
-        self, path: str, dtype: np.dtype, dimensions: Sequence[Dimension]
+        self,
+        path: str,
+        dtype: np.dtype,
+        dimensions: Sequence[Dimension],
+        *,
+        overwrite: bool = False,
     ) -> Self:
-        """Create a new stream for path, dtype, and dimensions."""
+        """Create a new stream for path, dtype, and dimensions.
+
+        Parameters
+        ----------
+        path : str
+            Path to the output file or directory.
+        dtype : np.dtype
+            NumPy data type for the image data.
+        dimensions : Sequence[Dimension]
+            Sequence of dimension information describing the data structure.
+        overwrite : bool, optional
+            Whether to overwrite existing files or directories. Default is False.
+
+        Returns
+        -------
+        Self
+            The instance of the stream, allowing for chaining.
+        """
 
     @abstractmethod
     def append(self, frame: np.ndarray) -> None:

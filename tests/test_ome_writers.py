@@ -207,6 +207,23 @@ def test_data_integrity_roundtrip(
         err_msg=f"Data mismatch in {stream_cls.__name__} roundtrip test with {dtype}",
     )
 
+    # Test 2: Try to create again without overwrite (should fail)
+    with pytest.raises(FileExistsError, match=".*already exists"):
+        stream = stream_cls()
+        stream = stream.create(str(output_path), dtype, dimensions, overwrite=False)
+
+    # Test 3: Create again with overwrite=True (should succeed)
+    stream = stream_cls()
+    stream = stream.create(str(output_path), dtype, dimensions, overwrite=True)
+    assert isinstance(stream, OMEStream)
+    assert stream.is_active()
+
+    for frame in original_frames:
+        stream.append(frame)
+    stream.flush()
+    assert not stream.is_active()
+    assert output_path.exists()
+
 
 @pytest.mark.parametrize("stream_cls,file_ext", backends_to_test)
 def test_multiposition_acquisition(

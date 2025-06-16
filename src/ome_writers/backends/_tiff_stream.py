@@ -59,7 +59,12 @@ class TiffStream(OMEStream):
         self._is_active = False
 
     def create(
-        self, path: str, dtype: np.dtype, dimensions: Sequence[Dimension]
+        self,
+        path: str,
+        dtype: np.dtype,
+        dimensions: Sequence[Dimension],
+        *,
+        overwrite: bool = False,
     ) -> Self:
         """
         Creates and pre-allocates OME-TIFF file(s) on disk.
@@ -75,6 +80,8 @@ class TiffStream(OMEStream):
             The numpy data type of the image frames (e.g., np.uint16).
         dimensions : Sequence[DimensionInfo]
             A sequence describing the dimensions of the experiment.
+        overwrite : bool, optional
+            Whether to overwrite existing files. Default is False.
 
         Returns
         -------
@@ -110,6 +117,12 @@ class TiffStream(OMEStream):
                 p_path = self._path.with_stem(f"{self._path.stem}_p{p_idx:03d}")
             else:
                 p_path = self._path
+
+            # Check if file exists and handle overwrite parameter
+            if p_path.exists() and not overwrite:
+                raise FileExistsError(
+                    f"File {p_path} already exists. Use overwrite=True to overwrite it."
+                )
             p_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Determine the shape and axes for this position's 5D stack

@@ -73,6 +73,7 @@ def create_stream(
     dimensions: Sequence[Dimension],
     *,
     backend: Literal[BackendName, "auto"] = "auto",
+    overwrite: bool = False,
 ) -> OMEStream:
     """Create a stream for writing OME-TIFF or OME-ZARR data.
 
@@ -94,6 +95,8 @@ def create_stream(
         - "auto": Automatically determine the backend based on the file extension.
 
         Default is "auto".
+    overwrite : bool, optional
+        Whether to overwrite existing files or directories. Default is False.
 
     Returns
     -------
@@ -101,7 +104,7 @@ def create_stream(
         A configured stream ready for writing frames.
     """
     stream = init_stream(path, backend=backend)
-    return stream.create(str(path), np.dtype(dtype), dimensions)
+    return stream.create(str(path), np.dtype(dtype), dimensions, overwrite=overwrite)
 
 
 def _autobackend(path: str | Path) -> Literal["acquire-zarr", "tensorstore", "tiff"]:
