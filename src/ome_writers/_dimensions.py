@@ -17,7 +17,7 @@ class Dimension(NamedTuple):
     unit: tuple[float, str] | None = None
     # None or 0 indicates no constraint.
     # -1 indicates that the chunk size should equal the full extent of the domain.
-    chunk_size: int | None = 1
+    chunk_size: int | None = None
 
     @property
     def ome_dim_type(self) -> Literal["space", "time", "channel", "other"]:

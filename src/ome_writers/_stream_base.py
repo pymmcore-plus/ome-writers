@@ -86,7 +86,13 @@ class MultiPositionOMEStream(OMEStream):
     def _init_positions(
         self, dimensions: Sequence[Dimension]
     ) -> tuple[int, Sequence[Dimension]]:
-        """Initialize position tracking and return num_positions, non_position_dims."""
+        """Initialize position tracking and return num_positions, non_position_dims.
+
+        Returns
+        -------
+        tuple[int, Sequence[Dimension]]
+            The number of positions and the non-position dimensions.
+        """
         # Separate position dimension from other dimensions
         position_dims = [d for d in dimensions if d.label == "p"]
         non_position_dims = [d for d in dimensions if d.label != "p"]
@@ -106,7 +112,22 @@ class MultiPositionOMEStream(OMEStream):
     def _write_to_backend(
         self, array_key: str, index: tuple[int, ...], frame: np.ndarray
     ) -> None:
-        """Backend-specific write implementation."""
+        """Backend-specific write implementation.
+
+        Parameters
+        ----------
+        array_key : str
+            The key for the position in the backend (e.g., Zarr group).
+        index : tuple[int, ...]
+            The index for the non-position dimensions.
+        frame : np.ndarray
+            The frame data to write.
+
+        Raises
+        ------
+        RuntimeError
+            If the stream is not active or uninitialized.
+        """
 
     def append(self, frame: np.ndarray) -> None:
         if not self.is_active():
