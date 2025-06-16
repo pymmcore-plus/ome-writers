@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import json
+from contextlib import suppress
+from pathlib import Path
 from typing import TYPE_CHECKING, Self
 
 import numpy as np
 
+from ._ngff_metadata import ome_meta_v5
 from ._stream_base import MultiPositionOMEStream
 
 if TYPE_CHECKING:
@@ -40,27 +44,52 @@ class AcquireZarrStream(MultiPositionOMEStream):
     ) -> Self:
         # Use MultiPositionOMEStream to handle position logic
         num_positions, non_position_dims = self._init_positions(dimensions)
+        self._group_path = Path(self._normalize_path(path))
 
         try:
             data_type = getattr(self._aqz.DataType, np.dtype(dtype).name.upper())
         except AttributeError as e:  # pragma: no cover
             raise ValueError(f"Cannot cast {dtype!r} to an acquire-zarr dtype.") from e
 
+        az_dims = [self._dim_toaqz_dim(dim) for dim in non_position_dims]
         # Create streams for each position
         for pos_idx in range(num_positions):
             array_key = str(pos_idx)
             settings = self._aqz.StreamSettings(
-                store_path=self._normalize_path(path),
-                # output_key=array_key,
+                store_path=str(self._group_path),
+                output_key=array_key,
                 data_type=data_type,
                 version=self._aqz.ZarrVersion.V3,
             )
-            settings.dimensions.extend(
-                self._dim_toaqz_dim(x) for x in non_position_dims
-            )
+            settings.dimensions.extend(az_dims)
             self._streams[array_key] = self._aqz.ZarrStream(settings)
 
+        self._patch_group_metadata()
         return self
+
+    def _patch_group_metadata(self) -> None:
+        """Patch the group metadata with OME NGFF v0.5 metadata.
+
+        This method exists because there are cases in which the standard acquire-zarr
+        API is not flexible enough to handle all the cases we need (such as multiple
+        positions).  This method manually writes the OME NGFF v0.5 metadata with our
+        manually constructed metadata.
+        """
+        dims = self._non_position_dims
+        attrs = ome_meta_v5({str(i): dims for i in range(self._num_positions)})
+        zarr_json = Path(self._group_path) / "zarr.json"
+        current_meta: dict = {
+            "consolidated_metadata": None,
+            "node_type": "group",
+            "zarr_format": 3,
+        }
+        if zarr_json.exists():
+            with suppress(json.JSONDecodeError):
+                with open(zarr_json) as f:
+                    current_meta = json.load(f)
+
+        current_meta.setdefault("attributes", {}).update(attrs)
+        zarr_json.write_text(json.dumps(current_meta, indent=2))
 
     def _write_to_backend(
         self, array_key: str, index: tuple[int, ...], frame: np.ndarray
@@ -74,6 +103,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
             raise RuntimeError("Stream is closed or uninitialized. Cannot flush.")
         # Flush all streams to ensure all data is written to disk.
         self._streams.clear()
+        self._patch_group_metadata()
 
     def is_active(self) -> bool:
         return bool(self._streams) and any(

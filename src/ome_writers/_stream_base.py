@@ -55,23 +55,25 @@ class MultiPositionOMEStream(OMEStream):
         # A mapping of indices to (array_key, non-position index)
         self._indices: dict[int, tuple[str, tuple[int, ...]]] = {}
         self._append_count = 0
+        self._num_positions = 0
+        self._non_position_dims: Sequence[DimensionInfo] = []
 
     def _init_positions(
         self, dimensions: Sequence[DimensionInfo]
     ) -> tuple[int, Sequence[DimensionInfo]]:
         """Initialize position tracking and return num_positions, non_position_dims."""
-        self._append_count = 0
-
         # Separate position dimension from other dimensions
         position_dims = [d for d in dimensions if d.label == "p"]
         non_position_dims = [d for d in dimensions if d.label != "p"]
-
         num_positions = position_dims[0].size if position_dims else 1
-        self._position_dim = position_dims[0] if position_dims else None
         non_p_ranges = [range(d.size) for d in non_position_dims if d.label not in "yx"]
+        range_iter = enumerate(product(range(num_positions), *non_p_ranges))
 
-        iterator = enumerate(product(range(num_positions), *non_p_ranges))
-        self._indices = {i: (str(pos), tuple(idx)) for i, (pos, *idx) in iterator}
+        self._position_dim = position_dims[0] if position_dims else None
+        self._indices = {i: (str(pos), tuple(idx)) for i, (pos, *idx) in range_iter}
+        self._append_count = 0
+        self._num_positions = num_positions
+        self._non_position_dims = non_position_dims
 
         return num_positions, non_position_dims
 

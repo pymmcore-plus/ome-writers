@@ -144,11 +144,11 @@ def write_directly_with_aq_zarr(
 
 
 if __name__ == "__main__":
-    sizes = {"t": 10, "z": 10, "c": 1, "y": 256, "x": 256}
+    sizes = {"t": 10, "z": 10, "c": 1, "y": 256, "x": 256, "p": 2}
     chunks_sizes = {"y": 64, "x": 64}
     output = Path("~/Desktop/some_path_ts.zarr").expanduser()
-    # backend = "acquire-zarr"
-    backend = "tensorstore"
+    backend = "acquire-zarr"
+    # backend = "tensorstore"
     shutil.rmtree(output, ignore_errors=True)  # remove existing output
 
     plane_iter, dims, dtype = create_data_and_dims(

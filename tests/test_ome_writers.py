@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import json
 from itertools import product
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -242,9 +243,6 @@ def test_multiposition_acquisition(
     stream_cls: type[OMEStream], file_ext: str, tmp_path: Path
 ) -> None:
     """Test multi-position acquisition support with position dimension."""
-    if stream_cls.__name__ == "AcquireZarrStream":
-        pytest.xfail("AcquireZarrStream does not support multi-position yet")
-
     dimensions = [
         DimensionInfo(label="p", size=3, chunk_size=1),  # 3 positions
         DimensionInfo(label="t", size=2, unit=(1.0, "s"), chunk_size=1),
@@ -290,31 +288,15 @@ def test_multiposition_acquisition(
     assert (output_path / "zarr.json").exists()
 
     # Verify that each position has correct metadata
-    import json
-
     with open(output_path / "zarr.json") as f:
         group_meta = json.load(f)
 
-    if stream_cls.__name__ == "TensorStoreZarrStream":
-        # TensorStore generates OME metadata
-        multiscales = group_meta["attributes"]["ome"]["multiscales"]
-        assert len(multiscales) == 3  # One for each position
+    ome_attrs = group_meta["attributes"]["ome"]
+    assert ome_attrs["version"] == "0.5"
+    multiscales = ome_attrs["multiscales"]
+    assert isinstance(multiscales, list)
+    assert len(multiscales) == 1
+    assert len(multiscales[0]["datasets"]) == 3
 
-        # Check that position dimension is excluded from axes
-        for multiscale in multiscales:
-            axes_names = [axis["name"] for axis in multiscale["axes"]]
-            assert "p" not in axes_names  # Position dimension should be excluded
-            assert "t" in axes_names
-            assert "c" in axes_names
-            assert "y" in axes_names
-            assert "x" in axes_names
-    elif stream_cls.__name__ == "AcquireZarrStream":
-        # AcquireZarr creates basic zarr v3 group without OME metadata
-        assert group_meta["zarr_format"] == 3
-        assert group_meta["node_type"] == "group"
-        # OME metadata would need to be added post-processing
-
-
-# Skip entire test class if no backends are available
-if not backends_to_test:
-    pytest.skip("No OME writer backends available", allow_module_level=True)
+    axes_names = {ax["name"] for ax in multiscales[0]["axes"]}
+    assert all(x in axes_names for x in ["t", "c", "y", "x"])

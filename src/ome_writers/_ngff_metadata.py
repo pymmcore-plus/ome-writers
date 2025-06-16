@@ -32,13 +32,26 @@ def ome_meta_v5(array_dims: Mapping[str, Sequence[DimensionInfo]]) -> dict:
     }
     >>> ome_meta = ome_meta_v5(array_dims)
     """
-    multiscales = []
+    # Group arrays by their axes to create multiscales entries
+    multiscales: dict[str, dict] = {}
+
     for array_path, dims in array_dims.items():
         axes, scales = _ome_axes_scales(dims)
         ct = {"scale": scales, "type": "scale"}
         ds = {"path": array_path, "coordinateTransformations": [ct]}
-        multiscales.append({"axes": axes, "datasets": [ds]})
-    attrs = {"ome": {"version": "0.5", "multiscales": multiscales}}
+
+        # Create a hashable key from axes for grouping
+        axes_key = str(axes)
+        # Create a new entry for this axes configuration if it doesn't exist
+        # (in the case where multiple arrays share the same axes, we want to
+        # create multiple datasets under the same multiscale entry, rather than
+        # creating a new multiscale entry with a single dataset each time)
+        multiscale = multiscales.setdefault(axes_key, {"axes": axes, "datasets": []})
+
+        # Add the dataset to the corresponding group
+        multiscale["datasets"].append(ds)
+
+    attrs = {"ome": {"version": "0.5", "multiscales": list(multiscales.values())}}
     return attrs
 
 
