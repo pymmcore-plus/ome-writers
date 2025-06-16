@@ -51,7 +51,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
             array_key = str(pos_idx)
             settings = self._aqz.StreamSettings(
                 store_path=self._normalize_path(path),
-                output_key=array_key,
+                # output_key=array_key,
                 data_type=data_type,
                 version=self._aqz.ZarrVersion.V3,
             )

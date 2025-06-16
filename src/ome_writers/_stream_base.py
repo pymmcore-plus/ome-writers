@@ -41,7 +41,13 @@ class OMEStream(abc.ABC):
 
 
 class MultiPositionOMEStream(OMEStream):
-    """Pure bookkeeping for P-axis handling (library-agnostic)."""
+    """Subclass for OME streams that support multiple positions.
+
+    This class provides a default "append()" implementation that handles
+    multi-position data by managing indices and position dimensions, subclasses
+    must now implement the "_write_to_backend()" method to handle
+    backend-specific writing logic.
+    """
 
     def __init__(self) -> None:
         # dimension info for position dimension, if any

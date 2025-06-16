@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-from typing import Literal, NamedTuple
+from typing import Literal, NamedTuple, TypeAlias
 
 OME_DIM_TYPE = {"y": "space", "x": "space", "z": "space", "t": "time", "c": "channel"}
 OME_UNIT = {"um": "micrometer", "ml": "milliliter", "s": "second", None: "unknown"}
 
 
+DimensionLabel: TypeAlias = Literal["x", "y", "z", "t", "c", "p", "other"]
+
+
 class DimensionInfo(NamedTuple):
-    label: Literal["x", "y", "z", "t", "c", "p", "other"]
+    label: DimensionLabel
     size: int
     unit: tuple[float, str] | None = None
     # None or 0 indicates no constraint.

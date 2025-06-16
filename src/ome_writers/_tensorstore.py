@@ -1,12 +1,13 @@
 import importlib.util
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Self
 
 import numpy as np
 
 from ._dimensions import DimensionInfo
+from ._ngff_metadata import ome_meta_v5
 from ._stream_base import MultiPositionOMEStream
 
 
@@ -104,38 +105,10 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
             array_dims[array_key] = non_position_dims if self._position_dim else dims
 
         group_zarr = self._group_path / "zarr.json"
-        group_zarr.write_text(json.dumps(self._group_meta(array_dims), indent=2))
+        group_meta = {
+            "zarr_format": 3,
+            "node_type": "group",
+            "attributes": ome_meta_v5(array_dims=array_dims),
+        }
+        group_zarr.write_text(json.dumps(group_meta, indent=2))
         return self._group_path
-
-    def _group_meta(self, array_dims: Mapping[str, Sequence[DimensionInfo]]) -> dict:
-        multiscales = []
-        for array_path, dims in array_dims.items():
-            axes, scales = _ome_axes_scales(dims)
-            ct = {"scale": scales, "type": "scale"}
-            ds = {"path": array_path, "coordinateTransformations": [ct]}
-            multiscales.append({"axes": axes, "datasets": [ds]})
-        attrs = {"ome": {"version": "0.5", "multiscales": multiscales}}
-        return {"zarr_format": 3, "node_type": "group", "attributes": attrs}
-
-
-def _ome_axes_scales(dims: Sequence[DimensionInfo]) -> tuple[list[dict], list[float]]:
-    """Return ome axes meta.
-
-    The length of "axes" must be between 2 and 5 and MUST be equal to the
-    dimensionality of the zarr arrays storing the image data. The "axes" MUST
-    contain 2 or 3 entries of "type:space" and MAY contain one additional
-    entry of "type:time" and MAY contain one additional entry of
-    "type:channel" or a null / custom type. The order of the entries MUST
-    correspond to the order of dimensions of the zarr arrays. In addition, the
-    entries MUST be ordered by "type" where the "time" axis must come first
-    (if present), followed by the "channel" or custom axis (if present) and
-    the axes of type "space".
-    """
-    axes: list[dict] = []
-    scales: list[float] = []
-    for dim in dims:
-        axes.append(
-            {"name": dim.label, "type": dim.ome_dim_type, "unit": dim.ome_unit},
-        )
-        scales.append(dim.ome_scale)
-    return axes, scales

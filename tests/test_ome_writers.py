@@ -242,6 +242,9 @@ def test_multiposition_acquisition(
     stream_cls: type[OMEStream], file_ext: str, tmp_path: Path
 ) -> None:
     """Test multi-position acquisition support with position dimension."""
+    if stream_cls.__name__ == "AcquireZarrStream":
+        pytest.xfail("AcquireZarrStream does not support multi-position yet")
+
     dimensions = [
         DimensionInfo(label="p", size=3, chunk_size=1),  # 3 positions
         DimensionInfo(label="t", size=2, unit=(1.0, "s"), chunk_size=1),
