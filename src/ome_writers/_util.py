@@ -6,13 +6,13 @@ import numpy as np
 
 from ome_writers import DimensionInfo, DimensionLabel
 
+VALID_LABELS = get_args(DimensionLabel)
 UNITS: dict[DimensionLabel, tuple[float, str]] = {
     "t": (1.0, "s"),
     "z": (1.0, "um"),
     "y": (1.0, "um"),
     "x": (1.0, "um"),
 }
-VALID_LABELS = get_args(DimensionLabel)
 
 
 def fake_data_for_sizes(
@@ -39,9 +39,9 @@ def fake_data_for_sizes(
         A mapping of dimension labels to their chunk sizes. If None, defaults to 1 for
         all dimensions, besizes 'y' and 'x', which default to their full sizes.
     """
-    if not {"y", "x"} <= sizes.keys():
+    if not {"y", "x"} <= sizes.keys():  # pragma: no cover
         raise ValueError("sizes must include both 'y' and 'x'")
-    if not all(k in VALID_LABELS for k in sizes):
+    if not all(k in VALID_LABELS for k in sizes):  # pragma: no cover
         raise ValueError(
             f"Invalid dimension labels in sizes: {sizes.keys() - set(VALID_LABELS)}"
         )
@@ -64,19 +64,18 @@ def fake_data_for_sizes(
 
     shape = [d.size for d in dims]
     dtype = np.dtype(dtype)
-    if not np.issubdtype(dtype, np.integer):
-        raise ValueError(f"Unsupported dtype: {dtype}")
+    if not np.issubdtype(dtype, np.integer):  # pragma: no cover
+        raise ValueError(f"Unsupported dtype: {dtype}.  Must be an integer type.")
 
     rng = np.random.default_rng()
     data = rng.integers(0, np.iinfo(dtype).max, size=shape, dtype=dtype)
 
     def _build_plane_generator() -> Iterator[np.ndarray]:
         """Yield 2-D planes in y-x order."""
-        if not non_spatial:
+        if not (non_spatial_sizes := shape[:-2]):  # it's just a 2-D image
             yield data
         else:
-            for idx in product(*(range(n) for n in non_spatial)):
+            for idx in product(*(range(n) for n in non_spatial_sizes)):
                 yield data[idx]
 
-    non_spatial = shape[:-2]  # everything except y, x
     return _build_plane_generator(), dims, dtype

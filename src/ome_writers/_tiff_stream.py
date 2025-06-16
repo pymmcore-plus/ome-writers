@@ -163,8 +163,8 @@ class TiffStream(OMEStream):
         frame : np.ndarray
             The 2D image frame to write.
         """
-        if not self.is_active():
-            raise RuntimeError("Stream is not active. Call create() first.")
+        if not self.is_active():  # pragma: no cover
+            raise RuntimeError("Stream is closed or uninitialized.")
         if self._frame_counter >= self._total_frames:  # pragma: no cover
             raise RuntimeError(
                 f"Attempted to write frame {self._frame_counter + 1}, but "

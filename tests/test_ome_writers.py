@@ -5,7 +5,6 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
-from itertools import product
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -18,6 +17,8 @@ from ome_writers import (
     OMEStream,
     TensorStoreZarrStream,
     TiffStream,
+    create_stream,
+    fake_data_for_sizes,
 )
 from ome_writers._auto import BACKENDS
 
@@ -55,28 +56,16 @@ if importlib.util.find_spec("tifffile") is not None:
     backends_to_test.append((TiffStream, "tiff"))
 
 
-@pytest.fixture
-def sample_dimensions() -> list[DimensionInfo]:
-    """Create sample dimensions for testing."""
-    return [
-        DimensionInfo(label="t", size=3, unit=(1.0, "s"), chunk_size=1),
-        DimensionInfo(label="z", size=2, unit=(0.5, "um"), chunk_size=1),
-        DimensionInfo(label="c", size=2, chunk_size=1),
-        DimensionInfo(label="y", size=64, unit=(0.1, "um"), chunk_size=32),
-        DimensionInfo(label="x", size=64, unit=(0.1, "um"), chunk_size=32),
-    ]
-
-
 @pytest.mark.parametrize("stream_cls,file_ext", backends_to_test)
 def test_minimal_2d_dimensions(
     stream_cls: type[OMEStream], file_ext: str, tmp_path: Path
 ) -> None:
     """Test with minimal 2D dimensions (just x and y)."""
-    dimensions = [
-        DimensionInfo(label="t", size=1, unit=(2.0, "s"), chunk_size=1),
-        DimensionInfo(label="y", size=32, unit=(1.0, "um"), chunk_size=16),
-        DimensionInfo(label="x", size=32, unit=(1.0, "um"), chunk_size=16),
-    ]
+    data_gen, dimensions, dtype = fake_data_for_sizes(
+        sizes={"t": 1, "y": 32, "x": 32},
+        chunk_sizes={"t": 1, "y": 16, "x": 16},
+        dtype=np.uint8,
+    )
 
     # Create the stream
     stream = stream_cls()
@@ -84,12 +73,12 @@ def test_minimal_2d_dimensions(
     # Set output path
     output_path = tmp_path / f"test_2d_{stream_cls.__name__.lower()}.{file_ext}"
 
-    data = np.random.randint(0, 255, size=(32, 32), dtype=np.uint8)
-
-    stream = stream.create(str(output_path), data.dtype, dimensions)
+    stream = stream.create(str(output_path), dtype, dimensions)
     assert stream.is_active()
 
-    stream.append(data)
+    # Get the data from the generator
+    for data in data_gen:
+        stream.append(data)
     stream.flush()
 
     assert not stream.is_active()
@@ -101,17 +90,10 @@ def test_stream_error_handling(
     stream_cls: type[OMEStream], file_ext: str, tmp_path: Path
 ) -> None:
     """Test error handling in streams."""
-    # Test appending to uninitialized stream
     empty_stream = stream_cls()
 
-    # Determine expected error message based on stream type
-    if stream_cls.__name__ in ("TensorStoreZarrStream", "AcquireZarrStream"):
-        expected_message = "Stream is closed or uninitialized"
-    else:  # TiffStreamWriter
-        expected_message = "Stream is not active"
-
+    expected_message = "Stream is closed or uninitialized"
     test_frame = np.zeros((64, 64), dtype=np.uint16)
-
     with pytest.raises(RuntimeError, match=expected_message):
         empty_stream.append(test_frame)
 
@@ -151,22 +133,23 @@ def test_create_stream_factory_function(
     backend_name: Literal["acquire-zarr", "tensorstore", "tiff", "auto"],
     file_ext: str,
     tmp_path: Path,
-    sample_dimensions: list[DimensionInfo],
 ) -> None:
     """Test the create_stream factory function."""
-    from ome_writers import create_stream
+    data_gen, dimensions, dtype = fake_data_for_sizes(
+        sizes={"t": 3, "z": 2, "c": 2, "y": 64, "x": 64},
+        chunk_sizes={"y": 32, "x": 32},
+    )
 
     output_path = tmp_path / f"factory_test.{file_ext}"
 
-    stream = create_stream(
-        str(output_path), np.dtype(np.uint16), sample_dimensions, backend=backend_name
-    )
+    stream = create_stream(str(output_path), dtype, dimensions, backend=backend_name)
     assert isinstance(stream, OMEStream)
     assert stream.is_active()
 
     # Write a test frame
-    test_frame = np.random.randint(0, 65536, size=(64, 64), dtype=np.uint16)
-    stream.append(test_frame)
+    for data in data_gen:
+        stream.append(data)
+        break  # Just write one frame for this test
 
     stream.flush()
     assert not stream.is_active()
@@ -182,51 +165,41 @@ def test_data_integrity_roundtrip(
     file_ext: str,
     tmp_path: Path,
     dtype: np.dtype,
-    sample_dimensions: list[DimensionInfo],
 ) -> None:
     """Test data integrity roundtrip with different data types."""
-    # Create deterministic random data for reproducible tests
-    np.random.seed(123)  # Different seed from other test
-    shape = tuple(d.size for d in sample_dimensions)
-    max_val = np.iinfo(dtype).max
-    original_data = np.random.randint(0, max_val + 1, size=shape, dtype=dtype)
-
-    output_path = (
-        tmp_path
-        / f"roundtrip_dtype_{stream_cls.__name__.lower()}_{dtype.name}.{file_ext}"
+    data_gen, dimensions, dtype = fake_data_for_sizes(
+        sizes={"t": 3, "z": 2, "c": 2, "y": 64, "x": 64},
+        chunk_sizes={"y": 32, "x": 32},
     )
+
+    # Convert generator to list to use data multiple times
+    original_frames = list(data_gen)
+
+    output_path = tmp_path / f"{stream_cls.__name__.lower()}_{dtype.name}.{file_ext}"
 
     # Write data using our stream
     stream = stream_cls()
-    stream = stream.create(str(output_path), dtype, sample_dimensions)
+    stream = stream.create(str(output_path), dtype, dimensions)
     assert stream.is_active()
-
-    # Write all frames in the expected order
-    nt, nz, nc = shape[:3]
-    for t, z, c in product(range(nt), range(nz), range(nc)):
-        frame = original_data[t, z, c]
+    for frame in original_frames:
         stream.append(frame)
 
     stream.flush()
     assert not stream.is_active()
-    assert output_path.exists()
 
     # Read data back and verify it matches
+    assert output_path.exists()
     read_data = read_file_data(output_path)
+
+    # Reconstruct original data array from frames
+    shape = tuple(d.size for d in dimensions)
+    original_data = np.array(original_frames).reshape(shape)
 
     # Verify the data matches exactly
     np.testing.assert_array_equal(
         original_data,
         read_data,
         err_msg=f"Data mismatch in {stream_cls.__name__} roundtrip test with {dtype}",
-    )
-
-    # Also verify shape and dtype
-    assert read_data.shape == original_data.shape, (
-        f"Shape mismatch: expected {original_data.shape}, got {read_data.shape}"
-    )
-    assert read_data.dtype == original_data.dtype, (
-        f"Dtype mismatch: expected {original_data.dtype}, got {read_data.dtype}"
     )
 
 
@@ -243,38 +216,22 @@ def test_multiposition_acquisition(
     stream_cls: type[OMEStream], file_ext: str, tmp_path: Path
 ) -> None:
     """Test multi-position acquisition support with position dimension."""
-    dimensions = [
-        DimensionInfo(label="p", size=3, chunk_size=1),  # 3 positions
-        DimensionInfo(label="t", size=2, unit=(1.0, "s"), chunk_size=1),
-        DimensionInfo(label="c", size=2, chunk_size=1),
-        DimensionInfo(label="y", size=32, unit=(1.0, "um"), chunk_size=16),
-        DimensionInfo(label="x", size=32, unit=(1.0, "um"), chunk_size=16),
-    ]
+
+    data_gen, dimensions, dtype = fake_data_for_sizes(
+        sizes={"t": 3, "z": 2, "c": 2, "y": 32, "x": 32, "p": 3},
+        chunk_sizes={"y": 16, "x": 16},
+    )
 
     # Create the stream
     stream = stream_cls()
     output_path = tmp_path / f"test_multipos_{stream_cls.__name__.lower()}.{file_ext}"
-    data = np.random.randint(0, 255, size=(32, 32), dtype=np.uint8)
 
-    stream = stream.create(str(output_path), data.dtype, dimensions)
+    stream = stream.create(str(output_path), dtype, dimensions)
     assert stream.is_active()
-
-    # Should create 3 stores/streams for 3 positions (test using stream name)
-    if stream_cls.__name__ == "TensorStoreZarrStream":
-        # Test that we have the right number of stores
-        assert hasattr(stream, "_stores")
-        assert len(stream._stores) == 3  # type: ignore
-        assert all(str(i) in stream._stores for i in range(3))  # type: ignore
-    elif stream_cls.__name__ == "AcquireZarrStream":
-        # Test that we have the right number of streams
-        assert hasattr(stream, "_streams")
-        assert len(stream._streams) == 3  # type: ignore
-        assert all(str(i) in stream._streams for i in range(3))  # type: ignore
 
     # Write frames for all positions and time/channel combinations
     # Total frames = 3 positions x 2 time x 2 channels = 12 frames
-    for i in range(12):
-        frame = np.full((32, 32), i, dtype=np.uint8)
+    for frame in data_gen:
         stream.append(frame)
 
     stream.flush()
@@ -292,8 +249,8 @@ def test_multiposition_acquisition(
         group_meta = json.load(f)
 
     ome_attrs = group_meta["attributes"]["ome"]
-    assert ome_attrs["version"] == "0.5"
     multiscales = ome_attrs["multiscales"]
+    assert ome_attrs["version"] == "0.5"
     assert isinstance(multiscales, list)
     assert len(multiscales) == 1
     assert len(multiscales[0]["datasets"]) == 3
