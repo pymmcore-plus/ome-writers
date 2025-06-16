@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+import importlib.util
 from typing import TYPE_CHECKING, Self
 
 import numpy as np
@@ -15,6 +17,11 @@ if TYPE_CHECKING:
 
 
 class AcquireZarrStream(OMEStream):
+    @classmethod
+    def is_available(cls) -> bool:
+        """Check if the acquire-zarr package is available."""
+        return importlib.util.find_spec("acquire_zarr") is not None
+
     def __init__(self) -> None:
         try:
             import acquire_zarr

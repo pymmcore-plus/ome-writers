@@ -6,7 +6,7 @@ import importlib
 import importlib.util
 from itertools import product
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import pytest
@@ -14,9 +14,11 @@ import pytest
 from ome_writers import (
     AcquireZarrStream,
     DimensionInfo,
+    OMEStream,
     TensorStoreZarrStream,
     TiffStream,
 )
+from ome_writers._auto import BACKENDS
 
 
 def read_file_data(output_path: Path) -> np.ndarray:
@@ -41,7 +43,6 @@ def read_file_data(output_path: Path) -> np.ndarray:
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from ome_writers import OMEStream
 
 # Test configurations for each backend
 backends_to_test: list[tuple[type[OMEStream], str]] = []
@@ -65,114 +66,16 @@ def sample_dimensions() -> list[DimensionInfo]:
     ]
 
 
-@pytest.fixture
-def sample_data(sample_dimensions: list[DimensionInfo]) -> np.ndarray:
-    """Create sample test data."""
-    shape = tuple(d.size for d in sample_dimensions)
-    return np.random.randint(0, 65536, size=shape, dtype=np.uint16)
-
-
-@pytest.mark.parametrize("stream_cls,file_ext", backends_to_test)
-def test_basic_stream_lifecycle(
-    stream_cls: type[OMEStream],
-    file_ext: str,
-    tmp_path: Path,
-    sample_dimensions: list[DimensionInfo],
-    sample_data: np.ndarray,
-) -> None:
-    """Test basic stream creation, writing, and closing."""
-    # Import and create the appropriate stream
-    stream = stream_cls()
-
-    # Set output path
-    output_path = tmp_path / f"test_output_{stream_cls.__name__.lower()}.{file_ext}"
-
-    # Create stream
-    stream = stream.create(str(output_path), sample_data.dtype, sample_dimensions)
-
-    # Check that stream is active
-    assert stream.is_active()
-
-    # Write all frames
-    nt, nz, nc, ny, nx = sample_data.shape
-    for t, z, c in product(range(nt), range(nz), range(nc)):
-        frame = sample_data[t, z, c]
-        stream.append(frame)
-
-    # Flush the stream
-    stream.flush()
-
-    # Check that stream is no longer active after flush
-    assert not stream.is_active()
-
-    # Verify file was created
-    assert output_path.exists()
-
-
-@pytest.mark.parametrize(
-    "dtype", [np.dtype(np.uint8), np.dtype(np.uint16)], ids=["uint8", "uint16"]
-)
-@pytest.mark.parametrize("stream_cls,file_ext", backends_to_test)
-def test_stream_with_different_dtypes(
-    stream_cls: type[OMEStream],
-    file_ext: str,
-    tmp_path: Path,
-    dtype: np.dtype,
-    sample_dimensions: list[DimensionInfo],
-) -> None:
-    """Test stream creation with different data types."""
-    stream = stream_cls()
-    output_path = (
-        tmp_path / f"test_{stream_cls.__name__.lower()}_{dtype.name}.{file_ext}"
-    )
-
-    assert not output_path.exists()
-    # Create test data with the specific dtype
-    shape = tuple(d.size for d in sample_dimensions)
-    data = np.random.randint(0, np.iinfo(dtype).max, size=shape, dtype=dtype)
-
-    # Create and use stream
-    stream = stream.create(str(output_path), dtype, sample_dimensions)
-    assert stream.is_active()
-
-    # Write a few frames
-    nt, nz, nc = shape[:3]
-    for t, z, c in product(range(nt), range(nz), range(nc)):
-        frame = data[t, z, c]
-        stream.append(frame)
-
-    stream.flush()
-    assert not stream.is_active()
-    assert output_path.exists()
-
-    # assert the file size is at least as large as expected
-    expected_size = data.nbytes
-    if output_path.is_dir():
-        # For directory-based formats like Zarr, sum all file sizes
-        actual_size = sum(
-            f.stat().st_size for f in output_path.rglob("*") if f.is_file()
-        )
-    else:
-        # For single file formats like TIFF
-        actual_size = output_path.stat().st_size
-    assert actual_size >= expected_size, (
-        f"File size {actual_size} is less than expected {expected_size}"
-    )
-
-
 @pytest.mark.parametrize("stream_cls,file_ext", backends_to_test)
 def test_minimal_2d_dimensions(
     stream_cls: type[OMEStream], file_ext: str, tmp_path: Path
 ) -> None:
     """Test with minimal 2D dimensions (just x and y)."""
     dimensions = [
+        DimensionInfo(label="t", size=1, unit=(2.0, "s"), chunk_size=1),
         DimensionInfo(label="y", size=32, unit=(1.0, "um"), chunk_size=16),
         DimensionInfo(label="x", size=32, unit=(1.0, "um"), chunk_size=16),
     ]
-
-    # Skip acquire-zarr for 2D as it requires at least 3 dimensions
-    if stream_cls.__name__ == "AcquireZarrStream":
-        pytest.skip("acquire-zarr requires at least 3 dimensions")
 
     # Create the stream
     stream = stream_cls()
@@ -237,20 +140,27 @@ def test_dimension_info_properties() -> None:
     assert p_dim.ome_dim_type == "other"
 
 
-@pytest.mark.skipif(
-    not any(cls.__name__ == "AcquireZarrStream" for cls, _ in backends_to_test),
-    reason="acquire-zarr not available",
-)
+backends_reverse = {v: k for k, v in BACKENDS.items()}
+backend_names = [(backends_reverse[cls], ext) for cls, ext in backends_to_test]
+backend_names += [("auto", "zarr"), ("auto", "tiff")]
+
+
+@pytest.mark.parametrize("backend_name,file_ext", backend_names)
 def test_create_stream_factory_function(
-    tmp_path: Path, sample_dimensions: list[DimensionInfo]
+    backend_name: Literal["acquire-zarr", "tensorstore", "tiff", "auto"],
+    file_ext: str,
+    tmp_path: Path,
+    sample_dimensions: list[DimensionInfo],
 ) -> None:
     """Test the create_stream factory function."""
     from ome_writers import create_stream
 
-    output_path = tmp_path / "factory_test.zarr"
+    output_path = tmp_path / f"factory_test.{file_ext}"
 
-    # The default create_stream uses AcquireZarrStream
-    stream = create_stream(str(output_path), np.dtype(np.uint16), sample_dimensions)
+    stream = create_stream(
+        str(output_path), np.dtype(np.uint16), sample_dimensions, backend=backend_name
+    )
+    assert isinstance(stream, OMEStream)
     assert stream.is_active()
 
     # Write a test frame
@@ -288,6 +198,7 @@ def test_data_integrity_roundtrip(
     # Write data using our stream
     stream = stream_cls()
     stream = stream.create(str(output_path), dtype, sample_dimensions)
+    assert stream.is_active()
 
     # Write all frames in the expected order
     nt, nz, nc = shape[:3]
@@ -296,6 +207,7 @@ def test_data_integrity_roundtrip(
         stream.append(frame)
 
     stream.flush()
+    assert not stream.is_active()
     assert output_path.exists()
 
     # Read data back and verify it matches

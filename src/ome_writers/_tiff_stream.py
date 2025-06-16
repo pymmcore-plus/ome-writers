@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+import importlib.util
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -38,6 +40,11 @@ class TiffStream(OMEStream):
     _array_dims_info : Dict[int, List[DimensionInfo]]
         A map of position index to the dimensions of its corresponding 5D array.
     """
+
+    @classmethod
+    def is_available(cls) -> bool:
+        """Check if the acquire-zarr package is available."""
+        return importlib.util.find_spec("acquire_zarr") is not None
 
     def __init__(self) -> None:
         super().__init__()

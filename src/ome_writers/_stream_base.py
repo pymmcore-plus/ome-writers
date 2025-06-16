@@ -32,3 +32,8 @@ class OMEStream(abc.ABC):
 
     def _normalize_path(self, path: str) -> str:
         return str(Path(path).expanduser().resolve())
+
+    @classmethod
+    @abstractmethod
+    def is_available(cls) -> bool:
+        """Return True if this stream type is available (has needed imports)."""

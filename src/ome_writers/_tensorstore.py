@@ -1,3 +1,4 @@
+import importlib.util
 import json
 from collections.abc import Mapping, Sequence
 from itertools import product
@@ -11,6 +12,11 @@ from ._stream_base import OMEStream
 
 
 class TensorStoreZarrStream(OMEStream):
+    @classmethod
+    def is_available(cls) -> bool:  # pragma: no cover
+        """Check if the tensorstore package is available."""
+        return importlib.util.find_spec("tensorstore") is not None
+
     def __init__(self) -> None:
         try:
             import tensorstore
