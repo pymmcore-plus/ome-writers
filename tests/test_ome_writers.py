@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import pytest
+import tensorstore as ts
+import tifffile
 
 from ome_writers import (
     AcquireZarrStream,
@@ -29,14 +31,14 @@ def read_file_data(output_path: Path) -> np.ndarray:
     file_ext = output_path.suffix.lstrip(".")
 
     if file_ext == "zarr":
-        import zarr
-
-        zarr_group = zarr.open(str(output_path), mode="r")
-        return zarr_group["0"][:]  # type: ignore[no-any-return]
+        spec = {
+            "driver": "zarr3",
+            "kvstore": {"driver": "file", "path": str(output_path / "0")},
+        }
+        store = ts.open(spec).result()
+        return store.read().result()  # type: ignore
 
     elif file_ext == "tiff":
-        import tifffile
-
         return tifffile.imread(str(output_path))
 
     else:
