@@ -32,32 +32,54 @@ class TensorStoreZarrStream(OMEStream):
         super().__init__()
         self._count = 0
         self._group_path: Path | None = None
-        self._array_path: Path | None = None
-        self._futures: tensorstore.FutureLike = []
-        self._store: tensorstore.TensorStore | None = None
-        self._indices: dict[int, tuple[int, ...]] = {}
+        self._array_paths: dict[str, Path] = {}  # array_key -> path mapping
+        self._futures: list = []
+        self._stores: dict[str, tensorstore.TensorStore] = {}  # array_key -> store
+        self._indices: dict[int, tuple[str, tuple[int, ...]]] = {}  # count -> key,idx
         self._delete_existing = True
+        self._position_dim: DimensionInfo | None = None
 
     def create(
         self, path: str, dtype: np.dtype, dimensions: Sequence[DimensionInfo]
     ) -> Self:
-        # Define a TensorStore spec for a Zarr v3 store.
-        prod = product(*[range(d.size) for d in dimensions if d.label not in "yx"])
-        self._indices = dict(enumerate(prod))
+        # Separate position dimension from other dimensions
+        position_dims = [d for d in dimensions if d.label == "p"]
+        non_position_dims = [d for d in dimensions if d.label != "p"]
+
+        # Determine number of positions (1 if no position dimension)
+        num_positions = position_dims[0].size if position_dims else 1
+        if position_dims:
+            self._position_dim = position_dims[0]
+
+        # Create indices for all positions and non-position dimensions
+        non_pos_prod = list(
+            product(*[range(d.size) for d in non_position_dims if d.label not in "yx"])
+        )
+        count = 0
+        for pos_idx in range(num_positions):
+            array_key = str(pos_idx)
+            for non_pos_index in non_pos_prod:
+                self._indices[count] = (array_key, non_pos_index)
+                count += 1
 
         self._create_group(self._normalize_path(path), dimensions)
-        spec = self._create_spec(dtype, dimensions)
-        self._store = self._ts.open(spec).result()
+
+        # Create stores for each array
+        for pos_idx in range(num_positions):
+            array_key = str(pos_idx)
+            spec = self._create_spec(dtype, non_position_dims, array_key)
+            self._stores[array_key] = self._ts.open(spec).result()
+
         return self
 
     def _create_spec(
-        self, dtype: np.dtype, dimensions: Sequence[DimensionInfo]
+        self, dtype: np.dtype, dimensions: Sequence[DimensionInfo], array_key: str
     ) -> dict:
         labels, shape, units, chunk_shape = zip(*dimensions)
         labels = tuple(str(x) for x in labels)
         return {
             "driver": "zarr3",
-            "kvstore": {"driver": "file", "path": str(self._array_path)},
+            "kvstore": {"driver": "file", "path": str(self._array_paths[array_key])},
             "schema": {
                 "domain": {"shape": shape, "labels": labels},
                 "dtype": dtype.name,
@@ -69,11 +91,12 @@ class TensorStoreZarrStream(OMEStream):
         }
 
     def append(self, frame: np.ndarray) -> None:
-        if self._store is None:
+        if not self._stores:
             msg = "Stream is closed or uninitialized. Call create() first."
             raise RuntimeError(msg)
-        index = self._indices[self._count]
-        future = self._store[index].write(frame)
+        array_key, index = self._indices[self._count]
+        store = self._stores[array_key]
+        future = store[index].write(frame)
         self._futures.append(future)
         self._count += 1
 
@@ -82,18 +105,31 @@ class TensorStoreZarrStream(OMEStream):
         for future in self._futures:
             future.result()
         self._futures.clear()
-        self._store = None
+        self._stores.clear()
 
     def is_active(self) -> bool:
-        return self._store is not None
+        return bool(self._stores)
 
     def _create_group(self, path: str, dims: Sequence[DimensionInfo]) -> Path:
         self._group_path = Path(path)
-        array_key = "0"
-        self._array_path = self._group_path / array_key
         self._group_path.mkdir(parents=True, exist_ok=True)
+
+        # Determine array keys and dimensions based on position dimension
+        position_dims = [d for d in dims if d.label == "p"]
+        non_position_dims = [d for d in dims if d.label != "p"]
+
+        # Determine number of positions (1 if no position dimension)
+        num_positions = position_dims[0].size if position_dims else 1
+
+        array_dims: dict[str, Sequence[DimensionInfo]] = {}
+        for pos_idx in range(num_positions):
+            array_key = str(pos_idx)
+            self._array_paths[array_key] = self._group_path / array_key
+            # Use non_position_dims for multi-pos, full dims for single pos
+            array_dims[array_key] = non_position_dims if position_dims else dims
+
         group_zarr = self._group_path / "zarr.json"
-        group_zarr.write_text(json.dumps(self._group_meta({array_key: dims}), indent=2))
+        group_zarr.write_text(json.dumps(self._group_meta(array_dims), indent=2))
         return self._group_path
 
     def _group_meta(self, array_dims: Mapping[str, Sequence[DimensionInfo]]) -> dict:

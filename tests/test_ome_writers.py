@@ -229,6 +229,69 @@ def test_data_integrity_roundtrip(
     )
 
 
+@pytest.mark.skipif(
+    not importlib.util.find_spec("tensorstore"),
+    reason="tensorstore not available",
+)
+def test_multi_position_acquisition(tmp_path: Path) -> None:
+    """Test multi-position acquisition support with position dimension."""
+    dimensions = [
+        DimensionInfo(label="p", size=3, chunk_size=1),  # 3 positions
+        DimensionInfo(label="t", size=2, unit=(1.0, "s"), chunk_size=1),
+        DimensionInfo(label="c", size=2, chunk_size=1),
+        DimensionInfo(label="y", size=32, unit=(1.0, "um"), chunk_size=16),
+        DimensionInfo(label="x", size=32, unit=(1.0, "um"), chunk_size=16),
+    ]
+
+    # Create the stream
+    stream = TensorStoreZarrStream()
+    output_path = tmp_path / "test_multipos.zarr"
+    data = np.random.randint(0, 255, size=(32, 32), dtype=np.uint8)
+
+    stream = stream.create(str(output_path), data.dtype, dimensions)
+    assert stream.is_active()
+
+    # Should create 3 stores for 3 positions
+    assert len(stream._stores) == 3
+    assert "0" in stream._stores
+    assert "1" in stream._stores
+    assert "2" in stream._stores
+
+    # Write frames for all positions and time/channel combinations
+    # Total frames = 3 positions x 2 time x 2 channels = 12 frames
+    for i in range(12):
+        frame = np.full((32, 32), i, dtype=np.uint8)
+        stream.append(frame)
+
+    stream.flush()
+    assert not stream.is_active()
+    assert output_path.exists()
+
+    # Verify zarr structure
+    assert (output_path / "0").exists()
+    assert (output_path / "1").exists()
+    assert (output_path / "2").exists()
+    assert (output_path / "zarr.json").exists()
+
+    # Verify that each position has correct metadata
+    import json
+
+    with open(output_path / "zarr.json") as f:
+        group_meta = json.load(f)
+
+    multiscales = group_meta["attributes"]["ome"]["multiscales"]
+    assert len(multiscales) == 3  # One for each position
+
+    # Check that position dimension is excluded from axes
+    for multiscale in multiscales:
+        axes_names = [axis["name"] for axis in multiscale["axes"]]
+        assert "p" not in axes_names  # Position dimension should be excluded
+        assert "t" in axes_names
+        assert "c" in axes_names
+        assert "y" in axes_names
+        assert "x" in axes_names
+
+
 # Skip entire test class if no backends are available
 if not backends_to_test:
     pytest.skip("No OME writer backends available", allow_module_level=True)
