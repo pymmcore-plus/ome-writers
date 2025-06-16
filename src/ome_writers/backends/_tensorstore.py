@@ -2,9 +2,9 @@ import importlib.util
 import json
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Self
 
 import numpy as np
+from typing_extensions import Self
 
 from ome_writers._dimensions import DimensionInfo
 from ome_writers._ngff_metadata import ome_meta_v5

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import Literal, NamedTuple, TypeAlias
+from typing import Literal, NamedTuple
+
+from typing_extensions import TypeAlias
 
 OME_DIM_TYPE = {"y": "space", "x": "space", "z": "space", "t": "time", "c": "channel"}
 OME_UNIT = {"um": "micrometer", "ml": "milliliter", "s": "second", None: "unknown"}

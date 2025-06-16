@@ -3,9 +3,9 @@ from abc import abstractmethod
 from collections.abc import Sequence
 from itertools import product
 from pathlib import Path
-from typing import Self
 
 import numpy as np
+from typing_extensions import Self
 
 from ._dimensions import DimensionInfo
 

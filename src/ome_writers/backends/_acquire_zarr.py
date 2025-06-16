@@ -5,9 +5,10 @@ import importlib.util
 import json
 from contextlib import suppress
 from pathlib import Path
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING
 
 import numpy as np
+from typing_extensions import Self
 
 from ome_writers._ngff_metadata import ome_meta_v5
 from ome_writers._stream_base import MultiPositionOMEStream

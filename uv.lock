@@ -856,6 +856,7 @@ dependencies = [
     { name = "tifffile", version = "2024.8.30", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "tifffile", version = "2025.5.10", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
     { name = "tifffile", version = "2025.6.11", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "typing-extensions" },
     { name = "zarr", version = "2.18.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "zarr", version = "2.18.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
     { name = "zarr", version = "3.0.8", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -904,6 +905,7 @@ third-party = [
 requires-dist = [
     { name = "numpy", specifier = ">=2" },
     { name = "tifffile", specifier = ">=2024.8.30" },
+    { name = "typing-extensions", specifier = ">=4.10.0" },
     { name = "zarr", specifier = ">=2.18.2" },
 ]
 

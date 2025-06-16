@@ -1,10 +1,15 @@
-from collections.abc import Iterator, Mapping
+from __future__ import annotations
+
 from itertools import product
-from typing import cast, get_args
+from typing import TYPE_CHECKING, cast, get_args
 
 import numpy as np
+import numpy.typing as npt
 
 from ome_writers import DimensionInfo, DimensionLabel
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Mapping
 
 VALID_LABELS = get_args(DimensionLabel)
 UNITS: dict[DimensionLabel, tuple[float, str]] = {
@@ -18,7 +23,7 @@ UNITS: dict[DimensionLabel, tuple[float, str]] = {
 def fake_data_for_sizes(
     sizes: Mapping[str, int],
     *,
-    dtype: np.typing.DTypeLike = np.uint16,
+    dtype: npt.DTypeLike = np.uint16,
     chunk_sizes: Mapping[str, int] | None = None,
 ) -> tuple[Iterator[np.ndarray], list[DimensionInfo], np.dtype]:
     """Simple helper function to create a data generator and dimensions.
