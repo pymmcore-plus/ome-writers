@@ -10,10 +10,11 @@ from typing_extensions import Self
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from types import TracebackType
 
     import numpy as np
 
-    from ._dimensions import DimensionInfo
+    from ._dimensions import Dimension
 
 
 class OMEStream(abc.ABC):
@@ -21,7 +22,7 @@ class OMEStream(abc.ABC):
 
     @abstractmethod
     def create(
-        self, path: str, dtype: np.dtype, dimensions: Sequence[DimensionInfo]
+        self, path: str, dtype: np.dtype, dimensions: Sequence[Dimension]
     ) -> Self:
         """Create a new stream for path, dtype, and dimensions."""
 
@@ -45,6 +46,20 @@ class OMEStream(abc.ABC):
     def is_available(cls) -> bool:
         """Return True if this stream type is available (has needed imports)."""
 
+    def __enter__(self) -> Self:
+        """Enter the runtime context related to this object."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException],
+        exc_value: BaseException,
+        traceback: TracebackType,
+    ) -> None:
+        """Exit the runtime context related to this object."""
+        if self.is_active():
+            self.flush()
+
 
 class MultiPositionOMEStream(OMEStream):
     """Subclass for OME streams that support multiple positions.
@@ -57,7 +72,7 @@ class MultiPositionOMEStream(OMEStream):
 
     def __init__(self) -> None:
         # dimension info for position dimension, if any
-        self._position_dim: DimensionInfo | None = None
+        self._position_dim: Dimension | None = None
         # A mapping of indices to (array_key, non-position index)
         self._indices: dict[int, tuple[str, tuple[int, ...]]] = {}
         # number of times append() has been called
@@ -66,11 +81,11 @@ class MultiPositionOMEStream(OMEStream):
         self._num_positions = 0
         # non-position dimensions
         # (e.g. time, z, c, y, x) that are not
-        self._non_position_dims: Sequence[DimensionInfo] = []
+        self._non_position_dims: Sequence[Dimension] = []
 
     def _init_positions(
-        self, dimensions: Sequence[DimensionInfo]
-    ) -> tuple[int, Sequence[DimensionInfo]]:
+        self, dimensions: Sequence[Dimension]
+    ) -> tuple[int, Sequence[Dimension]]:
         """Initialize position tracking and return num_positions, non_position_dims."""
         # Separate position dimension from other dimensions
         position_dims = [d for d in dimensions if d.label == "p"]

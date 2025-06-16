@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
     import acquire_zarr
 
-    from ome_writers._dimensions import DimensionInfo
+    from ome_writers._dimensions import Dimension
 
 
 class AcquireZarrStream(MultiPositionOMEStream):
@@ -41,7 +41,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
         self._streams: dict[str, acquire_zarr.ZarrStream] = {}  # array_key -> stream
 
     def create(
-        self, path: str, dtype: np.dtype, dimensions: Sequence[DimensionInfo]
+        self, path: str, dtype: np.dtype, dimensions: Sequence[Dimension]
     ) -> Self:
         # Use MultiPositionOMEStream to handle position logic
         num_positions, non_position_dims = self._init_positions(dimensions)
@@ -113,7 +113,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
 
     def _dim_toaqz_dim(
         self,
-        dim: DimensionInfo,
+        dim: Dimension,
         shard_size_chunks: int = 1,
     ) -> acquire_zarr.Dimension:
         return self._aqz.Dimension(

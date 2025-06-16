@@ -11,7 +11,7 @@ OME_UNIT = {"um": "micrometer", "ml": "milliliter", "s": "second", None: "unknow
 DimensionLabel: TypeAlias = Literal["x", "y", "z", "t", "c", "p", "other"]
 
 
-class DimensionInfo(NamedTuple):
+class Dimension(NamedTuple):
     label: DimensionLabel
     size: int
     unit: tuple[float, str] | None = None

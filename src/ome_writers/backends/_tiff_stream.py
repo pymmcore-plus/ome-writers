@@ -9,7 +9,7 @@ import numpy as np
 import tifffile
 from typing_extensions import Self
 
-from ome_writers._dimensions import DimensionInfo
+from ome_writers._dimensions import Dimension
 from ome_writers._stream_base import OMEStream
 
 if TYPE_CHECKING:
@@ -53,13 +53,13 @@ class TiffStream(OMEStream):
 
         self._frame_counter: int = 0
         self._total_frames: int = 0
-        self._loop_dims_info: list[DimensionInfo] = []
-        self._array_dims_info: dict[int, list[DimensionInfo]] = {}
+        self._loop_dims_info: list[Dimension] = []
+        self._array_dims_info: dict[int, list[Dimension]] = {}
         self._dim_order = "ptzcyx"
         self._is_active = False
 
     def create(
-        self, path: str, dtype: np.dtype, dimensions: Sequence[DimensionInfo]
+        self, path: str, dtype: np.dtype, dimensions: Sequence[Dimension]
     ) -> Self:
         """
         Creates and pre-allocates OME-TIFF file(s) on disk.
@@ -89,7 +89,7 @@ class TiffStream(OMEStream):
         self._dimensions = dimensions
 
         # 1. Parse and sort dimensions
-        dim_map: dict[str, DimensionInfo] = {d.label: d for d in dimensions}
+        dim_map: dict[str, Dimension] = {d.label: d for d in dimensions}
         sorted_dims = [dim_map[label] for label in self._dim_order if label in dim_map]
 
         y_dim = dim_map.get("y")
@@ -200,24 +200,20 @@ class TiffStream(OMEStream):
         return self._is_active
 
     def _generate_ome_metadata(
-        self, name: str, axes: str, dimensions: list[DimensionInfo]
+        self, name: str, axes: str, dimensions: list[Dimension]
     ) -> dict:
         """Create the metadata dictionary required by tifffile for OME-XML."""
         dim_map = {d.label: d for d in dimensions}
         metadata = {
             "axes": axes,
             "Name": name,
-            "PhysicalSizeX": dim_map.get(
-                "x", DimensionInfo("x", 0, (1.0, ""))
-            ).ome_scale,
+            "PhysicalSizeX": dim_map.get("x", Dimension("x", 0, (1.0, ""))).ome_scale,
             "PhysicalSizeXUnit": dim_map.get(
-                "x", DimensionInfo("x", 0, (1.0, ""))
+                "x", Dimension("x", 0, (1.0, ""))
             ).ome_unit,
-            "PhysicalSizeY": dim_map.get(
-                "y", DimensionInfo("y", 0, (1.0, ""))
-            ).ome_scale,
+            "PhysicalSizeY": dim_map.get("y", Dimension("y", 0, (1.0, ""))).ome_scale,
             "PhysicalSizeYUnit": dim_map.get(
-                "y", DimensionInfo("y", 0, (1.0, ""))
+                "y", Dimension("y", 0, (1.0, ""))
             ).ome_unit,
         }
         if "z" in dim_map:

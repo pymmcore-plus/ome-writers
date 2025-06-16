@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
     import numpy as np
 
-    from ome_writers._dimensions import DimensionInfo
+    from ome_writers._dimensions import Dimension
 
 
 class TensorStoreZarrStream(MultiPositionOMEStream):
@@ -42,7 +42,7 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         self._delete_existing = True
 
     def create(
-        self, path: str, dtype: np.dtype, dimensions: Sequence[DimensionInfo]
+        self, path: str, dtype: np.dtype, dimensions: Sequence[Dimension]
     ) -> Self:
         # Use MultiPositionOMEStream to handle position logic
         num_positions, non_position_dims = self._init_positions(dimensions)
@@ -58,7 +58,7 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         return self
 
     def _create_spec(
-        self, dtype: np.dtype, dimensions: Sequence[DimensionInfo], array_key: str
+        self, dtype: np.dtype, dimensions: Sequence[Dimension], array_key: str
     ) -> dict:
         labels, shape, units, chunk_shape = zip(*dimensions)
         labels = tuple(str(x) for x in labels)
@@ -93,7 +93,7 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
     def is_active(self) -> bool:
         return bool(self._stores)
 
-    def _create_group(self, path: str, dims: Sequence[DimensionInfo]) -> Path:
+    def _create_group(self, path: str, dims: Sequence[Dimension]) -> Path:
         self._group_path = Path(path)
         self._group_path.mkdir(parents=True, exist_ok=True)
 
@@ -104,7 +104,7 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         # Determine number of positions (1 if no position dimension)
         num_positions = position_dims[0].size if position_dims else 1
 
-        array_dims: dict[str, Sequence[DimensionInfo]] = {}
+        array_dims: dict[str, Sequence[Dimension]] = {}
         for pos_idx in range(num_positions):
             array_key = str(pos_idx)
             self._array_paths[array_key] = self._group_path / array_key

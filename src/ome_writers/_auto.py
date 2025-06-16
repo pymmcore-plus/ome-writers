@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
+import numpy as np
 from typing_extensions import TypeAlias
 
 from .backends._acquire_zarr import AcquireZarrStream
@@ -14,9 +15,9 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
-    import numpy as np
+    from numpy.typing import DTypeLike
 
-    from ._dimensions import DimensionInfo
+    from ._dimensions import Dimension
     from ._stream_base import OMEStream
 
 __all__ = ["create_stream", "init_stream"]
@@ -68,8 +69,8 @@ def init_stream(
 
 def create_stream(
     path: str | Path,
-    dtype: np.dtype,
-    dimensions: Sequence[DimensionInfo],
+    dtype: DTypeLike,
+    dimensions: Sequence[Dimension],
     *,
     backend: Literal[BackendName, "auto"] = "auto",
 ) -> OMEStream:
@@ -100,7 +101,7 @@ def create_stream(
         A configured stream ready for writing frames.
     """
     stream = init_stream(path, backend=backend)
-    return stream.create(str(path), dtype, dimensions)
+    return stream.create(str(path), np.dtype(dtype), dimensions)
 
 
 def _autobackend(path: str | Path) -> Literal["acquire-zarr", "tensorstore", "tiff"]:

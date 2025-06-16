@@ -5,50 +5,42 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import acquire_zarr as az
 import numpy as np
-from acquire_zarr import (
-    DataType,
-    Dimension,
-    DimensionType,
-    StreamSettings,
-    ZarrStream,
-    ZarrVersion,
-)
 
 from ome_writers._util import fake_data_for_sizes
 
 if TYPE_CHECKING:
-    from ome_writers import DimensionInfo
+    from ome_writers import Dimension
 
 
 def _dim_toaqz_dim(
-    dim: DimensionInfo,
+    dim: Dimension,
     shard_size_chunks: int = 1,
-) -> Dimension:
-    return Dimension(
+) -> az.Dimension:
+    return az.Dimension(
         name=dim.label,
-        type=getattr(DimensionType, dim.ome_dim_type.upper()),
+        type=getattr(az.DimensionType, dim.ome_dim_type.upper()),
         array_size_px=dim.size,
         chunk_size_px=(dim.chunk_size if dim.chunk_size is not None else dim.size),
         shard_size_chunks=shard_size_chunks,
     )
 
 
-sizes = {"t": 10, "z": 10, "c": 1, "y": 256, "x": 256, "p": 2}
-chunks_sizes = {"y": 64, "x": 64}
 output = Path("~/Desktop/some_path_ts.zarr").expanduser()
+plane_iter, dims, dtype = fake_data_for_sizes(
+    sizes={"t": 10, "z": 10, "c": 1, "y": 256, "x": 256, "p": 2},
+    chunk_sizes={"y": 64, "x": 64},
+)
 
-plane_iter, dims, dtype = fake_data_for_sizes(sizes=sizes, chunk_sizes=chunks_sizes)
-
-settings = StreamSettings(
-    store_path=output,
-    data_type=getattr(DataType, np.dtype(dtype).name.upper()),
-    version=ZarrVersion.V3,
+settings = az.StreamSettings(
+    store_path=str(output),
+    data_type=getattr(az.DataType, np.dtype(dtype).name.upper()),
+    version=az.ZarrVersion.V3,
     overwrite=True,
-    output_key="",
 )
 settings.dimensions.extend([_dim_toaqz_dim(dim) for dim in dims])
-stream = ZarrStream(settings)
+stream = az.ZarrStream(settings)
 
 for plane in plane_iter:
     stream.append(plane)

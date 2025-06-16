@@ -16,7 +16,7 @@ import tifffile
 
 from ome_writers import (
     AcquireZarrStream,
-    DimensionInfo,
+    Dimension,
     OMEStream,
     TensorStoreZarrStream,
     TiffStream,
@@ -106,25 +106,25 @@ def test_stream_error_handling(
 def test_dimension_info_properties() -> None:
     """Test DimensionInfo properties."""
     # Test spatial dimension
-    x_dim = DimensionInfo(label="x", size=100, unit=(0.5, "um"), chunk_size=50)
+    x_dim = Dimension(label="x", size=100, unit=(0.5, "um"), chunk_size=50)
     assert x_dim.ome_dim_type == "space"
     assert x_dim.ome_unit == "micrometer"
     assert x_dim.ome_scale == 0.5
 
     # Test time dimension
-    t_dim = DimensionInfo(label="t", size=10, unit=(2.0, "s"), chunk_size=1)
+    t_dim = Dimension(label="t", size=10, unit=(2.0, "s"), chunk_size=1)
     assert t_dim.ome_dim_type == "time"
     assert t_dim.ome_unit == "second"
     assert t_dim.ome_scale == 2.0
 
     # Test channel dimension
-    c_dim = DimensionInfo(label="c", size=3, chunk_size=1)
+    c_dim = Dimension(label="c", size=3, chunk_size=1)
     assert c_dim.ome_dim_type == "channel"
     assert c_dim.ome_unit == "unknown"
     assert c_dim.ome_scale == 1.0
 
     # Test custom dimension
-    p_dim = DimensionInfo(label="p", size=5, chunk_size=1)
+    p_dim = Dimension(label="p", size=5, chunk_size=1)
     assert p_dim.ome_dim_type == "other"
 
 

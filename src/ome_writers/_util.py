@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, cast, get_args
 import numpy as np
 import numpy.typing as npt
 
-from ome_writers import DimensionInfo, DimensionLabel
+from ome_writers import Dimension, DimensionLabel
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -25,7 +25,7 @@ def fake_data_for_sizes(
     *,
     dtype: npt.DTypeLike = np.uint16,
     chunk_sizes: Mapping[str, int] | None = None,
-) -> tuple[Iterator[np.ndarray], list[DimensionInfo], np.dtype]:
+) -> tuple[Iterator[np.ndarray], list[Dimension], np.dtype]:
     """Simple helper function to create a data generator and dimensions.
 
     Provide the sizes of the dimensions you would like to "acquire", along with the
@@ -58,7 +58,7 @@ def fake_data_for_sizes(
     ordered_labels = [z for z in sizes if z not in "yx"]
     ordered_labels += ["y", "x"]
     dims = [
-        DimensionInfo(
+        Dimension(
             label=lbl,
             size=sizes[lbl],
             unit=UNITS.get(lbl, None),

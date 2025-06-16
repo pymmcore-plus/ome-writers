@@ -10,7 +10,7 @@ except PackageNotFoundError:  # pragma: no cover
     __version__ = "uninstalled"
 
 from ._auto import BackendName, create_stream
-from ._dimensions import DimensionInfo, DimensionLabel
+from ._dimensions import Dimension, DimensionLabel
 from ._stream_base import OMEStream
 from ._util import fake_data_for_sizes
 from .backends._acquire_zarr import AcquireZarrStream
@@ -20,7 +20,7 @@ from .backends._tiff_stream import TiffStream
 __all__ = [
     "AcquireZarrStream",
     "BackendName",
-    "DimensionInfo",
+    "Dimension",
     "DimensionLabel",
     "OMEStream",
     "TensorStoreZarrStream",

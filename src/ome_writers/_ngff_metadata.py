@@ -5,10 +5,10 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from ome_writers._dimensions import DimensionInfo
+    from ome_writers._dimensions import Dimension
 
 
-def ome_meta_v5(array_dims: Mapping[str, Sequence[DimensionInfo]]) -> dict:
+def ome_meta_v5(array_dims: Mapping[str, Sequence[Dimension]]) -> dict:
     """Create OME NGFF v0.5 metadata.
 
     Parameters
@@ -55,7 +55,7 @@ def ome_meta_v5(array_dims: Mapping[str, Sequence[DimensionInfo]]) -> dict:
     return attrs
 
 
-def _ome_axes_scales(dims: Sequence[DimensionInfo]) -> tuple[list[dict], list[float]]:
+def _ome_axes_scales(dims: Sequence[Dimension]) -> tuple[list[dict], list[float]]:
     """Return ome axes meta.
 
     The length of "axes" must be between 2 and 5 and MUST be equal to the
