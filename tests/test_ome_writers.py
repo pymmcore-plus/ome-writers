@@ -124,6 +124,20 @@ def test_stream_with_different_dtypes(
     assert not stream.is_active()
     assert output_path.exists()
 
+    # assert the file size is at least as large as expected
+    expected_size = data.nbytes
+    if output_path.is_dir():
+        # For directory-based formats like Zarr, sum all file sizes
+        actual_size = sum(
+            f.stat().st_size for f in output_path.rglob("*") if f.is_file()
+        )
+    else:
+        # For single file formats like TIFF
+        actual_size = output_path.stat().st_size
+    assert actual_size >= expected_size, (
+        f"File size {actual_size} is less than expected {expected_size}"
+    )
+
 
 @pytest.mark.parametrize("stream_cls,file_ext", backends_to_test)
 def test_minimal_2d_dimensions(
@@ -225,6 +239,148 @@ def test_create_stream_factory_function(
     stream.flush()
     assert not stream.is_active()
     assert output_path.exists()
+
+
+@pytest.mark.parametrize("stream_cls,file_ext", backends_to_test)
+def test_data_integrity_roundtrip(
+    stream_cls: type[OMEStream],
+    file_ext: str,
+    tmp_path: Path,
+    sample_dimensions: list[DimensionInfo],
+) -> None:
+    """Test that data written to disk can be read back exactly as expected."""
+    # Create deterministic random data for reproducible tests
+    np.random.seed(42)
+    shape = tuple(d.size for d in sample_dimensions)
+    original_data = np.random.randint(0, 65536, size=shape, dtype=np.uint16)
+
+    output_path = tmp_path / f"roundtrip_{stream_cls.__name__.lower()}.{file_ext}"
+
+    # Write data using our stream
+    stream = stream_cls()
+    stream = stream.create(str(output_path), original_data.dtype, sample_dimensions)
+
+    # Write all frames in the expected order
+    nt, nz, nc = shape[:3]
+    for t, z, c in product(range(nt), range(nz), range(nc)):
+        frame = original_data[t, z, c]
+        stream.append(frame)
+
+    stream.flush()
+    assert output_path.exists()
+
+    # Read data back and verify it matches
+    if file_ext == "zarr":
+        # Read using zarr-python
+        try:
+            import zarr
+        except ImportError:
+            pytest.skip("zarr-python not available for reading back data")
+
+        # Open the zarr array
+        zarr_group = zarr.open(str(output_path), mode="r")
+        read_data = zarr_group["0"][:]
+
+    elif file_ext == "tiff":
+        # Read using tifffile
+        try:
+            import tifffile
+        except ImportError:
+            pytest.skip("tifffile not available for reading back data")
+
+        read_data = tifffile.imread(str(output_path))
+
+    else:
+        pytest.fail(f"Unknown file extension: {file_ext}")
+
+    # Verify the data matches exactly
+    np.testing.assert_array_equal(
+        original_data,
+        read_data,
+        err_msg=f"Data mismatch in {stream_cls.__name__} roundtrip test",
+    )
+
+    # Also verify shape and dtype
+    assert read_data.shape == original_data.shape, (
+        f"Shape mismatch: expected {original_data.shape}, got {read_data.shape}"
+    )
+    assert read_data.dtype == original_data.dtype, (
+        f"Dtype mismatch: expected {original_data.dtype}, got {read_data.dtype}"
+    )
+
+
+@pytest.mark.parametrize(
+    "dtype", [np.dtype(np.uint8), np.dtype(np.uint16)], ids=["uint8", "uint16"]
+)
+@pytest.mark.parametrize("stream_cls,file_ext", backends_to_test)
+def test_data_integrity_roundtrip_dtypes(
+    stream_cls: type[OMEStream],
+    file_ext: str,
+    tmp_path: Path,
+    dtype: np.dtype,
+    sample_dimensions: list[DimensionInfo],
+) -> None:
+    """Test data integrity roundtrip with different data types."""
+    # Create deterministic random data for reproducible tests
+    np.random.seed(123)  # Different seed from other test
+    shape = tuple(d.size for d in sample_dimensions)
+    max_val = np.iinfo(dtype).max
+    original_data = np.random.randint(0, max_val + 1, size=shape, dtype=dtype)
+
+    output_path = tmp_path / f"roundtrip_dtype_{stream_cls.__name__.lower()}_{dtype.name}.{file_ext}"
+
+    # Write data using our stream
+    stream = stream_cls()
+    stream = stream.create(str(output_path), dtype, sample_dimensions)
+
+    # Write all frames in the expected order
+    nt, nz, nc = shape[:3]
+    for t, z, c in product(range(nt), range(nz), range(nc)):
+        frame = original_data[t, z, c]
+        stream.append(frame)
+
+    stream.flush()
+    assert output_path.exists()
+
+    # Read data back and verify it matches
+    if file_ext == "zarr":
+        # Read using zarr-python
+        try:
+            import zarr
+        except ImportError:
+            pytest.skip("zarr-python not available for reading back data")
+
+        # Open the zarr array
+        zarr_group = zarr.open(str(output_path), mode='r')  # type: ignore
+        zarr_array = zarr_group['0']  # type: ignore
+        read_data = zarr_array[:]  # type: ignore
+
+    elif file_ext == "tiff":
+        # Read using tifffile
+        try:
+            import tifffile
+        except ImportError:
+            pytest.skip("tifffile not available for reading back data")
+
+        read_data = tifffile.imread(str(output_path))
+
+    else:
+        pytest.fail(f"Unknown file extension: {file_ext}")
+
+    # Verify the data matches exactly
+    np.testing.assert_array_equal(
+        original_data,
+        read_data,
+        err_msg=f"Data mismatch in {stream_cls.__name__} roundtrip test with {dtype}"
+    )
+
+    # Also verify shape and dtype
+    assert read_data.shape == original_data.shape, (
+        f"Shape mismatch: expected {original_data.shape}, got {read_data.shape}"
+    )
+    assert read_data.dtype == original_data.dtype, (
+        f"Dtype mismatch: expected {original_data.dtype}, got {read_data.dtype}"
+    )
 
 
 # Skip entire test class if no backends are available

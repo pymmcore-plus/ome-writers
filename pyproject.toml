@@ -33,7 +33,11 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Typing :: Typed",
 ]
-dependencies = ["numpy>=2"]
+dependencies = [
+    "numpy>=2",
+    "tifffile>=2024.8.30",
+    "zarr>=2.18.2",
+]
 
 [dependency-groups]
 test = ["pytest", "pytest-cov"]
