@@ -208,15 +208,7 @@ def test_data_integrity_roundtrip(
     )
 
 
-# Zarr backends that support multi-position
-zarr_backends_to_test = [
-    (backend_cls, file_ext)
-    for backend_cls, file_ext in backends_to_test
-    if file_ext == "zarr"
-]
-
-
-@pytest.mark.parametrize("stream_cls,file_ext", zarr_backends_to_test)
+@pytest.mark.parametrize("stream_cls,file_ext", backends_to_test)
 def test_multiposition_acquisition(
     stream_cls: type[OMEStream], file_ext: str, tmp_path: Path
 ) -> None:
@@ -245,24 +237,43 @@ def test_multiposition_acquisition(
 
     stream.flush()
     assert not stream.is_active()
-    assert output_path.exists()
 
-    # Verify zarr structure
-    assert (output_path / "0").exists()
-    assert (output_path / "1").exists()
-    assert (output_path / "2").exists()
-    assert (output_path / "zarr.json").exists()
+    if file_ext == "zarr":
+        assert output_path.exists()
+        # Verify zarr structure
+        assert (output_path / "0").exists()
+        assert (output_path / "1").exists()
+        assert (output_path / "2").exists()
+        assert (output_path / "zarr.json").exists()
 
-    # Verify that each position has correct metadata
-    with open(output_path / "zarr.json") as f:
-        group_meta = json.load(f)
+        # Verify that each position has correct metadata
+        with open(output_path / "zarr.json") as f:
+            group_meta = json.load(f)
 
-    ome_attrs = group_meta["attributes"]["ome"]
-    multiscales = ome_attrs["multiscales"]
-    assert ome_attrs["version"] == "0.5"
-    assert isinstance(multiscales, list)
-    assert len(multiscales) == 1
-    assert len(multiscales[0]["datasets"]) == 3
+        ome_attrs = group_meta["attributes"]["ome"]
+        multiscales = ome_attrs["multiscales"]
+        assert ome_attrs["version"] == "0.5"
+        assert isinstance(multiscales, list)
+        assert len(multiscales) == 1
+        assert len(multiscales[0]["datasets"]) == 3
 
-    axes_names = {ax["name"] for ax in multiscales[0]["axes"]}
-    assert all(x in axes_names for x in ["t", "c", "y", "x"])
+        axes_names = {ax["name"] for ax in multiscales[0]["axes"]}
+        assert all(x in axes_names for x in ["t", "c", "y", "x"])
+
+    elif file_ext == "tiff":
+        # For TIFF, separate files are created for each position
+        base_path = output_path.with_suffix("")
+        assert (base_path.with_name(f"{base_path.name}_p000.tiff")).exists()
+        assert (base_path.with_name(f"{base_path.name}_p001.tiff")).exists()
+        assert (base_path.with_name(f"{base_path.name}_p002.tiff")).exists()
+
+        # Verify that each TIFF file has the correct metadata and shape
+        for pos_idx in range(3):
+            pos_file = base_path.with_name(f"{base_path.name}_p{pos_idx:03d}.tiff")
+            assert pos_file.exists()
+
+            # Read the file to verify it has correct shape
+            with tifffile.TiffFile(str(pos_file)) as tif:
+                # Shape should be (t, z, c, y, x) = (3, 2, 2, 32, 32)
+                expected_shape = (3, 2, 2, 32, 32)
+                assert tif.asarray().shape == expected_shape

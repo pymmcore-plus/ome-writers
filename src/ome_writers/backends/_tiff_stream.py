@@ -43,8 +43,8 @@ class TiffStream(OMEStream):
 
     @classmethod
     def is_available(cls) -> bool:
-        """Check if the acquire-zarr package is available."""
-        return importlib.util.find_spec("acquire_zarr") is not None
+        """Check if the tifffile package is available."""
+        return importlib.util.find_spec("tifffile") is not None
 
     def __init__(self) -> None:
         super().__init__()
@@ -106,7 +106,7 @@ class TiffStream(OMEStream):
         # 2. Create a file for each position
         for p_idx in range(n_positions):
             # For each position, determine the file path
-            if p_dim:
+            if n_positions > 1:
                 p_path = self._path.with_stem(f"{self._path.stem}_p{p_idx:03d}")
             else:
                 p_path = self._path
