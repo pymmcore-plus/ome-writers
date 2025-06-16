@@ -39,7 +39,8 @@ stream = create_stream(
     "my_data.zarr",
     dimensions=dims,
     dtype='uint16',
-    # backend may be any of "acquire-zarr", "tensorstore", "tiff" (for ome-tiff) or "auto"
+    # backend may be any of
+    # "acquire-zarr", "tensorstore", "tiff" (for ome-tiff) or "auto"
     backend="acquire-zarr"  
 )
 
