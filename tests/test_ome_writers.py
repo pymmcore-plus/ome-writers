@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
+from importlib.metadata import version
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -52,6 +53,8 @@ if importlib.util.find_spec("tensorstore") is not None:
     backends_to_test.append((TensorStoreZarrStream, "zarr"))
 if importlib.util.find_spec("acquire_zarr") is not None:
     backends_to_test.append((AcquireZarrStream, "zarr"))
+    AQ_VERSION = tuple(int(x) for x in version("acquire-zarr").split(".")[:3])
+
 if importlib.util.find_spec("tifffile") is not None:
     backends_to_test.append((TiffStream, "tiff"))
 
@@ -216,6 +219,10 @@ def test_multiposition_acquisition(
     stream_cls: type[OMEStream], file_ext: str, tmp_path: Path
 ) -> None:
     """Test multi-position acquisition support with position dimension."""
+
+    if stream_cls == AcquireZarrStream:
+        if AQ_VERSION <= (0, 4, 0):
+            pytest.xfail("AcquireZarrStream does not support multi-position in 0.4.0")
 
     data_gen, dimensions, dtype = fake_data_for_sizes(
         sizes={"t": 3, "z": 2, "c": 2, "y": 32, "x": 32, "p": 3},

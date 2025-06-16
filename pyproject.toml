@@ -33,26 +33,24 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Typing :: Typed",
 ]
-dependencies = [
-    "numpy>=2",
-    "tifffile>=2024.8.30",
-    "zarr>=2.18.2",
-]
+dependencies = ["numpy>=2", "tifffile>=2024.8.30", "zarr>=2.18.2"]
 
 [dependency-groups]
-test = ["pytest", "pytest-cov"]
+third-party = [
+    "tifffile>=2024.8.30",
+    "acquire-zarr>=0.4.0",
+    "tensorstore>=0.1.69",
+]
+test = [{ include-group = "third-party" }, "pytest", "pytest-cov"]
 dev = [
     { include-group = "test" },
-    "acquire-zarr>=0.4.0",
     "ipython",
     "mypy",
-    "pdbpp", # https://github.com/pdbpp/pdbpp
+    "pdbpp",                    # https://github.com/pdbpp/pdbpp
     "pre-commit-uv",
-    "rich", # https://github.com/Textualize/rich
+    "rich",                     # https://github.com/Textualize/rich
     "ruff",
-    "tensorstore>=0.1.69",
     "tensorstore-stubs>=0.1.2",
-    "tifffile>=2024.8.30",
 ]
 
 [project.urls]

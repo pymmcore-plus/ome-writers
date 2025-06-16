@@ -882,8 +882,22 @@ dev = [
     { name = "tifffile", version = "2025.6.11", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
 test = [
+    { name = "acquire-zarr" },
     { name = "pytest" },
     { name = "pytest-cov" },
+    { name = "tensorstore", version = "0.1.69", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "tensorstore", version = "0.1.75", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "tifffile", version = "2024.8.30", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "tifffile", version = "2025.5.10", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
+    { name = "tifffile", version = "2025.6.11", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+third-party = [
+    { name = "acquire-zarr" },
+    { name = "tensorstore", version = "0.1.69", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "tensorstore", version = "0.1.75", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "tifffile", version = "2024.8.30", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "tifffile", version = "2025.5.10", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
+    { name = "tifffile", version = "2025.6.11", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
 
 [package.metadata]
@@ -909,8 +923,16 @@ dev = [
     { name = "tifffile", specifier = ">=2024.8.30" },
 ]
 test = [
+    { name = "acquire-zarr", specifier = ">=0.4.0" },
     { name = "pytest" },
     { name = "pytest-cov" },
+    { name = "tensorstore", specifier = ">=0.1.69" },
+    { name = "tifffile", specifier = ">=2024.8.30" },
+]
+third-party = [
+    { name = "acquire-zarr", specifier = ">=0.4.0" },
+    { name = "tensorstore", specifier = ">=0.1.69" },
+    { name = "tifffile", specifier = ">=2024.8.30" },
 ]
 
 [[package]]
