@@ -10,6 +10,7 @@ from ._tiff_stream import TiffStream
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from pathlib import Path
 
     import numpy as np
 
@@ -27,7 +28,7 @@ BACKENDS: dict[BackendName, type[OMEStream]] = {
 
 
 def init_stream(
-    path: str,
+    path: str | Path,
     *,
     backend: Literal[BackendName, "auto"] = "auto",
 ) -> OMEStream:
@@ -64,7 +65,7 @@ def init_stream(
 
 
 def create_stream(
-    path: str,
+    path: str | Path,
     dtype: np.dtype,
     dimensions: Sequence[DimensionInfo],
     *,
@@ -97,10 +98,11 @@ def create_stream(
         A configured stream ready for writing frames.
     """
     stream = init_stream(path, backend=backend)
-    return stream.create(path, dtype, dimensions)
+    return stream.create(str(path), dtype, dimensions)
 
 
-def _autobackend(path: str) -> Literal["acquire-zarr", "tensorstore", "tiff"]:
+def _autobackend(path: str | Path) -> Literal["acquire-zarr", "tensorstore", "tiff"]:
+    path = str(path)
     if path.endswith(".zarr"):
         if AcquireZarrStream.is_available():
             return "acquire-zarr"
