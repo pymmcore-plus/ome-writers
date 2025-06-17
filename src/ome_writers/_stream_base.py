@@ -18,7 +18,16 @@ if TYPE_CHECKING:
 
 
 class OMEStream(abc.ABC):
-    """Base API for writing a stream of frames to an OME file (tiff or zarr)."""
+    """Abstract base class for writing streams of image frames to OME-compliant files.
+
+    This class defines the common interface for all OME stream writers, providing
+    methods for creating streams, appending frames, flushing data, and managing
+    stream lifecycle. Concrete implementations handle specific file formats
+    (TIFF, Zarr) and storage backends.
+
+    The class supports context manager protocol for automatic resource cleanup
+    and provides path normalization utilities for cross-platform compatibility.
+    """
 
     @abstractmethod
     def create(
@@ -84,12 +93,18 @@ class OMEStream(abc.ABC):
 
 
 class MultiPositionOMEStream(OMEStream):
-    """Subclass for OME streams that support multiple positions.
+    """Base class for OME streams supporting multi-position imaging datasets.
 
-    This class provides a default "append()" implementation that handles
-    multi-position data by managing indices and position dimensions, subclasses
-    must now implement the "_write_to_backend()" method to handle
-    backend-specific writing logic.
+    Extends OMEStream to handle complex multi-dimensional acquisitions with
+    position ('p') dimensions. This class automatically manages index mapping
+    and coordinates between global frame indices and backend-specific array
+    keys and dimensional indices.
+
+    Provides a default append() implementation that handles multi-position
+    data routing, while requiring subclasses to implement `_write_to_backend()`
+    for their specific storage mechanisms. The class separates position
+    dimensions from other dimensions (time, z, channel, y, x) and creates
+    appropriate indexing schemes for efficient data organization.
     """
 
     def __init__(self) -> None:
