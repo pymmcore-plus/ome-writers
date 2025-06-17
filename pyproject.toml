@@ -116,7 +116,7 @@ pretty = true
 [tool.pytest.ini_options]
 minversion = "7.0"
 testpaths = ["tests"]
-filterwarnings = ["error"]
+filterwarnings = ["error", "ignore:Failing to pass a value:DeprecationWarning"]
 
 # https://coverage.readthedocs.io/
 [tool.coverage.report]

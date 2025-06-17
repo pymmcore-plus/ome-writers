@@ -72,15 +72,18 @@ def fake_data_for_sizes(
     if not np.issubdtype(dtype, np.integer):  # pragma: no cover
         raise ValueError(f"Unsupported dtype: {dtype}.  Must be an integer type.")
 
-    rng = np.random.default_rng()
-    data = rng.integers(0, np.iinfo(dtype).max, size=shape, dtype=dtype)
+    # rng = np.random.default_rng()
+    # data = rng.integers(0, np.iinfo(dtype).max, size=shape, dtype=dtype)
+    data = np.ones(shape, dtype=dtype)
 
     def _build_plane_generator() -> Iterator[np.ndarray]:
         """Yield 2-D planes in y-x order."""
+        i = 0
         if not (non_spatial_sizes := shape[:-2]):  # it's just a 2-D image
             yield data
         else:
             for idx in product(*(range(n) for n in non_spatial_sizes)):
-                yield data[idx]
+                yield data[idx] * i
+                i += 1
 
     return _build_plane_generator(), dims, dtype

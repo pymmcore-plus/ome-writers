@@ -2,18 +2,24 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import threading
+from itertools import count
 from pathlib import Path
+from queue import Queue
 from typing import TYPE_CHECKING
 
-import numpy as np
 import tifffile
 from typing_extensions import Self
 
-from ome_writers._dimensions import Dimension
+from ome_writers._dimensions import dims_to_ome
 from ome_writers._stream_base import MultiPositionOMEStream
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
+
+    import numpy as np
+
+    from ome_writers._dimensions import Dimension
 
 
 class TiffStream(MultiPositionOMEStream):
@@ -29,7 +35,7 @@ class TiffStream(MultiPositionOMEStream):
 
     Attributes
     ----------
-    _memmaps : Dict[int, np.memmap]
+    _writers : Dict[int, np.memmap]
         A dictionary mapping position index to its numpy memmap array.
     """
 
@@ -41,8 +47,8 @@ class TiffStream(MultiPositionOMEStream):
     def __init__(self) -> None:
         super().__init__()
         # Using dictionaries to handle multi-position ('p') acquisitions
-        self._memmaps: dict[int, np.memmap] = {}
-        self._dim_order = "ptzcyx"
+        self._threads: dict[int, WriterThread] = {}
+        self._queues: dict[int, Queue[np.ndarray | None]] = {}
         self._is_active = False
 
     def create(
@@ -54,21 +60,42 @@ class TiffStream(MultiPositionOMEStream):
         overwrite: bool = False,
     ) -> Self:
         # Use MultiPositionOMEStream to handle position logic
-        num_positions, non_position_dims = self._init_positions(dimensions)
+        num_positions, tczyx_dims = self._init_positions(dimensions)
         self._delete_existing = overwrite
         self._path = Path(self._normalize_path(path))
-        shape_5d = tuple(d.size for d in non_position_dims)
+        shape_5d = tuple(d.size for d in tczyx_dims)
 
-        path_root = str(self._path)
+        fnames = self._prepare_files(self._path, num_positions, overwrite)
+
+        # Create a memmap for each position
+        for p_idx, fname in enumerate(fnames):
+            ome = dims_to_ome(tczyx_dims, dtype=dtype, tiff_file_name=fname)
+            self._queues[p_idx] = q = Queue()  # type: ignore
+            self._threads[p_idx] = thread = WriterThread(
+                fname,
+                shape=shape_5d,
+                dtype=dtype,
+                image_queue=q,
+                ome_xml=ome.to_xml(),
+            )
+            thread.start()
+
+        self._is_active = True
+        return self
+
+    def _prepare_files(
+        self, path: Path, num_positions: int, overwrite: bool
+    ) -> list[str]:
+        path_root = str(path)
         for possible_ext in [".ome.tiff", ".ome.tif", ".tiff", ".tif"]:
             if path_root.endswith(possible_ext):
                 ext = possible_ext
                 path_root = path_root[: -len(possible_ext)]
                 break
         else:
-            ext = self._path.suffix
+            ext = path.suffix
 
-        # Create a memmap for each position
+        fnames = []
         for p_idx in range(num_positions):
             # only append position index if there are multiple positions
             if num_positions > 1:
@@ -76,7 +103,7 @@ class TiffStream(MultiPositionOMEStream):
             else:
                 p_path = self._path
 
-            # Check if file exists and handle overwrite parameter
+            # Check if file exists and handle overwrite logic
             if p_path.exists():
                 if not overwrite:
                     raise FileExistsError(
@@ -87,37 +114,26 @@ class TiffStream(MultiPositionOMEStream):
 
             # Ensure the parent directory exists
             p_path.parent.mkdir(parents=True, exist_ok=True)
+            fnames.append(str(p_path))
 
-            # Create empty OME-TIFF file with the correct shape and metadata.
-            tifffile.imwrite(
-                p_path,
-                shape=shape_5d,
-                dtype=dtype,
-                ome=True,
-                metadata=self._generate_ome_metadata(p_path.name, non_position_dims),
-            )
-
-            # Create a memory map to the file on disk.
-            self._memmaps[p_idx] = mm = tifffile.memmap(str(p_path), dtype=dtype)
-            # This line is important, as tifffile.memmap can lose singleton dimensions
-            mm.shape = shape_5d
-
-        self._is_active = True
-        return self
+        return fnames
 
     def _write_to_backend(
         self, array_key: str, index: tuple[int, ...], frame: np.ndarray
     ) -> None:
         """TIFF-specific write implementation."""
-        p_idx = int(array_key)
-        memmap_array = self._memmaps[p_idx]
-        memmap_array[index] = frame
+        self._queues[int(array_key)].put(frame)
 
     def flush(self) -> None:
-        """Flushes all buffered data in the memory-mapped files to disk."""
-        for memmap_array in self._memmaps.values():
-            if hasattr(memmap_array, "flush"):
-                memmap_array.flush()
+        """Flush all pending writes to the underlying TIFF files."""
+        # Signal the threads to stop by putting None in each queue
+        for queue in self._queues.values():
+            queue.put(None)
+
+        # Wait for the thread to finish
+        for thread in self._threads.values():
+            thread.join(timeout=5)
+
         # Mark as inactive after flushing - this is consistent with other backends
         self._is_active = False
 
@@ -125,34 +141,58 @@ class TiffStream(MultiPositionOMEStream):
         """Return True if the stream is currently active."""
         return self._is_active
 
-    def _generate_ome_metadata(
-        self, name: str, dimensions: Sequence[Dimension]
-    ) -> dict:
-        """Create the metadata dictionary required by tifffile for OME-XML."""
-        dim_map = {d.label: d for d in dimensions}
-        axes = "".join(d.label for d in dimensions).upper()
 
-        metadata = {
-            "axes": axes,
-            "Name": name,
-            "PhysicalSizeX": dim_map.get("x", Dimension("x", 0, (1.0, ""))).ome_scale,
-            "PhysicalSizeXUnit": dim_map.get(
-                "x", Dimension("x", 0, (1.0, ""))
-            ).ome_unit,
-            "PhysicalSizeY": dim_map.get("y", Dimension("y", 0, (1.0, ""))).ome_scale,
-            "PhysicalSizeYUnit": dim_map.get(
-                "y", Dimension("y", 0, (1.0, ""))
-            ).ome_unit,
-        }
-        if "z" in dim_map:
-            metadata["PhysicalSizeZ"] = dim_map["z"].ome_scale
-            metadata["PhysicalSizeZUnit"] = dim_map["z"].ome_unit
-        if "t" in dim_map:
-            metadata["TimeIncrement"] = dim_map["t"].ome_scale
-            metadata["TimeIncrementUnit"] = dim_map["t"].ome_unit
-        if "c" in dim_map:
-            # Assuming channel names are just indices if not provided otherwise
-            metadata["Channel"] = {
-                "Name": [f"Channel_{i}" for i in range(dim_map["c"].size)]
-            }
-        return metadata
+class WriterThread(threading.Thread):
+    def __init__(
+        self,
+        path: str,
+        shape: tuple[int, ...],
+        dtype: np.dtype,
+        image_queue: Queue[np.ndarray | None],
+        ome_xml: str = "",
+        pixelsize: float = 1.0,
+    ) -> None:
+        super().__init__(daemon=True, name=f"TiffWriterThread-{next(thread_counter)}")
+        self._path = path
+        self._shape = shape
+        self._dtype = dtype
+        self._image_queue = image_queue
+        self._ome_xml = ome_xml
+        self._res = 1 / pixelsize
+        self._bytes_written = 0
+        self._frames_written = 0
+
+    def run(self) -> None:
+        # would be nice if we could just use `iter(queue, None)`...
+        # but that doesn't work with numpy arrays which don't support __eq__
+
+        def _queue_iterator() -> Iterator[np.ndarray]:
+            """Generator to yield frames from the queue."""
+            while True:
+                frame = self._image_queue.get()
+                if frame is None:
+                    break
+                yield frame
+                self._bytes_written += frame.nbytes
+                self._frames_written += 1
+
+        try:
+            with tifffile.TiffWriter(self._path, bigtiff=True, ome=False) as tif:
+                tif.write(
+                    _queue_iterator(),
+                    shape=self._shape,
+                    dtype=self._dtype,
+                    resolution=(self._res, self._res),
+                    resolutionunit=tifffile.RESUNIT.MICROMETER,
+                    photometric=tifffile.PHOTOMETRIC.MINISBLACK,
+                    description=self._ome_xml,
+                )
+        except Exception as e:
+            # suppress an over-eager tifffile exception
+            # when the number of bytes written is less than expected
+            if "wrong number of bytes" in str(e):
+                return
+            raise
+
+
+thread_counter = count()
