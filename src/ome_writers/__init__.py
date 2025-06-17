@@ -15,7 +15,7 @@ from ._stream_base import OMEStream
 from ._util import fake_data_for_sizes
 from .backends._acquire_zarr import AcquireZarrStream
 from .backends._tensorstore import TensorStoreZarrStream
-from .backends._tiff_stream import TiffStream
+from .backends._tifffile import TifffileStream
 
 __all__ = [
     "AcquireZarrStream",
@@ -24,7 +24,7 @@ __all__ = [
     "DimensionLabel",
     "OMEStream",
     "TensorStoreZarrStream",
-    "TiffStream",
+    "TifffileStream",
     "__version__",
     "create_stream",
     "fake_data_for_sizes",

@@ -19,7 +19,7 @@ from ome_writers import (
     Dimension,
     OMEStream,
     TensorStoreZarrStream,
-    TiffStream,
+    TifffileStream,
     create_stream,
     fake_data_for_sizes,
 )
@@ -58,7 +58,7 @@ if importlib.util.find_spec("acquire_zarr") is not None:
     AQ_VERSION = tuple(int(x) for x in version("acquire-zarr").split(".")[:3])
 
 if importlib.util.find_spec("tifffile") is not None:
-    backends_to_test.append((TiffStream, "tiff"))
+    backends_to_test.append((TifffileStream, "tiff"))
 
 
 @pytest.mark.parametrize("stream_cls,file_ext", backends_to_test)

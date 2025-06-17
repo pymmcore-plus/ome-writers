@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from ome_writers._dimensions import Dimension
 
 
-class TiffStream(MultiPositionOMEStream):
+class TifffileStream(MultiPositionOMEStream):
     """A concrete OMEStream implementation for writing to OME-TIFF files.
 
     This writer is designed for deterministic acquisitions where the full experiment

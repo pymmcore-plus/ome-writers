@@ -9,7 +9,7 @@ from typing_extensions import TypeAlias
 
 from .backends._acquire_zarr import AcquireZarrStream
 from .backends._tensorstore import TensorStoreZarrStream
-from .backends._tiff_stream import TiffStream
+from .backends._tifffile import TifffileStream
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -26,7 +26,7 @@ BackendName: TypeAlias = Literal["acquire-zarr", "tensorstore", "tiff"]
 BACKENDS: dict[BackendName, type[OMEStream]] = {
     "acquire-zarr": AcquireZarrStream,
     "tensorstore": TensorStoreZarrStream,
-    "tiff": TiffStream,
+    "tiff": TifffileStream,
 }
 
 
@@ -120,7 +120,7 @@ def _autobackend(path: str | Path) -> Literal["acquire-zarr", "tensorstore", "ti
             "Please install one of these packages."
         )
     elif path.endswith(".tiff") or path.endswith(".ome.tiff"):
-        if TiffStream.is_available():
+        if TifffileStream.is_available():
             return "tiff"
         raise ValueError(  # pragma: no cover
             "Cannot determine backend automatically for .tiff file. "
