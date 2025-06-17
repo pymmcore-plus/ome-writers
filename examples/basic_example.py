@@ -11,12 +11,12 @@ plane_iter, dims, dtype = fake_data_for_sizes(
     chunk_sizes={"y": 64, "x": 64},
 )
 
-OUT = Path("~/Desktop/some_path_ts.ome.tiff").expanduser()
+OUT = Path("~/Desktop/some_path_ts.zarr").expanduser()
 stream = create_stream(
     OUT,
     dtype,
     dims,
-    # backend="acquire-zarr",  # or "tensorstore", or "tiff"
+    backend="acquire-zarr",  # or "tensorstore", or "tiff"
     overwrite=True,
 )
 
