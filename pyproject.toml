@@ -47,7 +47,7 @@ tiff = ["tifffile>=2024.8.30"]
 all = ["ome-writers[tensorstore,acquire-zarr,tiff]"]
 
 [dependency-groups]
-test = ["ome-writers[all]", "pytest", "pytest-cov"]
+test = ["ome-writers[all]", "pymmcore-plus>=0.15.0", "pytest", "pytest-cov"]
 dev = [
     { include-group = "test" },
     "ipython",

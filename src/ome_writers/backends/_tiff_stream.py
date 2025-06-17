@@ -109,12 +109,20 @@ class TiffStream(OMEStream):
         n_positions = p_dim.size if p_dim else 1
 
         self._total_frames = np.prod([d.size for d in self._loop_dims_info]).item()
+        path_str = str(self._path)
+        for possible_ext in [".ome.tiff", ".ome.tif", ".tiff", ".tif"]:
+            if path_str.endswith(possible_ext):
+                actual_ext = possible_ext
+                path_str = path_str[: -len(possible_ext)]
+                break
+        else:
+            actual_ext = self._path.suffix
 
         # 2. Create a file for each position
         for p_idx in range(n_positions):
             # For each position, determine the file path
             if n_positions > 1:
-                p_path = self._path.with_stem(f"{self._path.stem}_p{p_idx:03d}")
+                p_path = Path(f"{path_str}_p{p_idx:03d}{actual_ext}")
             else:
                 p_path = self._path
 
