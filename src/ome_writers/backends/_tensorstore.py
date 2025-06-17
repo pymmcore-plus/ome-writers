@@ -51,8 +51,6 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
     ) -> Self:
         # Use MultiPositionOMEStream to handle position logic
         num_positions, non_position_dims = self._init_positions(dimensions)
-
-        # Set delete_existing based on overwrite parameter
         self._delete_existing = overwrite
 
         self._create_group(self._normalize_path(path), dimensions)

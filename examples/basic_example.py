@@ -7,16 +7,16 @@ from pathlib import Path
 from ome_writers import create_stream, fake_data_for_sizes
 
 plane_iter, dims, dtype = fake_data_for_sizes(
-    sizes={"t": 10, "z": 10, "c": 1, "y": 256, "x": 256, "p": 2},
+    sizes={"t": 10, "z": 7, "c": 2, "y": 256, "x": 256},
     chunk_sizes={"y": 64, "x": 64},
 )
 
-OUT = Path("~/Desktop/some_path_ts.zarr").expanduser()
+OUT = Path("~/Desktop/some_path_ts.ome.tiff").expanduser()
 stream = create_stream(
     OUT,
     dtype,
     dims,
-    backend="acquire-zarr",  # or "tensorstore", or "tiff"
+    # backend="acquire-zarr",  # or "tensorstore", or "tiff"
     overwrite=True,
 )
 
