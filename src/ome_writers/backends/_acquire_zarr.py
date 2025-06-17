@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import gc
 import importlib
 import importlib.util
 import json
+import shutil
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -53,11 +55,13 @@ class AcquireZarrStream(MultiPositionOMEStream):
         self._group_path = Path(self._normalize_path(path))
 
         # Check if directory exists and handle overwrite parameter
-        if self._group_path.exists() and not overwrite:
-            raise FileExistsError(
-                f"Directory {self._group_path} already exists. "
-                "Use overwrite=True to overwrite it."
-            )
+        if self._group_path.exists():
+            if not overwrite:
+                raise FileExistsError(
+                    f"Directory {self._group_path} already exists. "
+                    "Use overwrite=True to overwrite it."
+                )
+            shutil.rmtree(self._group_path)
 
         try:
             data_type = getattr(self._aqz.DataType, np.dtype(dtype).name.upper())
@@ -116,6 +120,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
             raise RuntimeError("Stream is closed or uninitialized. Cannot flush.")
         # Flush all streams to ensure all data is written to disk.
         self._streams.clear()
+        gc.collect()
         self._patch_group_metadata()
 
     def is_active(self) -> bool:
