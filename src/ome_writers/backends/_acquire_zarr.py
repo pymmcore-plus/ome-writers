@@ -15,12 +15,9 @@ from typing_extensions import Self
 from ome_writers._ngff_metadata import ome_meta_v5
 from ome_writers._stream_base import MultiPositionOMEStream
 
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    import acquire_zarr
-
-    from ome_writers._dimensions import Dimension
+from collections.abc import Sequence
+import acquire_zarr
+from ome_writers._dimensions import Dimension
 
 
 class AcquireZarrStream(MultiPositionOMEStream):
@@ -40,13 +37,13 @@ class AcquireZarrStream(MultiPositionOMEStream):
             raise ImportError(msg) from e
         self._aqz = acquire_zarr
         super().__init__()
-        self._streams: dict[str, acquire_zarr.ZarrStream] = {}  # array_key -> stream
-
+        self._stream = None
+        
     def create(
         self,
         path: str,
         dtype: np.dtype,
-        dimensions: Sequence[Dimension],
+        dimensions: list[Dimension],
         *,
         overwrite: bool = False,
     ) -> Self:
@@ -69,23 +66,29 @@ class AcquireZarrStream(MultiPositionOMEStream):
             raise ValueError(f"Cannot cast {dtype!r} to an acquire-zarr dtype.") from e
 
         az_dims = [self._dim_toaqz_dim(dim) for dim in non_position_dims]
+        az_array_settings = [
+            self._aqz_pos_array(pos_idx, az_dims, data_type)
+            for pos_idx in range(num_positions)
+        ]
+
         # Create streams for each position
         for pos_idx in range(num_positions):
             array_key = str(pos_idx)
-            settings = self._aqz.StreamSettings(
-                store_path=str(self._group_path),
-                output_key=array_key,
-                data_type=data_type,
-                version=self._aqz.ZarrVersion.V3,
-            )
-            settings.dimensions.extend(az_dims)
-            self._streams[array_key] = self._aqz.ZarrStream(settings)
+
+        settings = self._aqz.StreamSettings(
+            arrays=az_array_settings,
+            store_path=str(self._group_path),
+            version=self._aqz.ZarrVersion.V3,
+        )
+        self._stream=self._aqz.ZarrStream(
+            settings
+        )
 
         self._patch_group_metadata()
         return self
 
     def _patch_group_metadata(self) -> None:
-        """Patch the group metadata with OME NGFF v0.5 metadata.
+        """Patch the group metadata with OME NGFF ev0.5 metadata.
 
         This method exists because there are cases in which the standard acquire-zarr
         API is not flexible enough to handle all the cases we need (such as multiple
@@ -112,21 +115,18 @@ class AcquireZarrStream(MultiPositionOMEStream):
         self, array_key: str, index: tuple[int, ...], frame: np.ndarray
     ) -> None:
         """AcquireZarr-specific write implementation."""
-        stream = self._streams[array_key]
-        stream.append(frame)
+        self._stream.append(frame)
 
     def flush(self) -> None:
-        if not self._streams:  # pragma: no cover
+        if not self._stream:  # pragma: no cover
             raise RuntimeError("Stream is closed or uninitialized. Cannot flush.")
-        # Flush all streams to ensure all data is written to disk.
-        self._streams.clear()
+        # Flush the stream to ensure all data is written to disk.
+        self._stream = None
         gc.collect()
         self._patch_group_metadata()
 
     def is_active(self) -> bool:
-        return bool(self._streams) and any(
-            stream.is_active() for stream in self._streams.values()
-        )
+        return bool(self._stream) and self._stream.is_active()
 
     def _dim_toaqz_dim(
         self,
@@ -135,8 +135,22 @@ class AcquireZarrStream(MultiPositionOMEStream):
     ) -> acquire_zarr.Dimension:
         return self._aqz.Dimension(
             name=dim.label,
-            type=getattr(self._aqz.DimensionType, dim.ome_dim_type.upper()),
+            kind=getattr(self._aqz.DimensionType, dim.ome_dim_type.upper()),
             array_size_px=dim.size,
             chunk_size_px=(dim.chunk_size if dim.chunk_size is not None else dim.size),
             shard_size_chunks=shard_size_chunks,
+        )
+
+    def _aqz_pos_array(
+        self,
+        position_index: int,
+        dimensions: list[acquire_zarr.Dimension],
+        dtype: acquire_zarr.DataType
+    ) -> acquire_zarr.ArraySettings:
+        """Create an AcquireZarr ArraySettings for a position."""
+        
+        return self._aqz.ArraySettings(
+            output_key=self._indices[position_index][0],
+            dimensions=dimensions,
+            #dtype=dtype
         )
