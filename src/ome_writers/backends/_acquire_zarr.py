@@ -88,7 +88,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
         return self
 
     def _patch_group_metadata(self) -> None:
-        """Patch the group metadata with OME NGFF ev0.5 metadata.
+        """Patch the group metadata with OME NGFF 0.5 metadata.
 
         This method exists because there are cases in which the standard acquire-zarr
         API is not flexible enough to handle all the cases we need (such as multiple
@@ -121,6 +121,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
         if not self._stream:  # pragma: no cover
             raise RuntimeError("Stream is closed or uninitialized. Cannot flush.")
         # Flush the stream to ensure all data is written to disk.
+        self._stream.close()
         self._stream = None
         gc.collect()
         self._patch_group_metadata()
