@@ -15,9 +15,12 @@ from typing_extensions import Self
 from ome_writers._ngff_metadata import ome_meta_v5
 from ome_writers._stream_base import MultiPositionOMEStream
 
-from collections.abc import Sequence
-import acquire_zarr
-from ome_writers._dimensions import Dimension
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    import acquire_zarr
+
+    from ome_writers._dimensions import Dimension
 
 
 class AcquireZarrStream(MultiPositionOMEStream):
