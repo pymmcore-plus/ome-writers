@@ -118,7 +118,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
         self, array_key: str, index: tuple[int, ...], frame: np.ndarray
     ) -> None:
         """AcquireZarr-specific write implementation."""
-        self._stream.append(frame)
+        self._stream.append(frame, key=array_key)
 
     def flush(self) -> None:
         if not self._stream:  # pragma: no cover
