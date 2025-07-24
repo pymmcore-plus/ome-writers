@@ -63,14 +63,9 @@ class AcquireZarrStream(MultiPositionOMEStream):
                 )
             shutil.rmtree(self._group_path)
 
-        try:
-            data_type = getattr(self._aqz.DataType, np.dtype(dtype).name.upper())
-        except AttributeError as e:  # pragma: no cover
-            raise ValueError(f"Cannot cast {dtype!r} to an acquire-zarr dtype.") from e
-
         az_dims = [self._dim_toaqz_dim(dim) for dim in non_position_dims]
         az_array_settings = [
-            self._aqz_pos_array(pos_idx, az_dims, data_type)
+            self._aqz_pos_array(pos_idx, az_dims, dtype)
             for pos_idx in range(num_positions)
         ]
 
@@ -149,12 +144,12 @@ class AcquireZarrStream(MultiPositionOMEStream):
         self,
         position_index: int,
         dimensions: list[acquire_zarr.Dimension],
-        dtype: acquire_zarr.DataType
+        dtype: np.dtype,
     ) -> acquire_zarr.ArraySettings:
         """Create an AcquireZarr ArraySettings for a position."""
         
         return self._aqz.ArraySettings(
             output_key=self._indices[position_index][0],
             dimensions=dimensions,
-            #dtype=dtype
+            data_type=dtype
         )
