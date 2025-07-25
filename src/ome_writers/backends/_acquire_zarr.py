@@ -63,16 +63,15 @@ class AcquireZarrStream(MultiPositionOMEStream):
                 )
             shutil.rmtree(self._group_path)
 
+        # Dimensions will be the same across all positions, so we can create them onece
         az_dims = [self._dim_toaqz_dim(dim) for dim in non_position_dims]
+        # Create AcquireZarr array settings for each position
         az_array_settings = [
             self._aqz_pos_array(pos_idx, az_dims, dtype)
             for pos_idx in range(num_positions)
         ]
 
         # Create streams for each position
-        for pos_idx in range(num_positions):
-            array_key = str(pos_idx)
-
         settings = self._aqz.StreamSettings(
             arrays=az_array_settings,
             store_path=str(self._group_path),
@@ -147,9 +146,9 @@ class AcquireZarrStream(MultiPositionOMEStream):
         dtype: np.dtype,
     ) -> acquire_zarr.ArraySettings:
         """Create an AcquireZarr ArraySettings for a position."""
-        
+
         return self._aqz.ArraySettings(
-            output_key=self._indices[position_index][0],
+            output_key=str(position_index), # this matches the position index key from the base class
             dimensions=dimensions,
             data_type=dtype
         )
