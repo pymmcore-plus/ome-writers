@@ -46,13 +46,15 @@ jobs:
       - name: Install debug tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y gdb lldb python3-dbg   # python3-dbg provides symbols for Python  [oai_citation:0‡Gist](https://gist.github.com/toolness/d56c1aab317377d5d17a?utm_source=chatgpt.com)
+          sudo apt-get install -y gdb lldb python3-dbg
+
       - name: Allow core dumps
         run: |
           ulimit -c unlimited
           echo '/tmp/core.%e.%p' | sudo tee /proc/sys/kernel/core_pattern
-            - name: Install Dependencies
-              run: uv sync --no-dev --group test
+
+      - name: Install Dependencies
+        run: uv sync --no-dev --group test
 
       - name: Run tests under GDB
         run: |
@@ -72,9 +74,9 @@ jobs:
               -ex "thread apply all bt full" \
               python3 "$core"
           done
-    
+
       # - name: 🧪 Run Tests
-        # run: uv run --no-sync coverage run -p -m pytest -v
+      # run: uv run --no-sync coverage run -p -m pytest -v
 
       # If something goes wrong with --pre tests, we can open an issue in the repo
       - name: 📝 Report --pre Failures
