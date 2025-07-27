@@ -58,9 +58,10 @@ jobs:
 
       - name: Run tests under GDB
         run: |
-          gdb --batch --quiet uv \
+          source .venv/bin/activate
+          gdb --batch --quiet python3 \
             -ex "set pagination off" \
-            -ex "set args run --no-sync coverage run -p -m pytest -v" \
+            -ex "set args -m pytest -v" \
             -ex "run" \
             -ex "bt full" \
             -ex "quit" \
