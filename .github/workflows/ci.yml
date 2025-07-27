@@ -61,7 +61,7 @@ jobs:
           source .venv/bin/activate
           gdb --batch --quiet python3 \
             -ex "set pagination off" \
-            -ex "set args -m pytest -v" \
+            -ex "set args -m pytest -v -s -k acquire" \
             -ex "run" \
             -ex "bt full" \
             -ex "quit" \
@@ -76,28 +76,6 @@ jobs:
               python3 "$core"
           done
 
-      - name: Collect backtraces
-        run: |
-          mkdir -p artifacts
-          # capture pytest-under-gdb output
-          cp backtrace.log artifacts/pytest-backtrace.log || true
-          # dump all core backtraces into separate files
-          idx=0
-          for core in /tmp/core.*; do
-            file="artifacts/core-${idx}.bt"
-            echo "===== Backtrace for $core =====" >"$file"
-            gdb --batch --quiet \
-              -ex "thread apply all bt full" \
-              python3 "$core" >>"$file" || true
-            idx=$((idx+1))
-          done
-
-      - name: Upload debug artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: debug-backtraces
-          path: artifacts/
-        
       # - name: 🧪 Run Tests
       # run: uv run --no-sync coverage run -p -m pytest -v
 
