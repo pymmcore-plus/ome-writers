@@ -43,7 +43,7 @@ dependencies = [
 
 [project.optional-dependencies]
 tensorstore = ["tensorstore>=0.1.69,!=0.1.72"]
-acquire-zarr = ["acquire-zarr>=0.4.0"]
+acquire-zarr = ["acquire-zarr>=0.5.1"]
 tiff = ["tifffile>=2024.8.30"]
 all = ["ome-writers[tensorstore,acquire-zarr,tiff]"]
 
