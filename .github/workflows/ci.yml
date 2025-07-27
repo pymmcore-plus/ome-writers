@@ -58,7 +58,7 @@ jobs:
 
       - name: Run tests under GDB
         run: |
-          gdb --batch --quiet python3 \
+          gdb --batch --quiet uv \
             -ex "set pagination off" \
             -ex "set args run --no-sync coverage run -p -m pytest -v" \
             -ex "run" \
