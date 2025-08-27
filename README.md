@@ -7,15 +7,29 @@ Version](https://img.shields.io/pypi/pyversions/ome-writers.svg?color=green)](ht
 [![CI](https://github.com/pymmcore-plus/ome-writers/actions/workflows/ci.yml/badge.svg)](https://github.com/pymmcore-plus/ome-writers/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/pymmcore-plus/ome-writers/branch/main/graph/badge.svg)](https://codecov.io/gh/pymmcore-plus/ome-writers)
 
-OME-TIFF and OME-ZARR writer APIs designed for microscopy acquisition
+OME-TIFF and OME-ZARR writer APIs designed for microscopy acquisition.
+
+This package provides a unified interface for writing OME-TIFF and OME-ZARR files,
+with various different backends.  It is currently designed/optimized for
+"deterministic" use cases where the shape of the data is known ahead of time, and
+the data can be efficiently chunked and written in a predictable manner with a
+series of calls to `stream.append(frame)` as the data is generated.
 
 ## Installation
 
-from github for now, including all extra dependencies (e.g. tifffile,
-acquire-zarr, tensorstore, etc.):
+```bash
+pip install ome-writers
+```
+
+Or, include all optional dependencies for specific backends:
+
+ - `tensorstore`: for [`tensorstore`](https://github.com/google/tensorstore) backend support
+ - `acquire-zarr`: for [`acquire-zarr`](https://github.com/acquire-project/acquire-zarr) backend support
+ - `tiff`: for `tiff` backend support using [`tifffile`](https://github.com/cgohlke/tifffile).
+ - `all`: install all backends
 
 ```bash
-pip install "ome-writers[all] @ git+https://github.com/pymmcore-plus/ome-writers"
+pip install "ome-writers[all]"
 ```
 
 ## Basic Usage
@@ -50,4 +64,24 @@ for frame in ...:
 
 # Flush any pending writes to disk
 stream.flush()
+```
+
+## Contributing
+
+This is a work in progress; we absolutely welcome and appreciate contributions!
+If you have suggestions, improvements, or bug fixes, please open an issue or
+submit a pull request.
+
+```sh
+git clone https://github.com/pymmcore-plus/ome-writers.git
+cd ome-writers
+
+# setup env
+uv sync
+
+# test
+uv run pytest
+
+# lint
+uv run pre-commit run -a
 ```
