@@ -17,13 +17,16 @@ OME_DIM_TYPE = {"y": "space", "x": "space", "z": "space", "t": "time", "c": "cha
 OME_UNIT = {"um": "micrometer", "ml": "milliliter", "s": "second", None: "unknown"}
 
 
+# Recognized dimension labels
 DimensionLabel: TypeAlias = Literal["x", "y", "z", "t", "c", "p", "other"]
+# UnitTuple is a tuple of (scale, unit); e.g. (1, "s")
+UnitTuple: TypeAlias = tuple[float, str]
 
 
 class Dimension(NamedTuple):
     label: DimensionLabel
     size: int
-    unit: tuple[float, str] | None = None
+    unit: UnitTuple | None = None
     # None or 0 indicates no constraint.
     # -1 indicates that the chunk size should equal the full extent of the domain.
     chunk_size: int | None = None
