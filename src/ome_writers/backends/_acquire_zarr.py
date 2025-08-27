@@ -9,7 +9,6 @@ from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import numpy as np
 from typing_extensions import Self
 
 from ome_writers._ngff_metadata import ome_meta_v5
@@ -19,6 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     import acquire_zarr
+    import numpy as np
 
     from ome_writers._dimensions import Dimension
 
@@ -41,12 +41,12 @@ class AcquireZarrStream(MultiPositionOMEStream):
         self._aqz = acquire_zarr
         super().__init__()
         self._stream = None
-        
+
     def create(
         self,
         path: str,
         dtype: np.dtype,
-        dimensions: list[Dimension],
+        dimensions: Sequence[Dimension],
         *,
         overwrite: bool = False,
     ) -> Self:
@@ -63,13 +63,23 @@ class AcquireZarrStream(MultiPositionOMEStream):
                 )
             shutil.rmtree(self._group_path)
 
-        # Dimensions will be the same across all positions, so we can create them onece
+        # Dimensions will be the same across all positions, so we can create them once
         az_dims = [self._dim_toaqz_dim(dim) for dim in non_position_dims]
+        # keep a strong reference (avoid segfaults)
+        self._az_dims_keepalive = az_dims
+
         # Create AcquireZarr array settings for each position
         az_array_settings = [
             self._aqz_pos_array(pos_idx, az_dims, dtype)
             for pos_idx in range(num_positions)
         ]
+
+        for arr in az_array_settings:
+            for d in arr.dimensions:
+                assert d.chunk_size_px > 0, (d.name, d.chunk_size_px)
+                assert d.shard_size_chunks > 0, (d.name, d.shard_size_chunks)
+
+        self._az_arrays_keepalive = az_array_settings
 
         # Create streams for each position
         settings = self._aqz.StreamSettings(
@@ -77,9 +87,8 @@ class AcquireZarrStream(MultiPositionOMEStream):
             store_path=str(self._group_path),
             version=self._aqz.ZarrVersion.V3,
         )
-        self._stream=self._aqz.ZarrStream(
-            settings
-        )
+        self._az_settings_keepalive = settings
+        self._stream = self._aqz.ZarrStream(settings)
 
         self._patch_group_metadata()
         return self
@@ -112,7 +121,8 @@ class AcquireZarrStream(MultiPositionOMEStream):
         self, array_key: str, index: tuple[int, ...], frame: np.ndarray
     ) -> None:
         """AcquireZarr-specific write implementation."""
-        self._stream.append(frame, key=array_key)
+        if self._stream is not None:
+            self._stream.append(frame, key=array_key)
 
     def flush(self) -> None:
         if not self._stream:  # pragma: no cover
@@ -124,7 +134,9 @@ class AcquireZarrStream(MultiPositionOMEStream):
         self._patch_group_metadata()
 
     def is_active(self) -> bool:
-        return bool(self._stream) and self._stream.is_active()
+        if self._stream is None:
+            return False
+        return self._stream.is_active()
 
     def _dim_toaqz_dim(
         self,
@@ -146,9 +158,10 @@ class AcquireZarrStream(MultiPositionOMEStream):
         dtype: np.dtype,
     ) -> acquire_zarr.ArraySettings:
         """Create an AcquireZarr ArraySettings for a position."""
-
         return self._aqz.ArraySettings(
-            output_key=str(position_index), # this matches the position index key from the base class
+            output_key=str(
+                position_index
+            ),  # this matches the position index key from the base class
             dimensions=dimensions,
-            data_type=dtype
+            data_type=dtype,
         )
