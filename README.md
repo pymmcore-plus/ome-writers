@@ -1,11 +1,11 @@
 # ome-writers
 
-[![License](https://img.shields.io/pypi/l/ome-writers.svg?color=green)](https://github.com/tlambert03/ome-writers/raw/main/LICENSE)
+[![License](https://img.shields.io/pypi/l/ome-writers.svg?color=green)](https://github.com/pymmcore-plus/ome-writers/raw/main/LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/ome-writers.svg?color=green)](https://pypi.org/project/ome-writers)
 [![Python
 Version](https://img.shields.io/pypi/pyversions/ome-writers.svg?color=green)](https://python.org)
-[![CI](https://github.com/tlambert03/ome-writers/actions/workflows/ci.yml/badge.svg)](https://github.com/tlambert03/ome-writers/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/tlambert03/ome-writers/branch/main/graph/badge.svg)](https://codecov.io/gh/tlambert03/ome-writers)
+[![CI](https://github.com/pymmcore-plus/ome-writers/actions/workflows/ci.yml/badge.svg)](https://github.com/pymmcore-plus/ome-writers/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/pymmcore-plus/ome-writers/branch/main/graph/badge.svg)](https://codecov.io/gh/pymmcore-plus/ome-writers)
 
 OME-TIFF and OME-ZARR writer APIs designed for microscopy acquisition
 
@@ -15,7 +15,7 @@ from github for now, including all extra dependencies (e.g. tifffile,
 acquire-zarr, tensorstore, etc.):
 
 ```bash
-pip install "ome-writers[all] @ git+https://github.com/tlambert03/ome-writers"
+pip install "ome-writers[all] @ git+https://github.com/pymmcore-plus/ome-writers"
 ```
 
 ## Basic Usage

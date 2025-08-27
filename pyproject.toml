@@ -61,8 +61,8 @@ dev = [
 ]
 
 [project.urls]
-homepage = "https://github.com/tlambert03/ome-writers"
-repository = "https://github.com/tlambert03/ome-writers"
+homepage = "https://github.com/pymmcore-plus/ome-writers"
+repository = "https://github.com/pymmcore-plus/ome-writers"
 
 # https://docs.astral.sh/ruff
 [tool.ruff]
