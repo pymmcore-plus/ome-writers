@@ -11,12 +11,19 @@ from ome_writers import Dimension, DimensionLabel
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
+    import useq
+
+    from ome_writers import UnitTuple
+
+
 VALID_LABELS = get_args(DimensionLabel)
-UNITS: dict[DimensionLabel, tuple[float, str]] = {
+DEFAULT_UNITS: Mapping[DimensionLabel, UnitTuple | None] = {
     "t": (1.0, "s"),
     "z": (1.0, "um"),
     "y": (1.0, "um"),
     "x": (1.0, "um"),
+    "c": None,
+    "p": None,
 }
 
 
@@ -61,7 +68,7 @@ def fake_data_for_sizes(
         Dimension(
             label=lbl,
             size=sizes[lbl],
-            unit=UNITS.get(lbl, None),
+            unit=DEFAULT_UNITS.get(lbl, None),
             chunk_size=_chunk_sizes.get(lbl, 1),
         )
         for lbl in cast("list[DimensionLabel]", ordered_labels)
@@ -87,3 +94,76 @@ def fake_data_for_sizes(
                 i += 1
 
     return _build_plane_generator(), dims, dtype
+
+
+def dims_from_useq(
+    seq: useq.MDASequence,
+    image_width: int,
+    image_height: int,
+    units: Mapping[str, UnitTuple | None] | None = None,
+) -> list[Dimension]:
+    """Convert a useq.MDASequence to a list of Dimensions for ome-writers.
+
+    Parameters
+    ----------
+    seq : useq.MDASequence
+        The `useq.MDASequence` to convert.
+    image_width : int
+        The expected width of the images in the stream.
+    image_height : int
+        The expected height of the images in the stream.
+    units : Mapping[str, UnitTuple | None] | None, optional
+        An optional mapping of dimension labels to their units. If `None`, defaults to
+        - "t" -> (1.0, "s")
+        - "z" -> (1.0, "um")
+        - "y" -> (1.0, "um")
+        - "x" -> (1.0, "um")
+
+    Examples
+    --------
+    A typical usage of ome-writers with useq-schema might look like this:
+
+    ```python
+    from ome_writers import create_stream, dims_from_useq
+
+    width, height = however_you_get_expected_image_dimensions()
+    dims = dims_from_useq(seq, image_width=width, image_height=height)
+
+    with create_stream(
+        path=...,
+        dimensions=dims,
+        dtype=np.uint16,
+        backend=...,
+    ) as stream:
+        for frame in whatever_generates_your_data():
+            stream.append(frame)
+    ```
+    """
+    try:
+        from useq import MDASequence
+    except ImportError:
+        # if we can't import MDASequence, then seq must not be a MDASequence
+        raise ValueError("seq must be a useq.MDASequence") from None
+    else:
+        if not isinstance(seq, MDASequence):
+            raise ValueError("seq must be a useq.MDASequence")
+
+    _units: Mapping[str, UnitTuple | None] = {
+        **DEFAULT_UNITS,  # type: ignore[dict-item]
+        **(units or {}),
+    }
+
+    dims: list[Dimension] = []
+    for ax, size in seq.sizes.items():
+        if size:
+            # all of the useq axes are the same as the ones used here.
+            dim_label = cast("DimensionLabel", str(ax))
+            if dim_label not in _units:
+                raise ValueError(f"Unsupported axis for OME: {ax}")
+            dims.append(Dimension(label=dim_label, size=size, unit=_units[dim_label]))
+
+    return [
+        *dims,
+        Dimension(label="y", size=image_height, unit=_units["y"]),
+        Dimension(label="x", size=image_width, unit=_units["x"]),
+    ]
