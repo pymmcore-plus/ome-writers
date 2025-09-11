@@ -8,7 +8,6 @@ from pathlib import Path
 from queue import Queue
 from typing import TYPE_CHECKING
 
-import tifffile
 from typing_extensions import Self
 
 from ome_writers._dimensions import dims_to_ome
@@ -46,6 +45,12 @@ class TifffileStream(MultiPositionOMEStream):
 
     def __init__(self) -> None:
         super().__init__()
+        try:
+            import tifffile  # noqa: F401
+        except ImportError as e:
+            msg = "TifffileStream requires tifffile: `pip install tifffile`."
+            raise ImportError(msg) from e
+
         # Using dictionaries to handle multi-position ('p') acquisitions
         self._threads: dict[int, WriterThread] = {}
         self._queues: dict[int, Queue[np.ndarray | None]] = {}
@@ -165,6 +170,7 @@ class WriterThread(threading.Thread):
     def run(self) -> None:
         # would be nice if we could just use `iter(queue, None)`...
         # but that doesn't work with numpy arrays which don't support __eq__
+        import tifffile
 
         def _queue_iterator() -> Iterator[np.ndarray]:
             """Generator to yield frames from the queue."""
