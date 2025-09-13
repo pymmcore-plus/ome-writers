@@ -14,6 +14,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  UV_PRERELEASE: ${{ github.event_name == 'schedule' && 'allow' || 'if-necessary-or-explicit' }}
+  UV_NO_SYNC: "1"
+  UV_NO_DEV: "1"
+
 jobs:
   check-manifest:
     runs-on: ubuntu-latest
@@ -24,18 +29,16 @@ jobs:
   test:
     name: ${{ matrix.platform }} (${{ matrix.python-version }})
     runs-on: ${{ matrix.platform }}
-    env:
-      UV_PRERELEASE: ${{ github.event_name == 'schedule' && 'allow' || 'if-necessary-or-explicit' }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         platform: [ubuntu-latest, macos-latest, windows-latest]
+        resolution: [highest, lowest-direct]
+        backend: [tifffile, tensorstore, acquire-zarr]
 
     steps:
       - uses: actions/checkout@v5
-      - uses: pymmcore-plus/setup-mm-test-adapters@main
-
       - name: 🐍 Set up Python ${{ matrix.python-version }}
         uses: astral-sh/setup-uv@v6
         with:
@@ -43,10 +46,12 @@ jobs:
           enable-cache: true
 
       - name: Install Dependencies
-        run: uv sync --no-dev --group test
+        run: uv sync --group test --group ${{ matrix.backend }}
+        env:
+          UV_RESOLUTION: ${{ matrix.resolution }}
 
       - name: 🧪 Run Tests
-        run: uv run --no-sync coverage run -p -m pytest -v
+        run: uv run coverage run -p -m pytest -v
 
       # If something goes wrong with --pre tests, we can open an issue in the repo
       - name: 📝 Report --pre Failures
@@ -65,13 +70,42 @@ jobs:
       - name: Upload coverage
         uses: actions/upload-artifact@v4
         with:
-          name: covreport-${{ matrix.platform }}-py${{ matrix.python-version }}
+          name: covreport-${{ matrix.platform }}-py${{ matrix.python-version }}-${{ matrix.backend }}-${{ matrix.resolution }}
+          path: ./.coverage*
+          include-hidden-files: true
+
+  test-pymmcore-plus:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12", "3.14"]
+        backend: [tifffile, tensorstore, acquire-zarr]
+
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+
+      - uses: pymmcore-plus/setup-mm-test-adapters@main
+      - name: Install Dependencies
+        run: uv sync --group test --group pymmcore
+
+      - name: 🧪 Run Tests
+        run: uv run coverage run -p -m pytest -v
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: covreport-ubuntu-pymmcore-plus-py${{ matrix.python-version }}-${{ matrix.backend }}
           path: ./.coverage*
           include-hidden-files: true
 
   upload_coverage:
     if: always()
-    needs: [test]
+    needs: [test, test-pymmcore-plus]
     uses: pyapp-kit/workflows/.github/workflows/upload-coverage.yml@v2
     secrets:
       codecov_token: ${{ secrets.CODECOV_TOKEN }}

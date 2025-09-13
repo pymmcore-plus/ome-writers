@@ -2,19 +2,14 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
-from typing import TYPE_CHECKING, Callable, NamedTuple, cast
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 import pytest
 
-# import tensorstore as ts
-from ome_writers import (
-    AcquireZarrStream,
-    OMEStream,
-    TensorStoreZarrStream,
-    TifffileStream,
-)
+import ome_writers as omew
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     import numpy as np
@@ -24,7 +19,7 @@ if TYPE_CHECKING:
 
 class AvailableBackend(NamedTuple):
     name: BackendName
-    cls: type[OMEStream]
+    cls: type[omew.OMEStream]
     file_ext: str
     read_data: Callable[[Path], np.ndarray]
 
@@ -62,14 +57,20 @@ def _read_tiff(output_path: Path) -> np.ndarray:
 BACKENDS: list[AvailableBackend] = []
 if importlib.util.find_spec("tensorstore") is not None:
     BACKENDS.append(
-        AvailableBackend("tensorstore", TensorStoreZarrStream, ".ome.zarr", _read_zarr)
+        AvailableBackend(
+            "tensorstore", omew.TensorStoreZarrStream, ".ome.zarr", _read_zarr
+        )
     )
 if importlib.util.find_spec("acquire_zarr") is not None:
     BACKENDS.append(
-        AvailableBackend("acquire-zarr", AcquireZarrStream, ".ome.zarr", _read_zarr)
+        AvailableBackend(
+            "acquire-zarr", omew.AcquireZarrStream, ".ome.zarr", _read_zarr
+        )
     )
 if importlib.util.find_spec("tifffile") is not None:
-    BACKENDS.append(AvailableBackend("tiff", TifffileStream, ".ome.tiff", _read_tiff))
+    BACKENDS.append(
+        AvailableBackend("tiff", omew.TifffileStream, ".ome.tiff", _read_tiff)
+    )
 
 
 @pytest.fixture(params=BACKENDS, ids=lambda b: b.name)

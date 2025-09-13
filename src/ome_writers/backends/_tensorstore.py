@@ -76,7 +76,7 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
     def _create_spec(
         self, dtype: np.dtype, dimensions: Sequence[Dimension], array_key: str
     ) -> dict:
-        labels, shape, units, chunk_shape = zip(*dimensions)
+        labels, shape, units, chunk_shape = zip(*dimensions, strict=False)
         labels = tuple(str(x) for x in labels)
         return {
             "driver": "zarr3",
