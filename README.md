@@ -68,20 +68,5 @@ stream.flush()
 
 ## Contributing
 
-This is a work in progress; we absolutely welcome and appreciate contributions!
-If you have suggestions, improvements, or bug fixes, please open an issue or
-submit a pull request.
-
-```sh
-git clone https://github.com/pymmcore-plus/ome-writers.git
-cd ome-writers
-
-# setup env
-uv sync
-
-# test
-uv run pytest
-
-# lint
-uv run pre-commit run -a
-```
+We welcome contributions to `ome-writers`!  See our [contributing
+guid](CONTRIBUTING.md) for details.
