@@ -34,7 +34,6 @@ but not limited to:
 - Extended support for functionality provided by one or more backend
 - Extended support for metadata, e.g. OME-XML, NGFF metadata
 
-> [!INFO]
 > In any API abstraction, the question arises of "how much to abstract",
 > and whether we aim to cover the union or the intersection of functionality
 > provided by the backends.  We don't have a strict policy on this, but we *do*
