@@ -96,7 +96,7 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
     ) -> None:
         """TensorStore-specific write implementation."""
         store = self._stores[array_key]
-        future = store[index].write(frame)  # pyright: ignore[reportIndexIssue]
+        future = store[index].write(frame)  # type: ignore[index]
         self._futures.append(future)
 
     def flush(self) -> None:

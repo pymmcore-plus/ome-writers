@@ -40,7 +40,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
             raise ImportError(msg) from e
         self._aqz = acquire_zarr
         super().__init__()
-        self._stream = None
+        self._stream: acquire_zarr.ZarrStream | None = None
 
     def create(
         self,
