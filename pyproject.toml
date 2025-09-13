@@ -65,6 +65,9 @@ dev = [
 homepage = "https://github.com/pymmcore-plus/ome-writers"
 repository = "https://github.com/pymmcore-plus/ome-writers"
 
+[tool.uv.sources]
+ndv = { workspace = true }
+
 # https://docs.astral.sh/ruff
 [tool.ruff]
 line-length = 88
