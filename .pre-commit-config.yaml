@@ -9,6 +9,11 @@ repos:
     hooks:
       - id: validate-pyproject
 
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.7
+    hooks:
+      - id: actionlint
+
   - repo: https://github.com/adhtruong/mirrors-typos
     rev: v1.36.2
     hooks:
@@ -29,3 +34,4 @@ repos:
         # # you have to add the things you want to type check against here
         # additional_dependencies:
         #   - numpy
+

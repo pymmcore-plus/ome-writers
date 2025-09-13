@@ -78,7 +78,7 @@ jobs:
 
   upload_coverage:
     if: always()
-    needs: [test, test-pymmcore-plus]
+    needs: [test]
     uses: pyapp-kit/workflows/.github/workflows/upload-coverage.yml@v2
     secrets:
       codecov_token: ${{ secrets.CODECOV_TOKEN }}
