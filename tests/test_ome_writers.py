@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from ome_writers import Dimension, OMEStream, create_stream, fake_data_for_sizes
+import ome_writers as omew
 
 if TYPE_CHECKING:
     from .conftest import AvailableBackend
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 def test_minimal_2d_dimensions(backend: AvailableBackend, tmp_path: Path) -> None:
     """Test with minimal 2D dimensions (just x and y)."""
-    data_gen, dimensions, dtype = fake_data_for_sizes(
+    data_gen, dimensions, dtype = omew.fake_data_for_sizes(
         sizes={"t": 1, "y": 32, "x": 32},
         chunk_sizes={"t": 1, "y": 16, "x": 16},
         dtype=np.uint8,
@@ -54,25 +54,25 @@ def test_stream_error_handling(backend: AvailableBackend) -> None:
 def test_dimension_info_properties() -> None:
     """Test DimensionInfo properties."""
     # Test spatial dimension
-    x_dim = Dimension(label="x", size=100, unit=(0.5, "um"), chunk_size=50)
+    x_dim = omew.Dimension(label="x", size=100, unit=(0.5, "um"), chunk_size=50)
     assert x_dim.ome_dim_type == "space"
     assert x_dim.ome_unit == "micrometer"
     assert x_dim.ome_scale == 0.5
 
     # Test time dimension
-    t_dim = Dimension(label="t", size=10, unit=(2.0, "s"), chunk_size=1)
+    t_dim = omew.Dimension(label="t", size=10, unit=(2.0, "s"), chunk_size=1)
     assert t_dim.ome_dim_type == "time"
     assert t_dim.ome_unit == "second"
     assert t_dim.ome_scale == 2.0
 
     # Test channel dimension
-    c_dim = Dimension(label="c", size=3, chunk_size=1)
+    c_dim = omew.Dimension(label="c", size=3, chunk_size=1)
     assert c_dim.ome_dim_type == "channel"
     assert c_dim.ome_unit == "unknown"
     assert c_dim.ome_scale == 1.0
 
     # Test custom dimension
-    p_dim = Dimension(label="p", size=5, chunk_size=1)
+    p_dim = omew.Dimension(label="p", size=5, chunk_size=1)
     assert p_dim.ome_dim_type == "other"
 
 
@@ -80,14 +80,16 @@ def test_create_stream_factory_function(
     backend: AvailableBackend, tmp_path: Path
 ) -> None:
     """Test the create_stream factory function."""
-    data_gen, dimensions, dtype = fake_data_for_sizes(
+    data_gen, dimensions, dtype = omew.fake_data_for_sizes(
         sizes={"t": 3, "z": 2, "c": 2, "y": 64, "x": 64},
         chunk_sizes={"y": 32, "x": 32},
     )
 
     output_path = tmp_path / f"factory_test.{backend.file_ext}"
-    stream = create_stream(str(output_path), dtype, dimensions, backend=backend.name)
-    assert isinstance(stream, OMEStream)
+    stream = omew.create_stream(
+        str(output_path), dtype, dimensions, backend=backend.name
+    )
+    assert isinstance(stream, omew.OMEStream)
     assert stream.is_active()
 
     # Write a test frame
@@ -109,14 +111,14 @@ def test_data_integrity_roundtrip(
     dtype: np.dtype,
 ) -> None:
     """Test data integrity roundtrip with different data types."""
-    data_gen, dimensions, dtype = fake_data_for_sizes(
+    data_gen, dimensions, dtype = omew.fake_data_for_sizes(
         sizes={"t": 3, "z": 2, "c": 2, "y": 64, "x": 64},
         chunk_sizes={"y": 32, "x": 32},
     )
 
     # Convert generator to list to use data multiple times
     original_frames = list(data_gen)
-    output_path = tmp_path / f"{backend.name.lower()}_{dtype.name}.{backend.file_ext}"
+    output_path = tmp_path / f"{backend.name.lower()}_{dtype.name}{backend.file_ext}"
 
     # Write data using our stream
     stream = backend.cls()
@@ -151,7 +153,7 @@ def test_data_integrity_roundtrip(
     # Test 3: Create again with overwrite=True (should succeed)
     stream = backend.cls()
     stream = stream.create(str(output_path), dtype, dimensions, overwrite=True)
-    assert isinstance(stream, OMEStream)
+    assert isinstance(stream, omew.OMEStream)
     assert stream.is_active()
 
     for frame in original_frames:
@@ -164,7 +166,7 @@ def test_data_integrity_roundtrip(
 def test_multiposition_acquisition(backend: AvailableBackend, tmp_path: Path) -> None:
     """Test multi-position acquisition support with position dimension."""
     stream_cls = backend.cls
-    data_gen, dimensions, dtype = fake_data_for_sizes(
+    data_gen, dimensions, dtype = omew.fake_data_for_sizes(
         sizes={"t": 3, "z": 2, "c": 2, "y": 32, "x": 32, "p": 3},
         chunk_sizes={"y": 16, "x": 16},
     )

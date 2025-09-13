@@ -7,50 +7,58 @@ build-backend = "hatchling.build"
 [tool.hatch.version]
 source = "vcs"
 
-# read more about configuring hatch at:
-# https://hatch.pypa.io/latest/config/build/
-[tool.hatch.build.targets.wheel]
-only-include = ["src"]
-sources = ["src"]
-
 # https://peps.python.org/pep-0621/
 [project]
 name = "ome-writers"
 dynamic = ["version"]
 description = "OME-TIFF and OME-ZARR writer APIs designed for microscopy acquisition"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { text = "BSD-3-Clause" }
 authors = [{ name = "Talley Lambert", email = "talley.lambert@gmail.com" }]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "License :: OSI Approved :: BSD License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Typing :: Typed",
 ]
-dependencies = ["numpy>=2", "ome-types>=0.6.1", "typing-extensions>=4.10.0"]
+dependencies = ["numpy>=2", "typing-extensions>=4.10.0"]
 
 [project.optional-dependencies]
 tensorstore = ["tensorstore>=0.1.69,!=0.1.72"]
-acquire-zarr = ["acquire-zarr>=0.5.1"]
-tiff = ["tifffile>=2024.8.30"]
-all = ["ome-writers[tensorstore,acquire-zarr,tiff]"]
+acquire-zarr = ["acquire-zarr>=0.5.2"]
+tifffile = ["tifffile>=2024.8.30", "ome-types>=0.6.1", "pydantic>=2.8"]
 
 [dependency-groups]
-test = ["ome-writers[all]", "pymmcore-plus>=0.15.0", "pytest", "pytest-cov"]
+# used for all tests
+test = ["pytest>=8.4.2", "pytest-cov>=7.0.0"]
+# these mirror the extras above
+# but with additional dependencies for testing
+# these are the groups used on CI
+tensorstore = [{ include-group = 'test' }, "ome-writers[tensorstore]"]
+acquire-zarr = [
+    { include-group = 'test' },
+    "ome-writers[acquire-zarr]",
+    "zarr>=3; python_version >= '3.11'",
+]
+tifffile = [{ include-group = 'test' }, "ome-writers[tifffile]"]
+pymmcore = [
+    { include-group = 'test' },
+    "pymmcore-plus>=0.15.0",
+    "ome-writers[tensorstore,acquire-zarr,tifffile]",
+]
 dev = [
-    { include-group = "test" },
-    "ipython",
-    "mypy",
-    "pdbpp",                    # https://github.com/pdbpp/pdbpp
-    "pre-commit-uv",
-    "rich",                     # https://github.com/Textualize/rich
-    "ruff",
+    { include-group = "pymmcore" },
+    "ipython>=8.37.0",
+    "mypy>=1.18.1",
+    "pdbpp>=0.11.7 ; sys_platform != 'win32'",
+    "pyright>=1.1.405",
+    "rich>=14.1.0",
+    "ruff>=0.13.0",
     "tensorstore-stubs>=0.1.2",
 ]
 
@@ -58,10 +66,13 @@ dev = [
 homepage = "https://github.com/pymmcore-plus/ome-writers"
 repository = "https://github.com/pymmcore-plus/ome-writers"
 
+[tool.uv.sources]
+ome-writers = { workspace = true }
+
 # https://docs.astral.sh/ruff
 [tool.ruff]
 line-length = 88
-target-version = "py39"
+target-version = "py310"
 src = ["src"]
 fix = true
 unsafe-fixes = true
@@ -106,6 +117,11 @@ disallow_subclassing_any = false
 show_error_codes = true
 pretty = true
 
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.10"
+enableExperimentalFeatures = true
+
 # https://docs.pytest.org/
 [tool.pytest.ini_options]
 minversion = "7.0"
@@ -130,7 +146,6 @@ source = ["ome_writers"]
 
 [tool.check-manifest]
 ignore = [".pre-commit-config.yaml", ".ruff_cache/**/*", "tests/**/*"]
-
 
 [tool.typos.default]
 extend-ignore-identifiers-re = ["(?i)nd2?.*", "(?i)ome"]

@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, TypeAlias
 
 import numpy as np
-from typing_extensions import TypeAlias
 
 from .backends._acquire_zarr import AcquireZarrStream
 from .backends._tensorstore import TensorStoreZarrStream

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from ome_writers import create_stream, dims_from_useq
+import ome_writers as omew
 
 try:
     import useq
@@ -35,9 +35,11 @@ def test_pymmcore_plus_mda(tmp_path: Path, backend: AvailableBackend) -> None:
     core.loadSystemConfiguration()
 
     dest = tmp_path / f"test_pymmcore_plus_mda{backend.file_ext}"
-    stream = create_stream(
+    stream = omew.create_stream(
         dest,
-        dimensions=dims_from_useq(seq, core.getImageWidth(), core.getImageHeight()),
+        dimensions=omew.dims_from_useq(
+            seq, core.getImageWidth(), core.getImageHeight()
+        ),
         dtype=np.uint16,
         overwrite=True,
         backend=backend.name,

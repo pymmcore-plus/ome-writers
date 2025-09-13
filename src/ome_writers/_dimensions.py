@@ -2,16 +2,16 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, NamedTuple
+from typing import TYPE_CHECKING, Literal, NamedTuple, TypeAlias
 
 import numpy as np
-from ome_types import model as m
-from typing_extensions import TypeAlias
 
 from ome_writers import __version__
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    import ome_types
 
 OME_DIM_TYPE = {"y": "space", "x": "space", "z": "space", "t": "time", "c": "channel"}
 OME_UNIT = {"um": "micrometer", "ml": "milliliter", "s": "second", None: "unknown"}
@@ -52,11 +52,19 @@ def dims_to_ome(
     dims: Sequence[Dimension],
     dtype: np.typing.DTypeLike,
     tiff_file_name: str | None = None,
-) -> m.OME:
+) -> ome_types.OME:
     """Convert a sequence of Dimension objects to an OME object.
 
     This creates an OME representing a 5D image with the specified dimensions.
     """
+    try:
+        from ome_types import model as m
+    except ImportError as e:
+        raise ImportError(
+            "The `ome-types` package is required to use this function. "
+            "Please install it via `pip install ome-types` or use the `tiff` extra."
+        ) from e
+
     # Find the position dimension, if any
     if any(dim.label not in "tczyxp" for dim in dims):
         raise NotImplementedError("Only dimensions t, c, z, y, x, and p are supported.")
@@ -88,7 +96,9 @@ def dims_to_ome(
         ifd = 0
 
         # iterate over ordered cartesian product of tcz sizes
-        labels, sizes = zip(*[(d.label, d.size) for d in dims if d.label in "tcz"])
+        labels, sizes = zip(
+            *[(d.label, d.size) for d in dims if d.label in "tcz"], strict=False
+        )
         has_z, has_t, has_c = "z" in labels, "t" in labels, "c" in labels
         for index in np.ndindex(*sizes):
             plane = m.Plane(
