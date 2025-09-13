@@ -118,7 +118,7 @@ def test_data_integrity_roundtrip(
 
     # Convert generator to list to use data multiple times
     original_frames = list(data_gen)
-    output_path = tmp_path / f"{backend.name.lower()}_{dtype.name}.{backend.file_ext}"
+    output_path = tmp_path / f"{backend.name.lower()}_{dtype.name}{backend.file_ext}"
 
     # Write data using our stream
     stream = backend.cls()

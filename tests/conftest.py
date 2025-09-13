@@ -24,22 +24,30 @@ class AvailableBackend(NamedTuple):
     read_data: Callable[[Path], np.ndarray]
 
 
+def _read_tstore(output_path: Path) -> np.ndarray:
+    import tensorstore as ts
+
+    spec = {
+        "driver": "zarr3",
+        "kvstore": {"driver": "file", "path": str(output_path / "0")},
+    }
+    store = ts.open(spec).result()
+    return store.read().result()  # type: ignore
+
+
+def _read_zarr_python(output_path: Path) -> np.ndarray:
+    import zarr  # type: ignore
+
+    z = zarr.open_array(output_path, mode="r", path="0")
+    return z[:]
+
+
 def _read_zarr(output_path: Path) -> np.ndarray:
     try:
-        import tensorstore as ts
-
-        spec = {
-            "driver": "zarr3",
-            "kvstore": {"driver": "file", "path": str(output_path / "0")},
-        }
-        store = ts.open(spec).result()
-        return store.read().result()  # type: ignore
+        return _read_tstore(output_path)
     except ImportError:
         try:
-            import zarr  # type: ignore
-
-            z = zarr.open(str(output_path / "0"), mode="r")
-            return z[:]
+            return _read_zarr_python(output_path)
         except ImportError as e:
             raise pytest.skip("zarr or tensorstore is not installed") from e
 

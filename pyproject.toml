@@ -43,7 +43,7 @@ tensorstore = [{ include-group = 'test' }, "ome-writers[tensorstore]"]
 acquire-zarr = [
     { include-group = 'test' },
     "ome-writers[acquire-zarr]",
-    "zarr>=2.18",
+    "zarr>=3; python_version >= '3.11'",
 ]
 tifffile = [{ include-group = 'test' }, "ome-writers[tifffile]"]
 pymmcore = [
@@ -56,6 +56,7 @@ dev = [
     "ipython>=8.37.0",
     "mypy>=1.18.1",
     "pdbpp>=0.11.7 ; sys_platform != 'win32'",
+    "pyright>=1.1.405",
     "rich>=14.1.0",
     "ruff>=0.13.0",
     "tensorstore-stubs>=0.1.2",
@@ -66,7 +67,7 @@ homepage = "https://github.com/pymmcore-plus/ome-writers"
 repository = "https://github.com/pymmcore-plus/ome-writers"
 
 [tool.uv.sources]
-ndv = { workspace = true }
+ome-writers = { workspace = true }
 
 # https://docs.astral.sh/ruff
 [tool.ruff]
@@ -115,6 +116,11 @@ disallow_any_generics = false
 disallow_subclassing_any = false
 show_error_codes = true
 pretty = true
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.10"
+enableExperimentalFeatures = true
 
 # https://docs.pytest.org/
 [tool.pytest.ini_options]
