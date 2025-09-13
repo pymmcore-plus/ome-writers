@@ -40,6 +40,9 @@ jobs:
         platform: [ubuntu-latest, macos-latest, windows-latest]
         resolution: [highest, lowest-direct]
         group: [tifffile, tensorstore, acquire-zarr, pymmcore]
+        exclude:
+          - group: pymmcore
+            resolution: lowest-direct
 
     steps:
       - uses: actions/checkout@v5
