@@ -69,6 +69,10 @@ class OMEStream(abc.ABC):
     def flush(self) -> None:
         """Flush to disk."""
 
+    @abstractmethod
+    def update_metadata(self, metadata: dict) -> None:
+        """Update the metadata in the output file(s)."""
+
     def _normalize_path(self, path: str) -> str:
         return str(Path(path).expanduser().resolve())
 

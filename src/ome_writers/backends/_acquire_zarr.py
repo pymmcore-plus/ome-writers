@@ -165,3 +165,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
             dimensions=dimensions,
             data_type=dtype,
         )
+
+    def update_metadata(self, metadata: dict) -> None:
+        """Update the metadata in the output file(s)."""
+        # TODO: to be implemented
