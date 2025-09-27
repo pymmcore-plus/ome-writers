@@ -8,8 +8,6 @@ from pathlib import Path
 from queue import Queue
 from typing import TYPE_CHECKING
 
-from ome_types import OME
-from ome_types.model import Image, Plate, Well
 from typing_extensions import Self
 
 from ome_writers._dimensions import dims_to_ome
@@ -19,6 +17,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
     import numpy as np
+    from ome_types import OME
+    from ome_types.model import Image, Plate, Well
 
     from ome_writers._dimensions import Dimension
 
@@ -51,6 +51,12 @@ class TifffileStream(MultiPositionOMEStream):
             import tifffile  # noqa: F401
         except ImportError as e:
             msg = "TifffileStream requires tifffile: `pip install tifffile`."
+            raise ImportError(msg) from e
+
+        try:
+            import ome_types  # noqa: F401
+        except ImportError as e:
+            msg = "TifffileStream requires ome-types: `pip install ome-types`."
             raise ImportError(msg) from e
 
         # Using dictionaries to handle multi-position ('p') acquisitions
@@ -115,6 +121,8 @@ class TifffileStream(MultiPositionOMEStream):
         This method should be called after flush() to update the OME-XML
         description in the already-written TIFF files with complete metadata.
         """
+        from ome_types import OME
+
         ome_metadata = OME.model_validate(metadata)
 
         if len(self._threads) == 1:
@@ -197,6 +205,8 @@ class TifffileStream(MultiPositionOMEStream):
         Extracts only the Image and related metadata for the given position index.
         Assumes Image IDs follow the pattern "Image:{position_idx}".
         """
+        from ome_types import OME
+
         target_image_id = f"Image:{position_idx}"
         position_image = self._find_image_by_id(ome.images, target_image_id)
 
@@ -257,6 +267,8 @@ class TifffileStream(MultiPositionOMEStream):
         self, original_plate: Plate, well: Well, target_image_id: str
     ) -> Plate:
         """Create a new plate containing only the relevant well and sample."""
+        from ome_types.model import Plate
+
         # Find the specific well sample for this image
         target_sample = next(
             sample
