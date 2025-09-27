@@ -8,7 +8,6 @@ from pathlib import Path
 from queue import Queue
 from typing import TYPE_CHECKING
 
-import tifffile
 from ome_types import OME
 from ome_types.model import Image, Plate, Well
 from typing_extensions import Self
@@ -168,6 +167,8 @@ class TifffileStream(MultiPositionOMEStream):
 
     def _update_single_file_metadata(self, position_idx: int, ome_xml: str) -> None:
         """Add OME metadata to TIFF file efficiently without rewriting image data."""
+        import tifffile
+
         thread = self._threads[position_idx]
         try:
             tifffile.tiffcomment(thread._path, comment=ome_xml)
@@ -295,6 +296,7 @@ class WriterThread(threading.Thread):
     def run(self) -> None:
         # would be nice if we could just use `iter(queue, None)`...
         # but that doesn't work with numpy arrays which don't support __eq__
+        import tifffile
 
         def _queue_iterator() -> Iterator[np.ndarray]:
             """Generator to yield frames from the queue."""
