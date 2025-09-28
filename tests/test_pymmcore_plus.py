@@ -5,8 +5,6 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
-import tifffile
-from ome_types import from_xml
 
 import ome_writers as omew
 
@@ -110,6 +108,13 @@ class PYMMCP:
 
 def test_pymmcore_plus_mda_tiff_metadata_update(tmp_path: Path) -> None:
     """Test pymmcore_plus MDA with metadata update after acquisition."""
+
+    # skip if tifffile or ome-types is not installed
+    try:
+        import tifffile
+        from ome_types import from_xml
+    except ImportError:
+        pytest.skip("tifffile or ome-types is not installed")
 
     seq = useq.MDASequence(
         time_plan=useq.TIntervalLoops(interval=0.001, loops=2),  # type: ignore
