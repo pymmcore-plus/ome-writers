@@ -118,12 +118,17 @@ class TifffileStream(MultiPositionOMEStream):
     def update_metadata(self, metadata: dict) -> None:
         """Update the OME metadata in the TIFF files.
 
+        The dict passed in should be a valid OME structure as a dictionary.
+
         This method should be called after flush() to update the OME-XML
         description in the already-written TIFF files with complete metadata.
         """
         from ome_types import OME
 
-        ome_metadata = OME.model_validate(metadata)
+        try:
+            ome_metadata = OME.model_validate(metadata)
+        except Exception as e:
+            raise UserWarning(f"Failed to validate OME metadata: {e}") from e
 
         if len(self._threads) == 1:
             self._update_single_file_metadata(0, ome_metadata)
