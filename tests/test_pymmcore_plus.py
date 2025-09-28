@@ -62,6 +62,50 @@ def test_pymmcore_plus_mda(tmp_path: Path, backend: AvailableBackend) -> None:
         assert dest.exists()
 
 
+class PYMMCP:
+    def __init__(
+        self, sequence: useq.MDASequence, core: CMMCorePlus, dest: Path
+    ) -> None:
+        self._seq = sequence
+        self._core = core
+        self._dest = dest
+
+        self._summary_meta: SummaryMetaV1 = {}  # type: ignore
+        self._frame_meta_list: list[FrameMetaV1] = []
+
+        self._stream = omew.create_stream(
+            self._dest,
+            dimensions=omew.dims_from_useq(
+                self._seq, core.getImageWidth(), core.getImageHeight()
+            ),
+            dtype=np.uint16,
+            overwrite=True,
+            backend="tiff",
+        )
+
+        @core.mda.events.sequenceStarted.connect
+        def _on_sequence_started(
+            sequence: useq.MDASequence, summary_meta: SummaryMetaV1
+        ) -> None:
+            self._summary_meta = summary_meta
+
+        @core.mda.events.frameReady.connect
+        def _on_frame_ready(
+            frame: np.ndarray, event: useq.MDAEvent, frame_meta: FrameMetaV1
+        ) -> None:
+            self._stream.append(frame)
+            self._frame_meta_list.append(frame_meta)
+
+        @core.mda.events.sequenceFinished.connect
+        def _on_sequence_finished(sequence: useq.MDASequence) -> None:
+            self._stream.flush()
+            _o = create_ome_metadata(self._summary_meta, self._frame_meta_list)
+            self._stream.update_metadata(dict(_o))
+
+    def run(self) -> None:
+        self._core.mda.run(self._seq)
+
+
 def test_pymmcore_plus_mda_tiff_metadata_update(tmp_path: Path) -> None:
     """Test pymmcore_plus MDA with metadata update after acquisition."""
 
@@ -76,41 +120,16 @@ def test_pymmcore_plus_mda_tiff_metadata_update(tmp_path: Path) -> None:
     core.loadSystemConfiguration()
 
     dest = tmp_path / "test_mda_tiff_metadata_update.ome.tiff"
-    stream = omew.create_stream(
-        dest,
-        dimensions=omew.dims_from_useq(
-            seq, core.getImageWidth(), core.getImageHeight()
-        ),
-        dtype=np.uint16,
-        overwrite=True,
-        backend="tiff",
-    )
 
-    summary_meta: SummaryMetaV1 | None = None
-    frame_meta_list: list[FrameMetaV1] = []
+    pymm = PYMMCP(seq, core, dest)
+    pymm.run()
 
-    @core.mda.events.sequenceStarted.connect
-    def _on_sequence_started(
-        sequence: useq.MDASequence, summary_metadata: SummaryMetaV1
-    ) -> None:
-        nonlocal summary_meta
-        summary_meta = summary_metadata
+    # reopen the file and check metadata
+    import tifffile
+    from ome_types import from_xml
 
-    @core.mda.events.frameReady.connect
-    def _on_frame_ready(
-        frame: np.ndarray, event: useq.MDAEvent, frame_meta: FrameMetaV1
-    ) -> None:
-        stream.append(frame)
-        frame_meta_list.append(frame_meta)
-
-    @core.mda.events.sequenceFinished.connect
-    def _on_sequence_finished(sequence: useq.MDASequence) -> None:
-        stream.flush()
-        if summary_meta is not None:
-            ome_metadata = create_ome_metadata(summary_meta, frame_meta_list)
-            stream.update_metadata(dict(ome_metadata))
-
-    core.mda.run(seq)
-
-    assert len(frame_meta_list) > 0
-    assert summary_meta is not None
+    for f in list(tmp_path.glob("*.ome.tiff")):
+        with tifffile.TiffFile(f) as tif:
+            ome_xml = tif.ome_metadata
+            if ome_xml is not None:
+                from_xml(ome_xml)

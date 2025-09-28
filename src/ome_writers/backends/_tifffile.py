@@ -178,8 +178,30 @@ class TifffileStream(MultiPositionOMEStream):
         import tifffile
 
         thread = self._threads[position_idx]
+
+        # -------------------------------------------------------------
+        # TODO: this MUST BE FIXED, we should find another way or we won't be able to
+        # validate the metadata correctly with ome-types
+        # see test_pymmcore_plus_mda_tiff_metadata_update
+        # TEMPORARY WORKAROUND:
+        # Create ASCII version for tifffile.tiffcomment
+        # tifffile.tiffcomment requires ASCII strings
+        ascii_xml = ome_xml
         try:
-            tifffile.tiffcomment(thread._path, comment=ome_xml)
+            ascii_xml.encode("ascii")
+        except UnicodeEncodeError:
+            # Replace specific Unicode characters that are common in OME metadata
+            unicode_replacements = {"µm": "um"}
+
+            for unicode_char, ascii_replacement in unicode_replacements.items():
+                ascii_xml = ascii_xml.replace(unicode_char, ascii_replacement)
+
+            # After specific replacements, check if we still have non-ASCII
+            ascii_xml.encode("ascii")
+        # -------------------------------------------------------------
+
+        try:
+            tifffile.tiffcomment(thread._path, comment=ascii_xml)
         except Exception as e:
             raise RuntimeError(
                 f"Failed to update OME metadata in {thread._path}"
