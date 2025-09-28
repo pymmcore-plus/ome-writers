@@ -124,11 +124,16 @@ class TifffileStream(MultiPositionOMEStream):
         description in the already-written TIFF files with complete metadata.
         """
         from ome_types import OME
+        from pydantic import ValidationError
 
         try:
             ome_metadata = OME.model_validate(metadata)
+        except ValidationError:
+            # Re-raise ValidationError as-is for proper error handling
+            raise
         except Exception as e:
-            raise UserWarning(f"Failed to validate OME metadata: {e}") from e
+            # For other exceptions, raise a RuntimeError with context
+            raise RuntimeError(f"Failed to validate OME metadata: {e}") from e
 
         if len(self._threads) == 1:
             self._update_single_file_metadata(0, ome_metadata)
