@@ -126,7 +126,7 @@ class TifffileStream(MultiPositionOMEStream):
         ome_metadata = OME.model_validate(metadata)
 
         if len(self._threads) == 1:
-            self._update_single_file_metadata(0, ome_metadata.to_xml())
+            self._update_single_file_metadata(0, ome_metadata)
         else:
             self._update_multifile_metadata(ome_metadata)
 
@@ -173,32 +173,15 @@ class TifffileStream(MultiPositionOMEStream):
         """TIFF-specific write implementation."""
         self._queues[int(array_key)].put(frame)
 
-    def _update_single_file_metadata(self, position_idx: int, ome_xml: str) -> None:
+    def _update_single_file_metadata(self, position_idx: int, ome: OME) -> None:
         """Add OME metadata to TIFF file efficiently without rewriting image data."""
         import tifffile
 
         thread = self._threads[position_idx]
 
-        # -------------------------------------------------------------
-        # TODO: this MUST BE FIXED, we should find another way or we won't be able to
-        # validate the metadata correctly with ome-types
-        # see test_pymmcore_plus_mda_tiff_metadata_update
-        # TEMPORARY WORKAROUND:
-        # Create ASCII version for tifffile.tiffcomment
-        # tifffile.tiffcomment requires ASCII strings
-        ascii_xml = ome_xml
-        try:
-            ascii_xml.encode("ascii")
-        except UnicodeEncodeError:
-            # Replace specific Unicode characters that are common in OME metadata
-            unicode_replacements = {"µm": "um"}
-
-            for unicode_char, ascii_replacement in unicode_replacements.items():
-                ascii_xml = ascii_xml.replace(unicode_char, ascii_replacement)
-
-            # After specific replacements, check if we still have non-ASCII
-            ascii_xml.encode("ascii")
-        # -------------------------------------------------------------
+        # Create ASCII version for tifffile.tiffcomment since tifffile.tiffcomment
+        # requires ASCII strings
+        ascii_xml = ome.to_xml().replace("µ", "&#x00B5;").encode("ascii")
 
         try:
             tifffile.tiffcomment(thread._path, comment=ascii_xml)
@@ -219,7 +202,7 @@ class TifffileStream(MultiPositionOMEStream):
         for position_idx in self._threads:
             position_ome = self._create_position_specific_ome(ome, position_idx)
             if position_ome is not None:
-                self._update_single_file_metadata(position_idx, position_ome.to_xml())
+                self._update_single_file_metadata(position_idx, position_ome)
 
     def _create_position_specific_ome(self, ome: OME, position_idx: int) -> OME | None:
         """Create OME metadata for a specific position from complete metadata.

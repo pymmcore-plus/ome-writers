@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
+import tifffile
+from ome_types import from_xml
 
 import ome_writers as omew
 
@@ -124,10 +126,7 @@ def test_pymmcore_plus_mda_tiff_metadata_update(tmp_path: Path) -> None:
     pymm = PYMMCP(seq, core, dest)
     pymm.run()
 
-    # reopen the file and check metadata
-    import tifffile
-    from ome_types import from_xml
-
+    # reopen the file and validate ome metadata
     for f in list(tmp_path.glob("*.ome.tiff")):
         with tifffile.TiffFile(f) as tif:
             ome_xml = tif.ome_metadata
