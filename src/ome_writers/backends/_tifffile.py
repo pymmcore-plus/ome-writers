@@ -115,30 +115,28 @@ class TifffileStream(MultiPositionOMEStream):
         # Mark as inactive after flushing - this is consistent with other backends
         self._is_active = False
 
-    def update_metadata(self, metadata: dict) -> None:
+    def update_metadata(self, metadata: object) -> None:
         """Update the OME metadata in the TIFF files.
 
-        The dict passed in should be a valid OME structure as a dictionary.
+        The metadata argument MUST be an instance of ome_types.OME.
 
         This method should be called after flush() to update the OME-XML
         description in the already-written TIFF files with complete metadata.
+
+        Parameters
+        ----------
+        metadata : OME
+            The OME metadata object to write to the TIFF files.
         """
         from ome_types import OME
-        from pydantic import ValidationError
 
-        try:
-            ome_metadata = OME.model_validate(metadata)
-        except ValidationError:
-            # Re-raise ValidationError as-is for proper error handling
-            raise
-        except Exception as e:
-            # For other exceptions, raise a RuntimeError with context
-            raise RuntimeError(f"Failed to validate OME metadata: {e}") from e
+        if not isinstance(metadata, OME):
+            raise TypeError(f"Expected OME metadata, got {type(metadata)}")
 
         if len(self._threads) == 1:
-            self._update_single_file_metadata(0, ome_metadata)
+            self._update_single_file_metadata(0, metadata)
         else:
-            self._update_multifile_metadata(ome_metadata)
+            self._update_multifile_metadata(metadata)
 
     # -----------------------PRIVATE METHODS------------------------ #
 

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
 import pytest
+from ome_types import OME
+from ome_types.model import Channel, Image, ImageRef, Pixels, Plate, Well, WellSample
 
 import ome_writers as omew
 
@@ -22,59 +23,94 @@ def create_metadata(
     size_x: int = 32,
     size_y: int = 32,
     num_images: int = 1,
-    plates: list | None = None,
-) -> dict:
-    """Create metadata dictionary with customizable parameters."""
-    # Base metadata template that can be modified for different test scenarios
-    metadata = {
-        "images": [
-            {
-                "id": "Image:0",
-                "name": f"{image_name}",
-                "pixels": {
-                    "id": "Pixels:0",
-                    "type": dtype,
-                    "size_x": size_x,
-                    "size_y": size_y,
-                    "size_z": size_z,
-                    "size_c": size_c,
-                    "size_t": size_t,
-                    "dimension_order": "XYCZT",
-                    "channels": [
-                        {
-                            "id": "Channel:0",
-                            "name": f"{channel_name}",
-                            "samples_per_pixel": 1,
-                        }
-                    ],
-                },
-            }
-        ],
-        "creator": f"ome_writers v{omew.__version__}",
-    }
+    plates: list[Plate] | None = None,
+) -> OME:
+    """Create OME metadata object with customizable parameters."""
+
+    # Create base image
+    channels = [
+        Channel(
+            id="Channel:0",
+            name=channel_name,
+            samples_per_pixel=1,
+        )
+    ]
+
+    pixels = Pixels(
+        id="Pixels:0",
+        type=dtype,  # type: ignore[arg-type]
+        size_x=size_x,
+        size_y=size_y,
+        size_z=size_z,
+        size_c=size_c,
+        size_t=size_t,
+        dimension_order="XYCZT",  # type: ignore[arg-type]
+        channels=channels,
+    )
+
+    base_image = Image(
+        id="Image:0",
+        name=image_name,
+        pixels=pixels,
+    )
+
+    images = []
 
     # Create additional images if needed
     if num_images > 1:
-        base_image = metadata["images"][0]
-        metadata["images"] = []
         for i in range(num_images):
-            image = deepcopy(base_image)
-            image["id"] = f"Image:{i}"
-            image["pixels"]["id"] = f"Pixels:{i}"
-            image["pixels"]["channels"][0]["id"] = f"Channel:{i}"
+            # Create new channels for this image
+            channel_name_final = (
+                channel_name.replace("P0", f"P{i}")
+                if "P0" in channel_name
+                else channel_name
+            )
+            image_channels = [
+                Channel(
+                    id=f"Channel:{i}",
+                    name=channel_name_final,
+                    samples_per_pixel=1,
+                )
+            ]
+
+            # Create new pixels for this image
+            image_pixels = Pixels(
+                id=f"Pixels:{i}",
+                type=dtype,  # type: ignore[arg-type]
+                size_x=size_x,
+                size_y=size_y,
+                size_z=size_z,
+                size_c=size_c,
+                size_t=size_t,
+                dimension_order="XYCZT",  # type: ignore[arg-type]
+                channels=image_channels,
+            )
+
             # Customize per-position names if they contain position info
+            final_image_name = image_name
             if "Position" in image_name:
-                image["name"] = image_name.replace("0", str(i))
-            if "P0" in channel_name:
-                channel_name_updated = channel_name.replace("P0", f"P{i}")
-                image["pixels"]["channels"][0]["name"] = channel_name_updated
-            metadata["images"].append(image)
+                final_image_name = image_name.replace("0", str(i))
+
+            image = Image(
+                id=f"Image:{i}",
+                name=final_image_name,
+                pixels=image_pixels,
+            )
+            images.append(image)
+    else:
+        images = [base_image]
+
+    # Create OME object
+    ome = OME(
+        images=images,
+        creator=f"ome_writers v{omew.__version__}",
+    )
 
     # Add plates if provided
     if plates is not None:
-        metadata["plates"] = plates
+        ome.plates = plates
 
-    return metadata
+    return ome
 
 
 def test_update_metadata_single_file(tmp_path: Path) -> None:
@@ -116,6 +152,7 @@ def test_update_metadata_single_file(tmp_path: Path) -> None:
 
     with tifffile.TiffFile(str(output_path)) as tif:
         ome_xml = tif.ome_metadata
+        assert ome_xml is not None
         assert "Updated Test Image" in ome_xml
         assert "Updated Channel" in ome_xml
 
@@ -176,6 +213,7 @@ def test_update_metadata_multifile(tmp_path: Path) -> None:
             expected_name = f"Position {pos_idx} Updated"
             expected_channel = f"Channel P{pos_idx}"
 
+            assert ome_xml is not None
             assert expected_name in ome_xml
             assert expected_channel in ome_xml
 
@@ -211,19 +249,11 @@ def test_update_metadata_error_conditions(tmp_path: Path) -> None:
     stream.flush()
 
     # Test with invalid metadata structure that causes validation errors
-    invalid_metadata = {
-        "images": [
-            {
-                "id": "Image:0",
-                # Missing required pixels field should cause validation error
-            }
-        ]
-    }
+    # Since we now require an OME object, we'll test with a non-OME object
+    invalid_metadata = {"not": "an ome object"}
 
-    # This should raise a ValidationError due to missing required fields
-    from pydantic import ValidationError
-
-    with pytest.raises(ValidationError):
+    # This should raise a TypeError due to wrong type
+    with pytest.raises(TypeError, match="Expected OME metadata"):
         stream.update_metadata(invalid_metadata)
 
     # Test that we can successfully update with valid metadata after flush
@@ -241,6 +271,7 @@ def test_update_metadata_error_conditions(tmp_path: Path) -> None:
 
     with tifffile.TiffFile(str(output_path)) as tif:
         ome_xml = tif.ome_metadata
+        assert ome_xml is not None
         assert "Test Image After Error" in ome_xml
 
 
@@ -267,36 +298,36 @@ def test_update_metadata_with_plates(tmp_path: Path) -> None:
 
     # Create metadata with plate information
     plates = [
-        {
-            "id": "Plate:0",
-            "name": "Test Plate",
-            "wells": [
-                {
-                    "id": "Well:0",
-                    "row": 0,
-                    "column": 0,
-                    "well_samples": [
-                        {
-                            "id": "WellSample:0",
-                            "index": 0,
-                            "image_ref": {"id": "Image:0"},
-                        }
+        Plate(
+            id="Plate:0",
+            name="Test Plate",
+            wells=[
+                Well(
+                    id="Well:0",
+                    row=0,
+                    column=0,
+                    well_samples=[
+                        WellSample(
+                            id="WellSample:0",
+                            index=0,
+                            image_ref=ImageRef(id="Image:0"),
+                        )
                     ],
-                },
-                {
-                    "id": "Well:1",
-                    "row": 0,
-                    "column": 1,
-                    "well_samples": [
-                        {
-                            "id": "WellSample:1",
-                            "index": 0,
-                            "image_ref": {"id": "Image:1"},
-                        }
+                ),
+                Well(
+                    id="Well:1",
+                    row=0,
+                    column=1,
+                    well_samples=[
+                        WellSample(
+                            id="WellSample:1",
+                            index=0,
+                            image_ref=ImageRef(id="Image:1"),
+                        )
                     ],
-                },
+                ),
             ],
-        }
+        )
     ]
 
     updated_metadata = create_metadata(
@@ -308,7 +339,8 @@ def test_update_metadata_with_plates(tmp_path: Path) -> None:
     )
 
     # Manually update the second image name since it's not automatic
-    updated_metadata["images"][1]["name"] = "Well A02 Field 1"
+    # With OME objects, we need to modify the object directly
+    updated_metadata.images[1].name = "Well A02 Field 1"
 
     # Update metadata after flush
     stream.update_metadata(updated_metadata)
@@ -325,6 +357,7 @@ def test_update_metadata_with_plates(tmp_path: Path) -> None:
 
         with tifffile.TiffFile(str(pos_file)) as tif:
             ome_xml = tif.ome_metadata
+            assert ome_xml is not None
             ome_obj = from_xml(ome_xml)
 
             # Each file should have only one image and relevant plate info
@@ -337,6 +370,7 @@ def test_update_metadata_with_plates(tmp_path: Path) -> None:
                 plate = ome_obj.plates[0]
                 assert len(plate.wells) == 1  # Only the relevant well
                 well = plate.wells[0]
+                assert well.well_samples[0].image_ref is not None
                 assert well.well_samples[0].image_ref.id == f"Image:{pos_idx}"
 
 

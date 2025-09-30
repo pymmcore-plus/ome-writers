@@ -99,8 +99,8 @@ class PYMMCP:
         @core.mda.events.sequenceFinished.connect
         def _on_sequence_finished(sequence: useq.MDASequence) -> None:
             self._stream.flush()
-            _o = create_ome_metadata(self._summary_meta, self._frame_meta_list)
-            self._stream.update_metadata(dict(_o))
+            ome = create_ome_metadata(self._summary_meta, self._frame_meta_list)
+            self._stream.update_metadata(ome)
 
     def run(self) -> None:
         self._core.mda.run(self._seq)

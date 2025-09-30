@@ -70,7 +70,7 @@ class OMEStream(abc.ABC):
         """Flush to disk."""
 
     @abstractmethod
-    def update_metadata(self, metadata: dict) -> None:
+    def update_metadata(self, metadata: object) -> None:
         """Update the metadata in the output file(s)."""
 
     def _normalize_path(self, path: str) -> str:
