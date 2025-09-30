@@ -67,7 +67,7 @@ class OMEStream(abc.ABC):
 
     @abstractmethod
     def flush(self) -> None:
-        """Flush to disk."""
+        """Flush pending stream writes to disk."""
 
     def _normalize_path(self, path: str) -> str:
         return str(Path(path).expanduser().resolve())
