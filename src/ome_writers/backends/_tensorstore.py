@@ -135,7 +135,3 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         }
         group_zarr.write_text(json.dumps(group_meta, indent=2))
         return self._group_path
-
-    def update_metadata(self, metadata: object) -> None:
-        """Update the metadata in the output file(s)."""
-        # TODO: to be implemented

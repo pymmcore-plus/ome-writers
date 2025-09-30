@@ -116,7 +116,7 @@ class TifffileStream(MultiPositionOMEStream):
         # Mark as inactive after flushing - this is consistent with other backends
         self._is_active = False
 
-    def update_metadata(self, metadata: object) -> None:
+    def update_ome_metadata(self, metadata: OME) -> None:
         """Update the OME metadata in the TIFF files.
 
         The metadata argument MUST be an instance of ome_types.OME.

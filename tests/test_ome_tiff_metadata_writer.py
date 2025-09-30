@@ -148,7 +148,7 @@ def test_update_metadata_single_file(tmp_path: Path) -> None:
     )
 
     # Update metadata after flush
-    stream.update_metadata(updated_metadata)
+    stream.update_ome_metadata(updated_metadata)
 
     # Verify the metadata was updated by reading it back
     import tifffile
@@ -200,7 +200,7 @@ def test_update_metadata_multifile(tmp_path: Path) -> None:
     )
 
     # Update metadata after flush
-    stream.update_metadata(updated_metadata)
+    stream.update_ome_metadata(updated_metadata)
 
     # Verify each position file has the correct metadata
     import tifffile
@@ -257,7 +257,7 @@ def test_update_metadata_error_conditions(tmp_path: Path) -> None:
 
     # This should raise a TypeError due to wrong type
     with pytest.raises(TypeError, match="Expected OME metadata"):
-        stream.update_metadata(invalid_metadata)
+        stream.update_ome_metadata(invalid_metadata)
 
     # Test that we can successfully update with valid metadata after flush
     valid_metadata = create_metadata(
@@ -267,7 +267,7 @@ def test_update_metadata_error_conditions(tmp_path: Path) -> None:
     )
 
     # This should work without errors
-    stream.update_metadata(valid_metadata)
+    stream.update_ome_metadata(valid_metadata)
 
     # Verify the metadata was actually updated
     import tifffile
@@ -347,7 +347,7 @@ def test_update_metadata_with_plates(tmp_path: Path) -> None:
     updated_metadata.images[1].name = "Well A02 Field 1"
 
     # Update metadata after flush
-    stream.update_metadata(updated_metadata)
+    stream.update_ome_metadata(updated_metadata)
 
     # Verify that each position file contains only the relevant plate information
     import tifffile
