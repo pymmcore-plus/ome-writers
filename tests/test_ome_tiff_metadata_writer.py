@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
-from ome_types import OME
-from ome_types.model import Channel, Image, ImageRef, Pixels, Plate, Well, WellSample
 
 import ome_writers as omew
+
+if TYPE_CHECKING:
+    import ome_types.model as ome
 
 
 def create_metadata(
@@ -23,20 +25,21 @@ def create_metadata(
     size_x: int = 32,
     size_y: int = 32,
     num_images: int = 1,
-    plates: list[Plate] | None = None,
-) -> OME:
+    plates: list[ome.Plate] | None = None,
+) -> ome.OME:
     """Create OME metadata object with customizable parameters."""
+    import ome_types.model as ome
 
     # Create base image
     channels = [
-        Channel(
+        ome.Channel(
             id="Channel:0",
             name=channel_name,
             samples_per_pixel=1,
         )
     ]
 
-    pixels = Pixels(
+    pixels = ome.Pixels(
         id="Pixels:0",
         type=dtype,  # type: ignore[arg-type]
         size_x=size_x,
@@ -48,7 +51,7 @@ def create_metadata(
         channels=channels,
     )
 
-    base_image = Image(
+    base_image = ome.Image(
         id="Image:0",
         name=image_name,
         pixels=pixels,
@@ -66,7 +69,7 @@ def create_metadata(
                 else channel_name
             )
             image_channels = [
-                Channel(
+                ome.Channel(
                     id=f"Channel:{i}",
                     name=channel_name_final,
                     samples_per_pixel=1,
@@ -74,7 +77,7 @@ def create_metadata(
             ]
 
             # Create new pixels for this image
-            image_pixels = Pixels(
+            image_pixels = ome.Pixels(
                 id=f"Pixels:{i}",
                 type=dtype,  # type: ignore[arg-type]
                 size_x=size_x,
@@ -91,7 +94,7 @@ def create_metadata(
             if "Position" in image_name:
                 final_image_name = image_name.replace("0", str(i))
 
-            image = Image(
+            image = ome.Image(
                 id=f"Image:{i}",
                 name=final_image_name,
                 pixels=image_pixels,
@@ -101,16 +104,16 @@ def create_metadata(
         images = [base_image]
 
     # Create OME object
-    ome = OME(
+    ome_model = ome.OME(
         images=images,
         creator=f"ome_writers v{omew.__version__}",
     )
 
     # Add plates if provided
     if plates is not None:
-        ome.plates = plates
+        ome_model.plates = plates
 
-    return ome
+    return ome_model
 
 
 def test_update_metadata_single_file(tmp_path: Path) -> None:
@@ -278,6 +281,7 @@ def test_update_metadata_error_conditions(tmp_path: Path) -> None:
 def test_update_metadata_with_plates(tmp_path: Path) -> None:
     """Test update_metadata with plate metadata for multi-position experiments."""
     # Only test with tifffile backend since update_metadata is TIFF-specific
+    ome = pytest.importorskip("ome_types.model", reason="ome_types not installed")
     if not omew.TifffileStream.is_available():
         pytest.skip("tifffile not available")
 
@@ -298,31 +302,31 @@ def test_update_metadata_with_plates(tmp_path: Path) -> None:
 
     # Create metadata with plate information
     plates = [
-        Plate(
+        ome.Plate(
             id="Plate:0",
             name="Test Plate",
             wells=[
-                Well(
+                ome.Well(
                     id="Well:0",
                     row=0,
                     column=0,
                     well_samples=[
-                        WellSample(
+                        ome.WellSample(
                             id="WellSample:0",
                             index=0,
-                            image_ref=ImageRef(id="Image:0"),
+                            image_ref=ome.ImageRef(id="Image:0"),
                         )
                     ],
                 ),
-                Well(
+                ome.Well(
                     id="Well:1",
                     row=0,
                     column=1,
                     well_samples=[
-                        WellSample(
+                        ome.WellSample(
                             id="WellSample:1",
                             index=0,
-                            image_ref=ImageRef(id="Image:1"),
+                            image_ref=ome.ImageRef(id="Image:1"),
                         )
                     ],
                 ),

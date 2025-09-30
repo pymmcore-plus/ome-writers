@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import importlib
-import importlib.util
 from typing import TYPE_CHECKING, NamedTuple, cast
 
 import pytest
@@ -63,19 +61,19 @@ def _read_tiff(output_path: Path) -> np.ndarray:
 
 # Test configurations for each backend
 BACKENDS: list[AvailableBackend] = []
-if importlib.util.find_spec("tensorstore") is not None:
+if omew.TensorStoreZarrStream.is_available():
     BACKENDS.append(
         AvailableBackend(
             "tensorstore", omew.TensorStoreZarrStream, ".ome.zarr", _read_zarr
         )
     )
-if importlib.util.find_spec("acquire_zarr") is not None:
+if omew.AcquireZarrStream.is_available():
     BACKENDS.append(
         AvailableBackend(
             "acquire-zarr", omew.AcquireZarrStream, ".ome.zarr", _read_zarr
         )
     )
-if importlib.util.find_spec("tifffile") is not None:
+if omew.TifffileStream.is_available():
     BACKENDS.append(
         AvailableBackend("tiff", omew.TifffileStream, ".ome.tiff", _read_tiff)
     )

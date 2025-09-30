@@ -43,20 +43,21 @@ class TifffileStream(MultiPositionOMEStream):
     @classmethod
     def is_available(cls) -> bool:
         """Check if the tifffile package is available."""
-        return importlib.util.find_spec("tifffile") is not None
+        return bool(
+            importlib.util.find_spec("tifffile") is not None
+            and importlib.util.find_spec("ome_types") is not None
+        )
 
     def __init__(self) -> None:
         super().__init__()
         try:
+            import ome_types  # noqa: F401
             import tifffile  # noqa: F401
         except ImportError as e:
-            msg = "TifffileStream requires tifffile: `pip install tifffile`."
-            raise ImportError(msg) from e
-
-        try:
-            import ome_types  # noqa: F401
-        except ImportError as e:
-            msg = "TifffileStream requires ome-types: `pip install ome-types`."
+            msg = (
+                "TifffileStream requires tifffile and ome-types: "
+                "`pip install ome-writers[tifffile]`."
+            )
             raise ImportError(msg) from e
 
         # Using dictionaries to handle multi-position ('p') acquisitions
