@@ -63,6 +63,13 @@ def test_pymmcore_plus_mda(tmp_path: Path, backend: AvailableBackend) -> None:
 
 
 class PYMMCP:
+    """A little example of how one might integrate pymmcore_plus MDA with ome-writers.
+
+    This class listens to pymmcore_plus MDA events and writes data to an OME-TIFF
+    file using ome-writers. It also collects metadata during the acquisition and
+    updates the OME metadata at the end of the sequence.
+    """
+
     def __init__(
         self, sequence: useq.MDASequence, core: CMMCorePlus, dest: Path
     ) -> None:

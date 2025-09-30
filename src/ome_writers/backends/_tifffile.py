@@ -208,6 +208,8 @@ class TifffileStream(MultiPositionOMEStream):
             ) from e
 
         try:
+            # TODO:
+            # consider a lock on the tiff file itself to prevent concurrent writes?
             self._tf.tiffcomment(thread._path, comment=ascii_xml)
         except Exception as e:
             raise RuntimeError(
