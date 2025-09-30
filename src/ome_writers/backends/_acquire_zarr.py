@@ -165,4 +165,3 @@ class AcquireZarrStream(MultiPositionOMEStream):
             dimensions=dimensions,
             data_type=dtype,
         )
-

@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import threading
+import warnings
+from contextlib import suppress
 from itertools import count
 from pathlib import Path
 from queue import Queue
@@ -17,10 +19,13 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
     import numpy as np
-    from ome_types import OME
-    from ome_types.model import Image, Plate, Well
+    import ome_types.model as ome
 
     from ome_writers._dimensions import Dimension
+
+else:
+    with suppress(ImportError):
+        import ome_types.model as ome
 
 
 class TifffileStream(MultiPositionOMEStream):
@@ -51,8 +56,8 @@ class TifffileStream(MultiPositionOMEStream):
     def __init__(self) -> None:
         super().__init__()
         try:
-            import ome_types  # noqa: F401
-            import tifffile  # noqa: F401
+            import ome_types.model
+            import tifffile
         except ImportError as e:
             msg = (
                 "TifffileStream requires tifffile and ome-types: "
@@ -60,6 +65,8 @@ class TifffileStream(MultiPositionOMEStream):
             )
             raise ImportError(msg) from e
 
+        self._tf = tifffile
+        self._ome = ome_types.model
         # Using dictionaries to handle multi-position ('p') acquisitions
         self._threads: dict[int, WriterThread] = {}
         self._queues: dict[int, Queue[np.ndarray | None]] = {}
@@ -116,7 +123,7 @@ class TifffileStream(MultiPositionOMEStream):
         # Mark as inactive after flushing - this is consistent with other backends
         self._is_active = False
 
-    def update_ome_metadata(self, metadata: OME) -> None:
+    def update_ome_metadata(self, metadata: ome.OME) -> None:
         """Update the OME metadata in the TIFF files.
 
         The metadata argument MUST be an instance of ome_types.OME.
@@ -129,15 +136,11 @@ class TifffileStream(MultiPositionOMEStream):
         metadata : OME
             The OME metadata object to write to the TIFF files.
         """
-        from ome_types import OME
-
-        if not isinstance(metadata, OME):
+        if not isinstance(metadata, self._ome.OME):  # pragma: no cover
             raise TypeError(f"Expected OME metadata, got {type(metadata)}")
 
-        if len(self._threads) == 1:
-            self._update_single_file_metadata(0, metadata)
-        else:
-            self._update_multifile_metadata(metadata)
+        for position_idx in self._threads:
+            self._update_position_metadata(position_idx, metadata)
 
     # -----------------------PRIVATE METHODS------------------------ #
 
@@ -182,121 +185,34 @@ class TifffileStream(MultiPositionOMEStream):
         """TIFF-specific write implementation."""
         self._queues[int(array_key)].put(frame)
 
-    def _update_single_file_metadata(self, position_idx: int, ome: OME) -> None:
+    def _update_position_metadata(self, position_idx: int, metadata: ome.OME) -> None:
         """Add OME metadata to TIFF file efficiently without rewriting image data."""
-        import tifffile
-
         thread = self._threads[position_idx]
-
-        # Create ASCII version for tifffile.tiffcomment since tifffile.tiffcomment
-        # requires ASCII strings
-        ascii_xml = ome.to_xml().replace("µ", "&#x00B5;").encode("ascii")
+        if not Path(thread._path).exists():  # pragma: no cover
+            warnings.warn(
+                f"TIFF file for position {position_idx} does not exist at "
+                f"{thread._path}. Not writing metadata.",
+                stacklevel=2,
+            )
+            return
 
         try:
-            tifffile.tiffcomment(thread._path, comment=ascii_xml)
+            position_ome = _create_position_specific_ome(position_idx, metadata)
+            # Create ASCII version for tifffile.tiffcomment since tifffile.tiffcomment
+            # requires ASCII strings
+            ascii_xml = position_ome.to_xml().replace("µ", "&#x00B5;").encode("ascii")
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to create position-specific OME metadata for position "
+                f"{position_idx}. {e}"
+            ) from e
+
+        try:
+            self._tf.tiffcomment(thread._path, comment=ascii_xml)
         except Exception as e:
             raise RuntimeError(
                 f"Failed to update OME metadata in {thread._path}"
             ) from e
-
-    def _update_multifile_metadata(self, ome: OME) -> None:
-        """Update metadata for multiple TIFF files in multi-position experiments.
-
-        Each file gets only the OME metadata relevant to its position.
-
-        The ome argument contains the complete metadata for all positions (Images)
-        so we need to create separate OME metadata for each file (position) which means
-        to extract only the relevant Image and related metadata for each position.
-        """
-        for position_idx in self._threads:
-            position_ome = self._create_position_specific_ome(ome, position_idx)
-            if position_ome is not None:
-                self._update_single_file_metadata(position_idx, position_ome)
-
-    def _create_position_specific_ome(self, ome: OME, position_idx: int) -> OME | None:
-        """Create OME metadata for a specific position from complete metadata.
-
-        Extracts only the Image and related metadata for the given position index.
-        Assumes Image IDs follow the pattern "Image:{position_idx}".
-        """
-        from ome_types import OME
-
-        target_image_id = f"Image:{position_idx}"
-        position_image = self._find_image_by_id(ome.images, target_image_id)
-
-        if position_image is None:
-            return None
-
-        position_plate = self._extract_position_plate(ome, target_image_id)
-
-        return OME(
-            uuid=ome.uuid,
-            images=[position_image],
-            instruments=ome.instruments,
-            plates=[position_plate] if position_plate else [],
-        )
-
-    def _find_image_by_id(self, images: list[Image], target_id: str) -> Image | None:
-        """Find an image by its ID in the given list of images."""
-        for image in images:
-            if image.id == target_id:
-                return image
-        return None
-
-    def _extract_position_plate(self, ome: OME, target_image_id: str) -> Plate | None:
-        """Extract plate metadata for a specific image ID.
-
-        Searches through plates to find the well sample referencing the target
-        image ID and returns a plate containing only the relevant well and sample.
-        """
-        if not ome.plates:
-            return None
-
-        for plate in ome.plates:
-            matching_well = self._find_well_with_image(plate.wells, target_image_id)
-            if matching_well is not None:
-                return self._create_position_plate(
-                    plate, matching_well, target_image_id
-                )
-
-        return None
-
-    def _find_well_with_image(
-        self, wells: list[Well], target_image_id: str
-    ) -> Well | None:
-        """Find the well containing a sample that references the target image ID."""
-        for well in wells:
-            if self._well_contains_image(well, target_image_id):
-                return well
-        return None
-
-    def _well_contains_image(self, well: Well, target_image_id: str) -> bool:
-        """Check if a well contains a sample referencing the target image ID."""
-        return any(
-            sample.image_ref and sample.image_ref.id == target_image_id
-            for sample in well.well_samples
-        )
-
-    def _create_position_plate(
-        self, original_plate: Plate, well: Well, target_image_id: str
-    ) -> Plate:
-        """Create a new plate containing only the relevant well and sample."""
-        from ome_types.model import Plate
-
-        # Find the specific well sample for this image
-        target_sample = next(
-            sample
-            for sample in well.well_samples
-            if sample.image_ref and sample.image_ref.id == target_image_id
-        )
-
-        # Create new plate with only the relevant well and sample
-        plate_dict = original_plate.model_dump()
-        well_dict = well.model_dump()
-        well_dict["well_samples"] = [target_sample]
-        plate_dict["wells"] = [well_dict]
-
-        return Plate.model_validate(plate_dict)
 
 
 class WriterThread(threading.Thread):
@@ -310,7 +226,7 @@ class WriterThread(threading.Thread):
         pixelsize: float = 1.0,
     ) -> None:
         super().__init__(daemon=True, name=f"TiffWriterThread-{next(thread_counter)}")
-        self._path = path
+        self._path: str = path
         self._shape = shape
         self._dtype = dtype
         self._image_queue = image_queue
@@ -358,3 +274,69 @@ class WriterThread(threading.Thread):
 
 
 thread_counter = count()
+
+# ------------------------
+
+# helpers for position-specific OME metadata updates
+
+
+def _create_position_specific_ome(position_idx: int, metadata: ome.OME) -> ome.OME:
+    """Create OME metadata for a specific position from complete metadata.
+
+    Extracts only the Image and related metadata for the given position index.
+    Assumes Image IDs follow the pattern "Image:{position_idx}".
+    """
+    target_image_id = f"Image:{position_idx}"
+
+    # Find an image by its ID in the given list of images
+    # will raise StopIteration if not found (caller should catch error)
+    position_image = next(img for img in metadata.images if img.id == target_image_id)
+    position_plates = _extract_position_plates(metadata, target_image_id)
+
+    return ome.OME(
+        uuid=metadata.uuid,
+        images=[position_image],
+        instruments=metadata.instruments,
+        plates=position_plates,
+    )
+
+
+def _extract_position_plates(ome: ome.OME, target_image_id: str) -> list[ome.Plate]:
+    """Extract plate metadata for a specific image ID.
+
+    Searches through plates to find the well sample referencing the target
+    image ID and returns a plate containing only the relevant well and sample.
+    """
+    for plate in ome.plates:
+        for well in plate.wells:
+            if _well_contains_image(well, target_image_id):
+                return [_create_position_plate(plate, well, target_image_id)]
+
+    return []
+
+
+def _well_contains_image(well: ome.Well, target_image_id: str) -> bool:
+    """Check if a well contains a sample referencing the target image ID."""
+    return any(
+        sample.image_ref and sample.image_ref.id == target_image_id
+        for sample in well.well_samples
+    )
+
+
+def _create_position_plate(
+    original_plate: ome.Plate, well: ome.Well, target_image_id: str
+) -> ome.Plate:
+    """Create a new plate containing only the relevant well and sample."""
+    # Find the specific well sample for this image
+    target_sample = next(
+        sample
+        for sample in well.well_samples
+        if sample.image_ref and sample.image_ref.id == target_image_id
+    )
+
+    # Create new plate with only the relevant well and sample
+    plate_dict = original_plate.model_dump()
+    well_dict = well.model_dump()
+    well_dict["well_samples"] = [target_sample]
+    plate_dict["wells"] = [well_dict]
+    return ome.Plate.model_validate(plate_dict)

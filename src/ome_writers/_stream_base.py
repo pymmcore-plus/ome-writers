@@ -4,7 +4,7 @@ import abc
 from abc import abstractmethod
 from itertools import product
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from typing_extensions import Self
 
@@ -67,7 +67,7 @@ class OMEStream(abc.ABC):
 
     @abstractmethod
     def flush(self) -> None:
-        """Flush to disk."""
+        """Flush pending stream writes to disk."""
 
     def _normalize_path(self, path: str) -> str:
         return str(Path(path).expanduser().resolve())
