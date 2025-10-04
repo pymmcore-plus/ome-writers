@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import uuid
-from pathlib import Path
 from typing import TYPE_CHECKING, Literal, NamedTuple, TypeAlias
 
 import numpy as np
@@ -143,7 +142,7 @@ def dims_to_ome(
             # physical_size_z_unit = UnitsLength.MICROMETER
         )
 
-        base_name = Path(tiff_file_name).stem if tiff_file_name else f"Image_{p}"
+        base_name = tiff_file_name if tiff_file_name else f"Image_{p}"
         images.append(
             m.Image(
                 # objective_settings=...

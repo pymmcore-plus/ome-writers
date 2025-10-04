@@ -92,7 +92,9 @@ class TifffileStream(MultiPositionOMEStream):
 
         # Create a memmap for each position
         for p_idx, fname in enumerate(fnames):
-            ome = dims_to_ome(tczyx_dims, dtype=dtype, tiff_file_name=fname)
+            # remove extension for name to use in OME metadata
+            p_root, _ = self._get_path_root_and_extension(fname)
+            ome = dims_to_ome(tczyx_dims, dtype=dtype, tiff_file_name=Path(p_root).name)
             self._queues[p_idx] = q = Queue()  # type: ignore
             self._threads[p_idx] = thread = WriterThread(
                 fname,
@@ -147,15 +149,7 @@ class TifffileStream(MultiPositionOMEStream):
     def _prepare_files(
         self, path: Path, num_positions: int, overwrite: bool
     ) -> list[str]:
-        path_root = str(path)
-        for possible_ext in [".ome.tiff", ".ome.tif", ".tiff", ".tif"]:
-            if path_root.endswith(possible_ext):
-                ext = possible_ext
-                path_root = path_root[: -len(possible_ext)]
-                break
-        else:
-            ext = path.suffix
-
+        path_root, ext = self._get_path_root_and_extension(path)
         fnames = []
         for p_idx in range(num_positions):
             # only append position index if there are multiple positions
@@ -178,6 +172,13 @@ class TifffileStream(MultiPositionOMEStream):
             fnames.append(str(p_path))
 
         return fnames
+
+    def _get_path_root_and_extension(self, path: Path | str) -> tuple[str, str]:
+        path_root = str(path)
+        for possible_ext in [".ome.tiff", ".ome.tif", ".tiff", ".tif"]:
+            if path_root.endswith(possible_ext):
+                return path_root[: -len(possible_ext)], possible_ext
+        return path_root, Path(path).suffix
 
     def _write_to_backend(
         self, array_key: str, index: tuple[int, ...], frame: np.ndarray

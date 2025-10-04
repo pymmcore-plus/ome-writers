@@ -139,6 +139,12 @@ def test_update_metadata_single_file(tmp_path: Path) -> None:
     stream.flush()
     assert not stream.is_active()
 
+    import ome_types
+
+    meta = ome_types.from_xml(stream._threads[0]._ome_xml)
+    assert len(meta.images) == 1
+    assert meta.images[0].name == "test_update_metadata"
+
     # Create updated metadata
     updated_metadata = create_metadata(
         image_name="Updated Test Image",
@@ -189,6 +195,12 @@ def test_update_metadata_multifile(tmp_path: Path) -> None:
         stream.append(frame)
     stream.flush()
     assert not stream.is_active()
+
+    import ome_types
+
+    for p in range(2):
+        meta = ome_types.from_xml(stream._threads[p]._ome_xml)
+        assert meta.images[0].name == f"test_update_multipos_p{p:03d}"
 
     # Create updated metadata with multiple images (positions)
     updated_metadata = create_metadata(
