@@ -175,7 +175,7 @@ class TifffileStream(MultiPositionOMEStream):
 
     def _get_path_root_and_extension(self, path: Path | str) -> tuple[str, str]:
         """Split the path into root and extension for .(ome.)tif and .(ome.)tiff files.
-        
+
         Retuns
         -------
         tuple[str, str]
