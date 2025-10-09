@@ -118,7 +118,7 @@ def _autobackend(path: str | Path) -> Literal["acquire-zarr", "tensorstore", "ti
             "Neither acquire-zarr nor tensorstore is available. "
             "Please install one of these packages."
         )
-    elif path.endswith(".tiff") or path.endswith(".ome.tiff"):
+    elif path.endswith((".tiff", ".tif", ".ome.tiff", ".ome.tif")):
         if TifffileStream.is_available():
             return "tiff"
         raise ValueError(  # pragma: no cover
