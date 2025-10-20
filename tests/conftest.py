@@ -60,26 +60,41 @@ def _read_tiff(output_path: Path) -> np.ndarray:
 
 
 # Test configurations for each backend
-BACKENDS: list[AvailableBackend] = []
+TIFF_BACKENDS: list[AvailableBackend] = []
+ZARR_BACKENDS: list[AvailableBackend] = []
 if omew.TensorStoreZarrStream.is_available():
-    BACKENDS.append(
+    ZARR_BACKENDS.append(
         AvailableBackend(
             "tensorstore", omew.TensorStoreZarrStream, ".ome.zarr", _read_zarr
         )
     )
 if omew.AcquireZarrStream.is_available():
-    BACKENDS.append(
+    ZARR_BACKENDS.append(
         AvailableBackend(
             "acquire-zarr", omew.AcquireZarrStream, ".ome.zarr", _read_zarr
         )
     )
 if omew.TifffileStream.is_available():
-    BACKENDS.append(
+    TIFF_BACKENDS.append(
         AvailableBackend("tiff", omew.TifffileStream, ".ome.tiff", _read_tiff)
     )
+
+BACKENDS: list[AvailableBackend] = TIFF_BACKENDS + ZARR_BACKENDS
 
 
 @pytest.fixture(params=BACKENDS, ids=lambda b: b.name)
 def backend(request: pytest.FixtureRequest) -> AvailableBackend:
+    """Fixture to provide an available backend based on the test parameter."""
+    return cast("AvailableBackend", request.param)
+
+
+@pytest.fixture(params=ZARR_BACKENDS, ids=lambda b: b.name)
+def zarr_backend(request: pytest.FixtureRequest) -> AvailableBackend:
+    """Fixture to provide an available backend based on the test parameter."""
+    return cast("AvailableBackend", request.param)
+
+
+@pytest.fixture(params=TIFF_BACKENDS, ids=lambda b: b.name)
+def tiff_backend(request: pytest.FixtureRequest) -> AvailableBackend:
     """Fixture to provide an available backend based on the test parameter."""
     return cast("AvailableBackend", request.param)

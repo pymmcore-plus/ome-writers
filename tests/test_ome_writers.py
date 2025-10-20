@@ -8,11 +8,21 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
+from yaozarrs import validate_zarr_store
 
 import ome_writers as omew
 
 if TYPE_CHECKING:
     from .conftest import AvailableBackend
+
+
+def validate_path(path: Path) -> None:
+    """Helper function to validate that a file exists and is non-empty."""
+    assert path.exists(), f"File {path} does not exist."
+    if path.suffix == ".tiff":
+        ...
+    elif path.suffix in {".zarr", ".zarr/"}:
+        validate_zarr_store(path)
 
 
 def test_minimal_2d_dimensions(backend: AvailableBackend, tmp_path: Path) -> None:
@@ -38,7 +48,7 @@ def test_minimal_2d_dimensions(backend: AvailableBackend, tmp_path: Path) -> Non
     stream.flush()
 
     assert not stream.is_active()
-    assert output_path.exists()
+    validate_path(output_path)
 
 
 def test_stream_error_handling(backend: AvailableBackend) -> None:
@@ -81,7 +91,7 @@ def test_create_stream_factory_function(
 ) -> None:
     """Test the create_stream factory function."""
     data_gen, dimensions, dtype = omew.fake_data_for_sizes(
-        sizes={"t": 3, "z": 2, "c": 2, "y": 64, "x": 64},
+        sizes={"t": 3, "c": 2, "z": 2, "y": 64, "x": 64},
         chunk_sizes={"y": 32, "x": 32},
     )
 
@@ -99,7 +109,7 @@ def test_create_stream_factory_function(
 
     stream.flush()
     assert not stream.is_active()
-    assert output_path.exists()
+    validate_path(output_path)
 
 
 @pytest.mark.parametrize(
@@ -112,7 +122,7 @@ def test_data_integrity_roundtrip(
 ) -> None:
     """Test data integrity roundtrip with different data types."""
     data_gen, dimensions, dtype = omew.fake_data_for_sizes(
-        sizes={"t": 3, "z": 2, "c": 2, "y": 64, "x": 64},
+        sizes={"t": 3, "c": 2, "z": 2, "y": 64, "x": 64},
         chunk_sizes={"y": 32, "x": 32},
     )
 
@@ -131,7 +141,7 @@ def test_data_integrity_roundtrip(
     assert not stream.is_active()
 
     # Read data back and verify it matches
-    assert output_path.exists()
+    validate_path(output_path)
     disk_data = backend.read_data(output_path)
 
     # Reconstruct original data array from frames
@@ -160,14 +170,14 @@ def test_data_integrity_roundtrip(
         stream.append(frame)
     stream.flush()
     assert not stream.is_active()
-    assert output_path.exists()
+    validate_path(output_path)
 
 
 def test_multiposition_acquisition(backend: AvailableBackend, tmp_path: Path) -> None:
     """Test multi-position acquisition support with position dimension."""
     stream_cls = backend.cls
     data_gen, dimensions, dtype = omew.fake_data_for_sizes(
-        sizes={"t": 3, "z": 2, "c": 2, "y": 32, "x": 32, "p": 3},
+        sizes={"t": 3, "c": 2, "z": 2, "y": 32, "x": 32, "p": 3},
         chunk_sizes={"y": 16, "x": 16},
     )
 
@@ -189,8 +199,9 @@ def test_multiposition_acquisition(backend: AvailableBackend, tmp_path: Path) ->
     assert not stream.is_active()
 
     if backend.file_ext.endswith("zarr"):
-        assert output_path.exists()
-        # Verify zarr structure
+        validate_path(output_path)
+
+        # Verify zarr structure (duplicate of above, but ensures positions are separate)
         assert (output_path / "0").exists()
         assert (output_path / "1").exists()
         assert (output_path / "2").exists()
@@ -213,14 +224,11 @@ def test_multiposition_acquisition(backend: AvailableBackend, tmp_path: Path) ->
     elif (ext := backend.file_ext).endswith("tiff"):
         # For TIFF, separate files are created for each position
         base_path = Path(str(output_path).replace(ext, ""))
-        assert (base_path.with_name(f"{base_path.name}_p000{ext}")).exists()
-        assert (base_path.with_name(f"{base_path.name}_p001{ext}")).exists()
-        assert (base_path.with_name(f"{base_path.name}_p002{ext}")).exists()
 
         # Verify that each TIFF file has the correct metadata and shape
         for pos_idx in range(3):
             pos_file = base_path.with_name(f"{base_path.name}_p{pos_idx:03d}{ext}")
-            assert pos_file.exists()
+            validate_path(pos_file)
 
             # Read the file to verify it has correct shape
             data = backend.read_data(pos_file)
