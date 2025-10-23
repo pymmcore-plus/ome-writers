@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING
 
 from typing_extensions import Self
 
-from ome_writers._dimensions import dims_to_ome
 from ome_writers._stream_base import MultiPositionOMEStream
 
 if TYPE_CHECKING:
@@ -92,6 +91,8 @@ class TifffileStream(MultiPositionOMEStream):
 
         # Create a memmap for each position
         for p_idx, fname in enumerate(fnames):
+            from ome_writers._dimensions import dims_to_ome
+
             ome = dims_to_ome(tczyx_dims, dtype=dtype, tiff_file_name=fname)
             self._queues[p_idx] = q = Queue()  # type: ignore
             self._threads[p_idx] = thread = WriterThread(

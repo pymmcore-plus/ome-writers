@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 from typing_extensions import Self
 
-from ome_writers._ngff_metadata import ome_meta_v5
 from ome_writers._stream_base import MultiPositionOMEStream
 
 if TYPE_CHECKING:
@@ -127,11 +126,13 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
             # Use non_position_dims for multi-pos, full dims for single pos
             array_dims[array_key] = non_position_dims if self._position_dim else dims
 
+        from ome_writers._dimensions import dims_to_ngff_v5
+
         group_zarr = self._group_path / "zarr.json"
         group_meta = {
             "zarr_format": 3,
             "node_type": "group",
-            "attributes": ome_meta_v5(array_dims=array_dims),
+            "attributes": dims_to_ngff_v5(array_dims=array_dims),
         }
         group_zarr.write_text(json.dumps(group_meta, indent=2))
         return self._group_path
