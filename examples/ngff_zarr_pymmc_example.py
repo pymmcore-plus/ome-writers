@@ -28,6 +28,22 @@ seq = MDASequence(
 plate = omew.plate_from_useq(seq)
 dims = omew.dims_from_useq(seq, image_width=512, image_height=512)
 
+# add chunck sizes to dimensions for downsampling
+dims_chunked = []
+for dim in dims:
+    if dim.label in ("y", "x"):
+        dims_chunked.append(
+            omew.Dimension(
+                label=dim.label,
+                size=dim.size,
+                unit=dim.unit,
+                chunk_size=256,
+            )
+        )
+    else:
+        dims_chunked.append(dim)
+dims = dims_chunked
+
 # Create acquire-zarr stream
 stream = omew.create_stream(
     path=output_path,

@@ -1,6 +1,6 @@
 """HCS example using ome-writers and acquire-zarr with pymmcore_plus and useq."""
 
-import json
+# import json
 from pathlib import Path
 
 import numpy as np
@@ -9,8 +9,8 @@ import zarr
 from pymmcore_plus import CMMCorePlus
 from pymmcore_plus.metadata import FrameMetaV1
 from useq import GridRowsColumns, MDASequence, WellPlatePlan
-from yaozarrs import validate_ome_json
 
+# from yaozarrs import validate_ome_json
 import ome_writers as omew
 
 output_path = Path(__file__).parent / "acq_z.zarr"
@@ -43,7 +43,6 @@ stream = omew.create_stream(
     backend="acquire-zarr",
     plate=plate,
     overwrite=True,
-    downsampling_method="mean",
 )
 
 # create CMMCorePlus instance and load system configuration

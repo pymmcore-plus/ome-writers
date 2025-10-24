@@ -72,6 +72,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
             If provided, the store will be structured as a plate with wells.
         downsampling_method : acquire_zarr.DownsamplingMethod | None, optional
             The method to use when generating multiscale (downsampled) image pyramids.
+            It works only if the chunk sizes is specified in the `dimensions` parameter.
             If provided, acquire-zarr will automatically create additional downsampled
             datasets for each array until the final spatial (XY) resolution
             approximately matches the chunk size. Available methods include "mean",
@@ -104,6 +105,9 @@ class AcquireZarrStream(MultiPositionOMEStream):
 
         # Dimensions will be the same across all positions, so we can create them once
         az_dims = [self._dim_toaqz_dim(dim) for dim in non_position_dims]
+
+        from rich import print
+        print(az_dims)
 
         if plate is not None:
             # Use HCS plate mode with acquire-zarr's hcs_plates parameter

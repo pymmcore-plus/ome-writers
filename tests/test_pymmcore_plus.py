@@ -188,7 +188,7 @@ def test_pymmcore_plus_plate_zarr(tmp_path: Path) -> None:
         backend="acquire-zarr",
         plate=plate,
         overwrite=True,
-        downsampling_method="mean",
+        # downsampling_method="mean",
     )
 
     def _on_frame_ready(
