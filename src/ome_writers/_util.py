@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from itertools import product
 from typing import TYPE_CHECKING, cast, get_args
 
@@ -9,7 +10,6 @@ import numpy.typing as npt
 from ome_writers import Dimension, DimensionLabel
 
 if TYPE_CHECKING:
-    from collections import defaultdict
     from collections.abc import Iterator, Mapping
 
     import useq
@@ -210,37 +210,23 @@ def plate_from_useq(seq: useq.MDASequence) -> Plate | None:
 
     from ome_writers import Plate, PlateAcquisition, WellPosition
 
-    # Check if stage_positions is a WellPlatePlan
+    # check if stage_positions is a WellPlatePlan
     if not isinstance(seq.stage_positions, WellPlatePlan):
         return None
 
     plate_plan: WellPlatePlan = seq.stage_positions
 
-    # Get rows and columns from the plate definition
-    # The plate.rows and plate.columns give the total number
-    num_rows = plate_plan.plate.rows
-    num_cols = plate_plan.plate.columns
-
-    # Create row labels (A, B, C, ...)
-    rows = [chr(ord("A") + i) for i in range(num_rows)]
-    # Create column labels (01, 02, 03, ...)
-    columns = [str(i + 1).zfill(2) for i in range(num_cols)]
-
-    # Get selected well names and create WellPosition objects
+    # get selected well names and corresponding indices from the plan
     wells: list[WellPosition] = []
-    well_set = set()  # To track unique wells
+    well_set = set()
+    names = plate_plan.selected_well_names
+    indices = plate_plan.selected_well_indices
 
-    # selected_well_names gives us the well names like "A1", "B2", etc.
-    for well_name in plate_plan.selected_well_names:
-        # Parse well name - format is like "A1", "B12", etc.
-        well_str = str(well_name)  # Convert from np.str_ if needed
-        row_letter = well_str[0].upper()
-        col_str = well_str[1:]
-
-        row_index = rows.index(row_letter)
-        col_index = int(col_str) - 1  # Convert to 0-based index
-        col_name = columns[col_index]
-
+    for name, idx in zip(names, indices, strict=True):
+        row_index, col_index = int(idx[0]), int(idx[1])  # e.g. 30, 32
+        row_letter, col_name = split_well_id(name)  # name e.g. AE33
+        if row_letter is None or col_name is None:
+            raise ValueError(f"Invalid well name: {name}")
         well_key = (row_index, col_index)
         if well_key not in well_set:
             well_set.add(well_key)
@@ -249,54 +235,46 @@ def plate_from_useq(seq: useq.MDASequence) -> Plate | None:
                 WellPosition(path=path, row_index=row_index, column_index=col_index)
             )
 
-    # Determine field count (FOV per well)
-    # Count how many positions map to the same well
-    from collections import defaultdict
+    # Extract unique row labels from the first column of well names
+    # all_well_names is 2D: [[A1, A2, ...], [B1, B2, ...], ...]
+    # Extract just the row letter(s) from each first element
+    rows = []
+    for name in plate_plan.plate.all_well_names[:, 0]:
+        row_label, _ = split_well_id(name)
+        if row_label is None:
+            raise ValueError(f"Invalid well name in plate definition: {name}")
+        rows.append(row_label)
+    num_cols = plate_plan.plate.columns
+    # Create column labels (01, 02, 03, ...)
+    columns = [str(i + 1).zfill(2) for i in range(num_cols)]
 
-    well_fov_count: defaultdict[tuple[int, int], int] = defaultdict(int)
+    field_count = plate_plan.num_points_per_well
 
-    for well_name in plate_plan.selected_well_names:
-        well_str = str(well_name)
-        row_letter = well_str[0].upper()
-        col_str = well_str[1:]
-        row_index = rows.index(row_letter)
-        col_index = int(col_str) - 1
-        well_fov_count[(row_index, col_index)] += 1
-
-    # Field count is the maximum number of FOVs in any well
-    # Also account for well_points_plan (e.g., grid points per well)
-    fov_per_well = plate_plan.num_points_per_well
-    if fov_per_well > 1:
-        field_count = fov_per_well
-    else:
-        field_count = max(well_fov_count.values()) if well_fov_count else 1
-
-    # Create optional acquisition metadata if sequence has time points
-    acquisitions = None
-    if seq.time_plan:
-        # Check if we have a time plan that generates frames
-        try:
-            # Simple check: try to get the length of the sequence
-            num_frames = len(list(seq))
-            if num_frames > 0:
-                acquisitions = [
-                    PlateAcquisition(
-                        id=0,
-                        name="Acquisition 1",
-                        maximum_field_count=field_count,
-                    )
-                ]
-        except Exception:
-            pass
-
-    # Get the plate name from the plate object
-    plate_name = getattr(plate_plan.plate, "name", None)
+    acquisitions = [
+        PlateAcquisition(
+            id=0,
+            name="Acquisition 1",
+            maximum_field_count=field_count,
+        )
+    ]
 
     return Plate(
         rows=rows,
         columns=columns,
         wells=wells,
-        name=plate_name,
+        name=plate_plan.plate.name,
         field_count=field_count if field_count > 1 else None,
         acquisitions=acquisitions,
     )
+
+
+def split_well_id(well: str) -> tuple[str | None, str | None]:
+    match = re.match(r"([A-Z]+)(\d+)$", well, re.I)
+    if match is None:
+        return None, None
+    if match.groups():
+        row_letter, col_name = match.groups()
+        if len(col_name) == 1:
+            col_name = col_name.zfill(2)
+        return row_letter, col_name
+    return None, None

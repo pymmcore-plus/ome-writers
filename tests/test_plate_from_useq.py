@@ -182,3 +182,58 @@ def test_plate_from_useq_integration_with_plate_to_yaozarrs() -> None:
     assert yao_plate.plate.name == "96-well"
     assert yao_plate.plate.field_count == 4  # 2x2 grid
     assert len(yao_plate.plate.wells) == 2
+
+
+def test_plate_from_useq_large_plate_with_multi_letter_rows() -> None:
+    """Test 1536-well plate with multi-letter row names (A-Z, AA-AF)."""
+    pytest.importorskip("useq")
+    from useq import (
+        MDASequence,
+        WellPlatePlan,
+        register_well_plates,
+        registered_well_plate_keys,
+    )
+
+    register_well_plates(
+        {
+            "1536-well": {
+                "rows": 32,
+                "columns": 48,
+                "well_spacing": 2.25,
+                "well_size": 1.55,
+            }
+        }
+    )
+
+    assert "1536-well" in registered_well_plate_keys()
+
+    # Create a 1536-well plate plan with wells that have multi-letter row names
+    # 1536-well plates have 32 rows (A-Z, AA-AF) and 48 columns
+    plate_plan = WellPlatePlan(
+        plate="1536-well",
+        a1_center_xy=(0.0, 0.0),
+        selected_wells=([0, 25, 30], [0, 23, 47]),  # A1, Z24, AE48
+    )
+    seq = MDASequence(stage_positions=plate_plan)
+
+    # Convert to ome-writers Plate
+    plate = omew.plate_from_useq(seq)
+
+    assert plate is not None
+    assert plate.name == "1536-well"
+    assert len(plate.wells) == 3
+    assert len(plate.rows) == 32  # A-Z (26) + AA-AF (6) = 32
+    assert len(plate.columns) == 48
+
+    # Check that row labels are correct
+    assert plate.rows[0] == "A"
+    assert plate.rows[25] == "Z"
+    assert plate.rows[26] == "AA"
+    assert plate.rows[30] == "AE"
+    assert plate.rows[31] == "AF"
+
+    # Check that wells are correctly created
+    well_paths = {w.path for w in plate.wells}
+    assert "A/01" in well_paths  # First well (row 0, col 0)
+    assert "Z/24" in well_paths  # Row Z (index 25), col 24
+    assert "AE/48" in well_paths  # Row AE (index 30), col 48
