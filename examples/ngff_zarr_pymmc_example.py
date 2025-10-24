@@ -1,5 +1,6 @@
 """HCS example using ome-writers and acquire-zarr with pymmcore_plus and useq."""
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -8,6 +9,7 @@ import zarr
 from pymmcore_plus import CMMCorePlus
 from pymmcore_plus.metadata import FrameMetaV1
 from useq import MDASequence
+from yaozarrs import validate_ome_json
 
 import ome_writers as omew
 
@@ -57,6 +59,13 @@ def _on_sequence_finished(sequence: useq.MDASequence) -> None:
     # open zarr group and print structure
     gp = zarr.open_group(output_path, mode="r")
     print(gp.tree())
+
+    # validate OME-NGFF JSON at root
+    zarr_json_path = output_path / "zarr.json"
+    assert zarr_json_path.exists(), "zarr.json should exist at root"
+    with open(zarr_json_path) as f:
+        root_meta = json.load(f)
+        validate_ome_json(json.dumps(root_meta))
 
 
 # run the MDA sequence

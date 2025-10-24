@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import json
 import os
 from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
+import useq
+import zarr
+from yaozarrs import validate_ome_json
 
 import ome_writers as omew
 
@@ -153,58 +157,61 @@ def test_pymmcore_plus_mda_tiff_metadata_update(tmp_path: Path) -> None:
                 assert ome.plates
 
 
-# def test_pymmcore_plus_plate_zarr(tmp_path: Path) -> None:
-#     """Test pymmcore_plus MDA with WellPlatePlan and acquire-zarr backend."""
-#     pytest.importorskip("useq")
-#     from useq import GridRowsColumns, MDASequence, WellPlatePlan
+def test_pymmcore_plus_plate_zarr(tmp_path: Path) -> None:
+    """Test pymmcore_plus MDA with WellPlatePlan and acquire-zarr backend."""
+    pytest.importorskip("useq")
+    from useq import GridRowsColumns, MDASequence, WellPlatePlan
 
-#     # output_path = tmp_path / "acq_z.zarr"
-#     output_path = "/Users/fdrgsp/Desktop/acq_z.zarr/"
+    output_path = tmp_path / "acq_z.zarr"
 
-#     plate_plan = WellPlatePlan(
-#         plate="96-well",
-#         a1_center_xy=(0.0, 0.0),
-#         selected_wells=([0, 0, 1], [0, 1, 0]),  # A1, A2, B1
-#         well_points_plan=GridRowsColumns(rows=2, columns=2),  # 4 FOV per well
-#     )
+    plate_plan = WellPlatePlan(
+        plate="96-well",
+        a1_center_xy=(0.0, 0.0),
+        selected_wells=([0, 0, 1], [0, 1, 0]),  # A1, A2, B1
+        well_points_plan=GridRowsColumns(rows=2, columns=2),  # 4 FOV per well
+    )
 
-#     seq = MDASequence(
-#         axis_order="ptc",
-#         stage_positions=plate_plan,
-#         time_plan={"interval": 0.1, "loops": 3},
-#         channels=["DAPI", "FITC"],
-#     )
+    seq = MDASequence(
+        axis_order="ptc",
+        stage_positions=plate_plan,
+        time_plan={"interval": 0.1, "loops": 3},
+        channels=["DAPI", "FITC"],
+    )
 
-#     plate = omew.plate_from_useq(seq)
-#     dims = omew.dims_from_useq(seq, image_width=512, image_height=512)
+    plate = omew.plate_from_useq(seq)
+    dims = omew.dims_from_useq(seq, image_width=512, image_height=512)
 
-#     stream = omew.create_stream(
-#         path=output_path,
-#         dimensions=dims,
-#         dtype=np.uint16,
-#         backend="acquire-zarr",
-#         plate=plate,
-#         overwrite=True,
-#         downsampling_method="mean",
-#     )
+    stream = omew.create_stream(
+        path=output_path,
+        dimensions=dims,
+        dtype=np.uint16,
+        backend="acquire-zarr",
+        plate=plate,
+        overwrite=True,
+        downsampling_method="mean",
+    )
 
-#     def _on_frame_ready(
-#         frame: np.ndarray, event: useq.MDAEvent, frame_meta: FrameMetaV1
-#     ) -> None:
-#         stream.append(frame)
+    def _on_frame_ready(
+        frame: np.ndarray, event: useq.MDAEvent, frame_meta: FrameMetaV1
+    ) -> None:
+        stream.append(frame)
 
-#     def _on_sequence_finished(sequence: useq.MDASequence) -> None:
-#         stream.flush()
+    def _on_sequence_finished(sequence: useq.MDASequence) -> None:
+        stream.flush()
 
-#     core = CMMCorePlus()
-#     core.loadSystemConfiguration("/Users/fdrgsp/Desktop/test_config.cfg")
-#     core.mda.events.frameReady.connect(_on_frame_ready)
-#     core.mda.events.sequenceFinished.connect(_on_sequence_finished)
+        zarr.open_group(output_path, mode="r")
 
-#     core.mda.run(seq)
+        # validate OME-NGFF JSON at root
+        # TODO: figure out what is the validation error
+        zarr_json_path = output_path / "zarr.json"
+        assert zarr_json_path.exists(), "zarr.json should exist at root"
+        with open(zarr_json_path) as f:
+            root_meta = json.load(f)
+            validate_ome_json(json.dumps(root_meta))
 
-#     # open zarr group and print structure
-#     import zarr
+    core = CMMCorePlus()
+    core.loadSystemConfiguration("/Users/fdrgsp/Desktop/test_config.cfg")
+    core.mda.events.frameReady.connect(_on_frame_ready)
+    core.mda.events.sequenceFinished.connect(_on_sequence_finished)
 
-#     gp = zarr.open_group(output_path, mode="r")
-#     print(gp.tree())
+    core.mda.run(seq)
