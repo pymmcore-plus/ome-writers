@@ -240,6 +240,16 @@ def dims_to_yaozarrs_v5(array_dims: Mapping[str, Sequence[Dimension]]) -> yao_v0
     for array_path, dims in array_dims.items():
         axes, scales = _ome_axes_scales(dims)
 
+        # Sort axes according to NGFF v0.5 spec: time, channel, space
+        # Create tuples of (axis, scale, original_index) for sorting
+        axis_order = {"time": 0, "channel": 1, "space": 2}
+        sorted_items = sorted(
+            zip(axes, scales, range(len(axes)), strict=True),
+            key=lambda x: (axis_order.get(x[0]["type"], 3), x[2])
+        )
+        axes = [item[0] for item in sorted_items]
+        scales = [item[1] for item in sorted_items]
+
         # Convert axes dicts to yaozarrs axis objects
         yao_axes = []
         for ax in axes:
