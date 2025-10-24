@@ -6,6 +6,7 @@ __all__ = [
     "UnitTuple",
     "dims_to_ngff_v5",
     "dims_to_ome",
+    "dims_to_yaozarrs_v5",
     "ome_meta_v5",
 ]
 
@@ -21,6 +22,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     import ome_types
+    import yaozarrs.v05 as yao_v05
 
 OME_DIM_TYPE = {"y": "space", "x": "space", "z": "space", "t": "time", "c": "channel"}
 OME_UNIT = {"um": "micrometer", "ml": "milliliter", "s": "second", None: "unknown"}
@@ -190,8 +192,106 @@ def dims_to_ome(
     return ome
 
 
+def dims_to_yaozarrs_v5(array_dims: Mapping[str, Sequence[Dimension]]) -> yao_v05.Image:
+    """Create OME NGFF v0.5 metadata as a yaozarrs Image object.
+
+    Parameters
+    ----------
+    array_dims : Mapping[str, Sequence[Dimension]]
+        A mapping of array paths to their corresponding dimension information.
+        Each key is the path to a zarr array, and the value is a sequence of
+        Dimension objects describing the dimensions of that array.
+
+    Returns
+    -------
+    yaozarrs.v05.Image
+        The OME-Zarr NGFF v0.5 Image object.
+
+    Raises
+    ------
+    ImportError
+        If yaozarrs is not installed.
+
+    Example
+    -------
+    >>> from ome_writers import Dimension, dims_to_yaozarrs_v5
+    >>> array_dims = {
+    ...     "0": [
+    ...         Dimension(label="t", size=1, unit=(1.0, "s")),
+    ...         Dimension(label="c", size=1),
+    ...         Dimension(label="z", size=1, unit=(1.0, "um")),
+    ...         Dimension(label="y", size=1, unit=(1.0, "um")),
+    ...         Dimension(label="x", size=1, unit=(1.0, "um")),
+    ...     ],
+    ... }
+    >>> image = dims_to_yaozarrs_v5(array_dims)
+    """
+    try:
+        from yaozarrs import v05
+    except ImportError as e:
+        raise ImportError(
+            "The `yaozarrs` package is required to use this function. "
+            "Please install it via `pip install yaozarrs`."
+        ) from e
+
+    # Group arrays by their axes to create multiscales entries
+    multiscales_dict: dict[str, dict] = {}
+
+    for array_path, dims in array_dims.items():
+        axes, scales = _ome_axes_scales(dims)
+
+        # Convert axes dicts to yaozarrs axis objects
+        yao_axes = []
+        for ax in axes:
+            if ax["type"] == "time":
+                yao_axes.append(
+                    v05.TimeAxis(name=ax["name"], type="time", unit=ax.get("unit"))
+                )
+            elif ax["type"] == "space":
+                yao_axes.append(
+                    v05.SpaceAxis(name=ax["name"], type="space", unit=ax.get("unit"))
+                )
+            elif ax["type"] == "channel":
+                yao_axes.append(v05.ChannelAxis(name=ax["name"], type="channel"))
+            else:
+                yao_axes.append(
+                    v05.CustomAxis(
+                        name=ax["name"], type=ax.get("type"), unit=ax.get("unit")
+                    )
+                )
+
+        # Create dataset with coordinate transformations
+        ct = v05.ScaleTransformation(type="scale", scale=scales)
+        ds = v05.Dataset(path=array_path, coordinateTransformations=[ct])
+
+        # Create a hashable key from axes for grouping
+        axes_key = str(axes)
+
+        # Get or create multiscale entry
+        if axes_key not in multiscales_dict:
+            multiscales_dict[axes_key] = {
+                "axes": yao_axes,
+                "datasets": []
+            }
+
+        # Add the dataset to the corresponding group
+        multiscales_dict[axes_key]["datasets"].append(ds)
+
+    # Create Multiscale objects
+    multiscales = [
+        v05.Multiscale(axes=ms_data["axes"], datasets=ms_data["datasets"])
+        for ms_data in multiscales_dict.values()
+    ]
+
+    return v05.Image(version="0.5", multiscales=multiscales)
+
+
 def dims_to_ngff_v5(array_dims: Mapping[str, Sequence[Dimension]]) -> dict:
-    """Create OME NGFF v0.5 metadata.
+    """Create OME NGFF v0.5 metadata as a dictionary.
+
+    .. deprecated::
+        Use `dims_to_yaozarrs_v5` instead. This function is provided for
+        backward compatibility and will be removed in a future version.
 
     Parameters
     ----------
@@ -203,43 +303,10 @@ def dims_to_ngff_v5(array_dims: Mapping[str, Sequence[Dimension]]) -> dict:
     Returns
     -------
     dict
-        The OME-Zarr NGFF v0.5 metadata dictionary.
-
-    Example
-    -------
-    >>> from ome_writers import Dimension
-    >>> array_dims = {
-    ...     "0": [
-    ...         Dimension(label="t", size=1, unit=(1.0, "s")),
-    ...         Dimension(label="c", size=1, unit=(1.0, "s")),
-    ...         Dimension(label="z", size=1, unit=(1.0, "s")),
-    ...         Dimension(label="y", size=1, unit=(1.0, "s")),
-    ...         Dimension(label="x", size=1, unit=(1.0, "s")),
-    ...     ],
-    ... }
-    >>> ome_meta = dims_to_ngff_v5(array_dims)
+        The OME-Zarr NGFF v0.5 metadata as a dictionary with an "ome" key.
     """
-    # Group arrays by their axes to create multiscales entries
-    multiscales: dict[str, dict] = {}
-
-    for array_path, dims in array_dims.items():
-        axes, scales = _ome_axes_scales(dims)
-        ct = {"scale": scales, "type": "scale"}
-        ds = {"path": array_path, "coordinateTransformations": [ct]}
-
-        # Create a hashable key from axes for grouping
-        axes_key = str(axes)
-        # Create a new entry for this axes configuration if it doesn't exist
-        # (in the case where multiple arrays share the same axes, we want to
-        # create multiple datasets under the same multiscale entry, rather than
-        # creating a new multiscale entry with a single dataset each time)
-        multiscale = multiscales.setdefault(axes_key, {"axes": axes, "datasets": []})
-
-        # Add the dataset to the corresponding group
-        multiscale["datasets"].append(ds)
-
-    attrs = {"ome": {"version": "0.5", "multiscales": list(multiscales.values())}}
-    return attrs
+    image = dims_to_yaozarrs_v5(array_dims)
+    return {"ome": image.model_dump(exclude_unset=True, by_alias=True)}
 
 
 def _ome_axes_scales(dims: Sequence[Dimension]) -> tuple[list[dict], list[float]]:
@@ -266,4 +333,4 @@ def _ome_axes_scales(dims: Sequence[Dimension]) -> tuple[list[dict], list[float]
 
 
 # Alias for backward compatibility
-ome_meta_v5 = dims_to_ngff_v5
+ome_meta_v5 = dims_to_yaozarrs_v5

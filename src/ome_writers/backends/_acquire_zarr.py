@@ -171,9 +171,12 @@ class AcquireZarrStream(MultiPositionOMEStream):
         else:
             # Write standard multi-position metadata
             dims = self._non_position_dims
-            from ome_writers._dimensions import dims_to_ngff_v5
+            from ome_writers._dimensions import dims_to_yaozarrs_v5
 
-            attrs = dims_to_ngff_v5({str(i): dims for i in range(self._num_positions)})
+            image = dims_to_yaozarrs_v5(
+                {str(i): dims for i in range(self._num_positions)}
+            )
+            attrs = {"ome": image.model_dump(exclude_unset=True, by_alias=True)}
             zarr_json = Path(self._group_path) / "zarr.json"
             current_meta: dict = {
                 "consolidated_metadata": None,
@@ -243,9 +246,10 @@ class AcquireZarrStream(MultiPositionOMEStream):
             field_zarr_json = field_path / "zarr.json"
 
             # Create image metadata with multiscales
-            from ome_writers._dimensions import dims_to_ngff_v5
+            from ome_writers._dimensions import dims_to_yaozarrs_v5
 
-            image_attrs = dims_to_ngff_v5({"0": dims})
+            image = dims_to_yaozarrs_v5({"0": dims})
+            image_attrs = {"ome": image.model_dump(exclude_unset=True, by_alias=True)}
 
             field_meta = {
                 "zarr_format": 3,

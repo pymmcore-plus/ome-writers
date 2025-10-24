@@ -74,7 +74,7 @@ def test_dimension_to_ome_types_with_positions() -> None:
 
 
 def test_dimension_to_yaozarrs_v5() -> None:
-    """Test dims_to_ngff_v5() conversion."""
+    """Test dims_to_yaozarrs_v5() conversion."""
     pytest.importorskip("yaozarrs")
     import json
 
@@ -89,38 +89,36 @@ def test_dimension_to_yaozarrs_v5() -> None:
 
     # Convert to yaozarrs v0.5 format
     array_dims = {"0": dims}
-    zarr_meta = omew.dims_to_ngff_v5(array_dims)
+    image = omew.dims_to_yaozarrs_v5(array_dims)
 
-    # Validate structure
-    assert "ome" in zarr_meta
-    assert zarr_meta["ome"]["version"] == "0.5"
-    assert "multiscales" in zarr_meta["ome"]
-    assert len(zarr_meta["ome"]["multiscales"]) == 1
+    # Validate structure - image is a yaozarrs.v05.Image object
+    assert image.version == "0.5"
+    assert len(image.multiscales) == 1
 
-    multiscale = zarr_meta["ome"]["multiscales"][0]
-    assert "axes" in multiscale
-    assert "datasets" in multiscale
-    assert len(multiscale["datasets"]) == 1
-    assert multiscale["datasets"][0]["path"] == "0"
+    multiscale = image.multiscales[0]
+    assert len(multiscale.axes) == 4
+    assert len(multiscale.datasets) == 1
+    assert multiscale.datasets[0].path == "0"
 
     # Check axes
-    axes = multiscale["axes"]
+    axes = multiscale.axes
     assert len(axes) == 4
-    assert axes[0]["name"] == "t"
-    assert axes[0]["type"] == "time"
-    assert axes[1]["name"] == "c"
-    assert axes[1]["type"] == "channel"
-    assert axes[2]["name"] == "y"
-    assert axes[2]["type"] == "space"
-    assert axes[3]["name"] == "x"
-    assert axes[3]["type"] == "space"
+    assert axes[0].name == "t"
+    assert axes[0].type == "time"
+    assert axes[1].name == "c"
+    assert axes[1].type == "channel"
+    assert axes[2].name == "y"
+    assert axes[2].type == "space"
+    assert axes[3].name == "x"
+    assert axes[3].type == "space"
 
-    # Validate using yaozarrs (convert dict to JSON string first)
+    # Validate using yaozarrs (convert Image object to dict first)
+    zarr_meta = {"ome": image.model_dump(exclude_unset=True, by_alias=True)}
     validate_ome_json(json.dumps(zarr_meta))
 
 
 def test_dimension_to_yaozarrs_v5_multiple_arrays() -> None:
-    """Test dims_to_ngff_v5() with multiple arrays."""
+    """Test dims_to_yaozarrs_v5() with multiple arrays."""
     pytest.importorskip("yaozarrs")
     import json
 
@@ -135,19 +133,19 @@ def test_dimension_to_yaozarrs_v5_multiple_arrays() -> None:
 
     # Create multiple arrays with same dimensions (e.g., multi-position)
     array_dims = {"0": dims, "1": dims, "2": dims}
-    zarr_meta = omew.dims_to_ngff_v5(array_dims)
+    image = omew.dims_to_yaozarrs_v5(array_dims)
 
-    # Validate structure
-    assert "ome" in zarr_meta
-    assert zarr_meta["ome"]["version"] == "0.5"
+    # Validate structure - image is a yaozarrs.v05.Image object
+    assert image.version == "0.5"
 
-    multiscale = zarr_meta["ome"]["multiscales"][0]
-    assert len(multiscale["datasets"]) == 3
-    assert multiscale["datasets"][0]["path"] == "0"
-    assert multiscale["datasets"][1]["path"] == "1"
-    assert multiscale["datasets"][2]["path"] == "2"
+    multiscale = image.multiscales[0]
+    assert len(multiscale.datasets) == 3
+    assert multiscale.datasets[0].path == "0"
+    assert multiscale.datasets[1].path == "1"
+    assert multiscale.datasets[2].path == "2"
 
-    # Validate using yaozarrs (convert dict to JSON string first)
+    # Validate using yaozarrs (convert Image object to dict first)
+    zarr_meta = {"ome": image.model_dump(exclude_unset=True, by_alias=True)}
     validate_ome_json(json.dumps(zarr_meta))
 
 
@@ -334,7 +332,7 @@ def test_backward_compatibility_dims_to_ome() -> None:
     assert len(ome_obj.images) == 1
 
 
-def test_backward_compatibility_dims_to_ngff_v5() -> None:
+def test_backward_compatibility_dims_to_yaozarrs_v5() -> None:
     """Test that the old dims_to_ngff_v5 function still works."""
     pytest.importorskip("yaozarrs")
 
@@ -343,7 +341,7 @@ def test_backward_compatibility_dims_to_ngff_v5() -> None:
         omew.Dimension(label="x", size=32, unit=(0.2, "um")),
     ]
 
-    # Old function should still work
+    # Old function should still work and return a dict
     zarr_meta = omew.dims_to_ngff_v5({"0": dims})
     assert zarr_meta is not None
     assert "ome" in zarr_meta

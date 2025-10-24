@@ -16,6 +16,7 @@ from ._dimensions import (
     UnitTuple,
     dims_to_ngff_v5,
     dims_to_ome,
+    dims_to_yaozarrs_v5,
     ome_meta_v5,
 )
 from ._plate import (
@@ -26,7 +27,7 @@ from ._plate import (
     plate_to_yaozarrs_v5,
 )
 from ._stream_base import OMEStream
-from ._util import dims_from_useq, fake_data_for_sizes
+from ._util import dims_from_useq, fake_data_for_sizes, plate_from_useq
 from .backends._acquire_zarr import AcquireZarrStream
 from .backends._tensorstore import TensorStoreZarrStream
 from .backends._tifffile import TifffileStream
@@ -48,8 +49,10 @@ __all__ = [
     "dims_from_useq",
     "dims_to_ngff_v5",
     "dims_to_ome",
+    "dims_to_yaozarrs_v5",
     "fake_data_for_sizes",
     "ome_meta_v5",
+    "plate_from_useq",
     "plate_to_ome_types",
     "plate_to_yaozarrs_v5",
 ]

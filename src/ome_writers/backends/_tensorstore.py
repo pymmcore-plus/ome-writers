@@ -126,13 +126,14 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
             # Use non_position_dims for multi-pos, full dims for single pos
             array_dims[array_key] = non_position_dims if self._position_dim else dims
 
-        from ome_writers._dimensions import dims_to_ngff_v5
+        from ome_writers._dimensions import dims_to_yaozarrs_v5
 
+        image = dims_to_yaozarrs_v5(array_dims=array_dims)
         group_zarr = self._group_path / "zarr.json"
         group_meta = {
             "zarr_format": 3,
             "node_type": "group",
-            "attributes": dims_to_ngff_v5(array_dims=array_dims),
+            "attributes": {"ome": image.model_dump(exclude_unset=True, by_alias=True)},
         }
         group_zarr.write_text(json.dumps(group_meta, indent=2))
         return self._group_path
