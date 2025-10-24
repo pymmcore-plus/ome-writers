@@ -286,29 +286,6 @@ def dims_to_yaozarrs_v5(array_dims: Mapping[str, Sequence[Dimension]]) -> yao_v0
     return v05.Image(version="0.5", multiscales=multiscales)
 
 
-def dims_to_ngff_v5(array_dims: Mapping[str, Sequence[Dimension]]) -> dict:
-    """Create OME NGFF v0.5 metadata as a dictionary.
-
-    .. deprecated::
-        Use `dims_to_yaozarrs_v5` instead. This function is provided for
-        backward compatibility and will be removed in a future version.
-
-    Parameters
-    ----------
-    array_dims : Mapping[str, Sequence[Dimension]]
-        A mapping of array paths to their corresponding dimension information.
-        Each key is the path to a zarr array, and the value is a sequence of
-        Dimension objects describing the dimensions of that array.
-
-    Returns
-    -------
-    dict
-        The OME-Zarr NGFF v0.5 metadata as a dictionary with an "ome" key.
-    """
-    image = dims_to_yaozarrs_v5(array_dims)
-    return {"ome": image.model_dump(exclude_unset=True, by_alias=True)}
-
-
 def _ome_axes_scales(dims: Sequence[Dimension]) -> tuple[list[dict], list[float]]:
     """Return ome axes meta.
 

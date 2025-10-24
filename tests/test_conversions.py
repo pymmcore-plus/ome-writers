@@ -1,6 +1,7 @@
 """Tests for Dimension and Plate conversion methods."""
 
 from __future__ import annotations
+import json
 
 import numpy as np
 import pytest
@@ -333,7 +334,7 @@ def test_backward_compatibility_dims_to_ome() -> None:
 
 
 def test_backward_compatibility_dims_to_yaozarrs_v5() -> None:
-    """Test that the old dims_to_ngff_v5 function still works."""
+    """Test that the old ome_meta_v5 function still works."""
     pytest.importorskip("yaozarrs")
 
     dims = [
@@ -342,6 +343,21 @@ def test_backward_compatibility_dims_to_yaozarrs_v5() -> None:
     ]
 
     # Old function should still work and return a dict
-    zarr_meta = omew.dims_to_ngff_v5({"0": dims})
+    zarr_meta = omew.ome_meta_v5({"0": dims})
+
     assert zarr_meta is not None
-    assert "ome" in zarr_meta
+
+    # Validate structure - image is a yaozarrs.v05.Image object
+    assert zarr_meta.version == "0.5"
+
+    multiscale = zarr_meta.multiscales[0]
+    assert len(multiscale.datasets) == 1
+    assert multiscale.datasets[0].path == "0"
+
+    from yaozarrs import validate_ome_json
+
+    # Validate using yaozarrs (convert Image object to dict first)
+    zarr_meta = {"ome": zarr_meta.model_dump(exclude_unset=True, by_alias=True)}
+    validate_ome_json(json.dumps(zarr_meta))
+
+

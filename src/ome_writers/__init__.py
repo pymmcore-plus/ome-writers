@@ -14,7 +14,6 @@ from ._dimensions import (
     Dimension,
     DimensionLabel,
     UnitTuple,
-    dims_to_ngff_v5,
     dims_to_ome,
     dims_to_yaozarrs_v5,
     ome_meta_v5,
