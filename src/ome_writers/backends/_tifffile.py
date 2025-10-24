@@ -8,7 +8,7 @@ from contextlib import suppress
 from itertools import count
 from pathlib import Path
 from queue import Queue
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from typing_extensions import Self
 
@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     import ome_types.model as ome
 
     from ome_writers._dimensions import Dimension
+    from ome_writers._plate import Plate
 
 else:
     with suppress(ImportError):
@@ -80,7 +81,14 @@ class TifffileStream(MultiPositionOMEStream):
         dimensions: Sequence[Dimension],
         *,
         overwrite: bool = False,
+        plate: Plate | None = None,
+        **kwargs: Any,
     ) -> Self:
+        if plate is not None:
+            raise NotImplementedError(
+                "Plate support is not yet implemented for the tifffile backend. "
+                "Use acquire-zarr or tensorstore backends for HCS plate support."
+            )
         # Use MultiPositionOMEStream to handle position logic
         num_positions, tczyx_dims = self._init_positions(dimensions)
         self._delete_existing = overwrite

@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from typing_extensions import Self
 
@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     import numpy as np
 
     from ome_writers._dimensions import Dimension
+    from ome_writers._plate import Plate
 
 
 class TensorStoreZarrStream(MultiPositionOMEStream):
@@ -47,7 +48,14 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         dimensions: Sequence[Dimension],
         *,
         overwrite: bool = False,
+        plate: Plate | None = None,
+        **kwargs: Any,
     ) -> Self:
+        if plate is not None:
+            raise NotImplementedError(
+                "Plate support is not yet implemented for the tensorstore backend. "
+                "Use acquire-zarr backend for HCS plate support."
+            )
         # Use MultiPositionOMEStream to handle position logic
         num_positions, non_position_dims = self._init_positions(dimensions)
         self._delete_existing = overwrite

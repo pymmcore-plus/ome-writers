@@ -18,6 +18,7 @@ stream = create_stream(
     dims,
     backend="acquire-zarr",  # or "tensorstore", or "tiff"
     overwrite=True,
+    downsampling_method="mean",  # or "min", "max", "decimate"
 )
 
 for plane in plane_iter:

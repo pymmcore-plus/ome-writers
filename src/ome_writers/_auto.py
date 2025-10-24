@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, TypeAlias
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias
 
 import numpy as np
 
@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from numpy.typing import DTypeLike
 
     from ._dimensions import Dimension
+    from ._plate import Plate
     from ._stream_base import OMEStream
 
 __all__ = ["create_stream", "init_stream"]
@@ -73,6 +74,8 @@ def create_stream(
     *,
     backend: Literal[BackendName, "auto"] = "auto",
     overwrite: bool = False,
+    plate: Plate | None = None,
+    **kwargs: Any,
 ) -> OMEStream:
     """Create a stream for writing OME-TIFF or OME-ZARR data.
 
@@ -84,6 +87,16 @@ def create_stream(
         NumPy data type for the image data.
     dimensions : Sequence[DimensionInfo]
         Sequence of dimension information describing the data structure.
+        It is important that the order of dimensions matches the order of data being
+        appended. For example, if the data is ordered as tpczyx:
+        dimensions = [
+            Dimension(label='t', size=5),
+            Dimension(label='p', size=10),
+            Dimension(label='c', size=3),
+            Dimension(label='z', size=1),
+            Dimension(label='y', size=512),
+            Dimension(label='x', size=512),
+        ]
 
     backend : Literal["acquire-zarr", "tensorstore", "tiff", "auto"], optional
         The backend to use for writing the data. Options are:
@@ -96,6 +109,12 @@ def create_stream(
         Default is "auto".
     overwrite : bool, optional
         Whether to overwrite existing files or directories. Default is False.
+    plate : Plate | None, optional
+        Optional plate metadata for organizing multi-well acquisitions.
+        If provided, the store will be structured as a plate with wells.
+        Only supported by acquire-zarr and tensorstore backends.
+    **kwargs : Any
+        Additional backend-specific keyword arguments.
 
     Returns
     -------
@@ -103,7 +122,9 @@ def create_stream(
         A configured stream ready for writing frames.
     """
     stream = init_stream(path, backend=backend)
-    return stream.create(str(path), np.dtype(dtype), dimensions, overwrite=overwrite)
+    return stream.create(
+        str(path), np.dtype(dtype), dimensions, overwrite=overwrite, plate=plate
+    )
 
 
 def _autobackend(path: str | Path) -> Literal["acquire-zarr", "tensorstore", "tiff"]:

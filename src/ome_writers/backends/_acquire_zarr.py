@@ -7,7 +7,7 @@ import json
 import shutil
 from contextlib import suppress
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from typing_extensions import Self
 
@@ -42,7 +42,6 @@ class AcquireZarrStream(MultiPositionOMEStream):
         super().__init__()
         self._stream: acquire_zarr.ZarrStream | None = None
         self._plate: Plate | None = None
-        self._well_paths: dict[int, str] = {}  # position_idx -> well_path mapping
 
     def create(
         self,
@@ -51,7 +50,9 @@ class AcquireZarrStream(MultiPositionOMEStream):
         dimensions: Sequence[Dimension],
         *,
         overwrite: bool = False,
+        downsampling_method: acquire_zarr.DownsamplingMethod | None = None,
         plate: Plate | None = None,
+        **kwargs: Any,
     ) -> Self:
         """Create a new stream for writing data.
 
@@ -68,18 +69,28 @@ class AcquireZarrStream(MultiPositionOMEStream):
         plate : Plate | None, optional
             Optional plate metadata for organizing multi-well acquisitions.
             If provided, the store will be structured as a plate with wells.
+        downsampling_method : acquire_zarr.DownsamplingMethod | None, optional
+            The method to use when generating multiscale (downsampled) image pyramids.
+            If provided, acquire-zarr will automatically create additional downsampled
+            datasets for each array until the final spatial (XY) resolution
+            approximately matches the chunk size. Available methods include "mean",
+            "min", "max" and "decimate".
+            By default, None (no downsampling is performed).
 
         Returns
         -------
         Self
             The instance of the stream, allowing for chaining.
         """
-        # Store plate metadata
+        self._downsampling_method = downsampling_method
         self._plate = plate
 
         # Use MultiPositionOMEStream to handle position logic
         num_positions, non_position_dims = self._init_positions(dimensions)
         self._group_path = Path(self._normalize_path(path))
+
+        # Save original dimensions for index mapping
+        self._all_dimensions = dimensions
 
         # Check if directory exists and handle overwrite parameter
         if self._group_path.exists():
@@ -90,174 +101,208 @@ class AcquireZarrStream(MultiPositionOMEStream):
                 )
             shutil.rmtree(self._group_path)
 
-        # Validate plate metadata if provided
-        if plate is not None:
-            # Calculate expected positions: wells * fields_per_well
-            fields_per_well = plate.field_count if plate.field_count is not None else 1
-            expected_positions = len(plate.wells) * fields_per_well
-            if num_positions != expected_positions:
-                raise ValueError(
-                    f"Number of positions ({num_positions}) does not match "
-                    f"expected positions ({expected_positions}) for plate with "
-                    f"{len(plate.wells)} wells and {fields_per_well} field(s) per well"
-                )
-
         # Dimensions will be the same across all positions, so we can create them once
         az_dims = [self._dim_toaqz_dim(dim) for dim in non_position_dims]
-        # keep a strong reference (avoid segfaults)
-        self._az_dims_keepalive = az_dims
 
-        # Create AcquireZarr array settings for each position
-        az_array_settings = []
-        for pos_idx in range(num_positions):
-            if plate is not None:
-                # For plate mode, use well path as the array key
-                well_pos = plate.wells[pos_idx]
-                array_key = f"{well_pos.path}/0"  # /0 is the field index
-                self._well_paths[pos_idx] = well_pos.path
-            else:
-                # For non-plate mode, use position index as key
-                array_key = str(pos_idx)
+        if plate is not None:
+            # Use HCS plate mode with acquire-zarr's hcs_plates parameter
+            self._create_with_hcs_plates(str(self._group_path), az_dims, dtype, plate)
+        else:
+            # Create array settings for each position
+            self._create(str(self._group_path), az_dims, dtype, num_positions)
 
-            az_array_settings.append(self._aqz_pos_array(array_key, az_dims, dtype))
+        return self
 
-        for arr in az_array_settings:
-            for d in arr.dimensions:
-                assert d.chunk_size_px > 0, (d.name, d.chunk_size_px)
-                assert d.shard_size_chunks > 0, (d.name, d.shard_size_chunks)
+    def _create_with_hcs_plates(
+        self,
+        store_path: str,
+        az_dims: list[acquire_zarr.Dimension],
+        dtype: np.dtype,
+        plate: Plate,
+    ) -> None:
+        """Create stream using acquire-zarr's HCS plates support.
 
-        self._az_arrays_keepalive = az_array_settings
+        This method uses the hcs_plates parameter in StreamSettings to properly
+        structure the data as an HCS plate with wells and fields of view.
+        """
+        fields_per_well = plate.field_count or 1
 
-        # Create streams for each position
+        # Create array settings for each field of view
+        fovs_arrays_settings: list[acquire_zarr.ArraySettings] = []
+        for fov_idx in range(fields_per_well):
+            fov_key = f"fov{fov_idx}" if fields_per_well > 1 else "0"
+            fov_array = self._aqz.ArraySettings(
+                output_key=fov_key,
+                dimensions=az_dims,
+                data_type=dtype,
+                downsampling_method=self._downsampling_method,
+            )
+            fovs_arrays_settings.append(fov_array)
+
+        # Create acquisition metadata if provided
+        acquisitions = []
+        if plate.acquisitions:
+            for acq in plate.acquisitions:
+                acquisitions.append(
+                    self._aqz.Acquisition(
+                        id=acq.id,
+                        name=acq.name or f"Acquisition {acq.id}",
+                        start_time=acq.start_time,
+                        end_time=acq.end_time,
+                    )
+                )
+
+        # Create wells with fields of view
+        wells = []
+        for well_pos in plate.wells:
+            row_name, col_name = well_pos.path.split("/")
+
+            # Create field of view entries for this well
+            fov_entries = []
+            for fov_idx, fov_array in enumerate(fovs_arrays_settings):
+                fov_key = f"fov{fov_idx}" if fields_per_well > 1 else "0"
+                fov_entries.append(
+                    self._aqz.FieldOfView(
+                        path=fov_key,
+                        acquisition_id=acquisitions[0].id if acquisitions else None,
+                        array_settings=fov_array,
+                    )
+                )
+
+            well = self._aqz.Well(
+                row_name=row_name,
+                column_name=col_name,
+                images=fov_entries,
+            )
+            wells.append(well)
+
+        # Create the HCS plate
+        # remove any spaces from the plate name for acquire-zarr
+        plate_path = (plate.name or "plate").replace(" ", "_")
+        plate_aqz = self._aqz.Plate(
+            path=plate_path,
+            name=plate.name,
+            row_names=list(plate.rows),
+            column_names=list(plate.columns),
+            wells=wells,
+            acquisitions=acquisitions if acquisitions else None,
+        )
+
+        # Create stream with HCS configuration
         settings = self._aqz.StreamSettings(
-            arrays=az_array_settings,
-            store_path=str(self._group_path),
+            store_path=store_path,
             version=self._aqz.ZarrVersion.V3,
+            hcs_plates=[plate_aqz],
         )
         self._az_settings_keepalive = settings
         self._stream = self._aqz.ZarrStream(settings)
 
-        # If plate mode, update the indices mapping to use well paths
-        if plate is not None:
-            # Rebuild the indices mapping with well paths instead of position indices
-            from itertools import product
+        # Build indices mapping for writing
+        # We need to account for the dimension order when building indices.
+        # The dimensions may be in any order (e.g., [t, p, c] or [p, t, c]),
+        # so we need to find where the position dimension is and iterate
+        # in the correct order.
+        from itertools import product
 
-            self._indices = {}
-            non_p_ranges = [
-                range(d.size) for d in non_position_dims if d.label not in "yx"
-            ]
-            idx = 0
-            for pos_idx in range(num_positions):
-                well_pos = plate.wells[pos_idx]
-                array_key = f"{well_pos.path}/0"  # /0 is the field index
-                for non_p_idx in (tuple(v) for v in product(*non_p_ranges)):
-                    self._indices[idx] = (array_key, non_p_idx)
-                    idx += 1
+        # Build ranges for all non-spatial dimensions in the order they appear
+        all_dims_ranges = []
+        position_dim_index = -1
+        for d in self._all_dimensions:
+            if d.label in "xy":
+                continue
+            if d.label == "p":
+                position_dim_index = len(all_dims_ranges)
+            all_dims_ranges.append(range(d.size))
 
+        self._indices = {}
+        for idx, combo in enumerate(product(*all_dims_ranges)):
+            # Extract position index and non-position indices
+            # Example:
+            # idx, combo = 0, (0, 0, 0)
+            # idx, combo = 1, (0, 0, 1)
+            # idx, combo = 2, (0, 1, 0)
+            #...
+            if position_dim_index >= 0:
+                pos_idx = combo[position_dim_index]
+                non_p_idx = tuple(
+                    v for i, v in enumerate(combo) if i != position_dim_index
+                )
+            else:
+                pos_idx = 0
+                non_p_idx = combo
+
+            # Map position index to well/FOV path
+            well_idx = pos_idx // fields_per_well
+            fov_idx_in_well = pos_idx % fields_per_well
+
+            well_pos = plate.wells[well_idx]
+            row_name, col_name = well_pos.path.split("/")
+            fov_key = f"fov{fov_idx_in_well}" if fields_per_well > 1 else "0"
+            array_key = f"{plate_path}/{row_name}/{col_name}/{fov_key}"
+
+            self._indices[idx] = (array_key, non_p_idx)
+
+    def _create(
+        self,
+        store_path: str,
+        az_dims: list[acquire_zarr.Dimension],
+        dtype: np.dtype,
+        num_positions: int,
+    ) -> None:
+        """Create stream without HCS plates (standard multi-position mode)."""
+        # Create AcquireZarr array settings for each position
+        array_settings: list[acquire_zarr.ArraySettings] = []
+        for pos_idx in range(num_positions):
+            array_key = str(pos_idx)
+            array_settings.append(self._aqz_pos_array(array_key, az_dims, dtype))
+
+        for arr in array_settings:
+            for d in arr.dimensions:
+                assert d.chunk_size_px > 0, (d.name, d.chunk_size_px)
+                assert d.shard_size_chunks > 0, (d.name, d.shard_size_chunks)
+
+        # Create streams for each position
+        settings = self._aqz.StreamSettings(
+            arrays=array_settings,
+            store_path=store_path,
+            version=self._aqz.ZarrVersion.V3,
+        )
+        self._az_settings_keepalive = settings
+        self._stream = self._aqz.ZarrStream(settings)
         self._patch_group_metadata()
-        return self
 
     def _patch_group_metadata(self) -> None:
         """Patch the group metadata with OME NGFF 0.5 metadata.
 
         This method exists because there are cases in which the standard acquire-zarr
         API is not flexible enough to handle all the cases we need (such as multiple
-        positions or plate layouts).  This method manually writes the OME NGFF v0.5
-        metadata with our manually constructed metadata.
+        positions).  For HCS plates, acquire-zarr handles metadata automatically,
+        so we don't need to patch anything.
         """
         if self._plate is not None:
-            # Write plate metadata
-            self._write_plate_metadata()
-        else:
-            # Write standard multi-position metadata
-            dims = self._non_position_dims
-            from ome_writers._dimensions import dims_to_yaozarrs_v5
-
-            image = dims_to_yaozarrs_v5(
-                {str(i): dims for i in range(self._num_positions)}
-            )
-            attrs = {"ome": image.model_dump(exclude_unset=True, by_alias=True)}
-            zarr_json = Path(self._group_path) / "zarr.json"
-            current_meta: dict = {
-                "consolidated_metadata": None,
-                "node_type": "group",
-                "zarr_format": 3,
-            }
-            if zarr_json.exists():
-                with suppress(json.JSONDecodeError):
-                    with open(zarr_json) as f:
-                        current_meta = json.load(f)
-
-            current_meta.setdefault("attributes", {}).update(attrs)
-            zarr_json.write_text(json.dumps(current_meta, indent=2))
-
-    def _write_plate_metadata(self) -> None:
-        """Write plate metadata to top-level and well metadata.
-
-        This creates the proper NGFF v0.5 plate structure with plate metadata
-        at the top level and well metadata in each well group.
-        """
-        if self._plate is None:
+            # HCS plates are handled by acquire-zarr's hcs_plates parameter
+            # No need to patch metadata
             return
 
-        # Convert plate to yaozarrs format
-        try:
-            from ome_writers._plate import plate_to_yaozarrs_v5
-
-            yao_plate = plate_to_yaozarrs_v5(self._plate)
-        except ImportError as e:
-            raise ImportError(
-                "yaozarrs is required for plate support. "
-                "Please install it via `pip install yaozarrs[io]`"
-            ) from e
-
-        # Write top-level plate metadata
-        zarr_json = Path(self._group_path) / "zarr.json"
-        plate_meta = {
-            "zarr_format": 3,
-            "node_type": "group",
-            "attributes": yao_plate.model_dump(exclude_unset=True, by_alias=True),
-        }
-        zarr_json.write_text(json.dumps(plate_meta, indent=2))
-
-        # Write well metadata for each well
+        # Write standard multi-position metadata
         dims = self._non_position_dims
-        for well_pos in self._plate.wells:
-            well_path = Path(self._group_path) / well_pos.path
-            well_zarr_json = well_path / "zarr.json"
+        from ome_writers._dimensions import dims_to_yaozarrs_v5
 
-            # Create well metadata with field images
-            # For now, assume 1 field per well (field "0")
-            from yaozarrs import v05
+        image = dims_to_yaozarrs_v5({str(i): dims for i in range(self._num_positions)})
+        attrs = {"ome": image.model_dump(exclude_unset=True, by_alias=True)}
+        zarr_json = Path(self._group_path) / "zarr.json"
+        current_meta: dict = {
+            "consolidated_metadata": None,
+            "node_type": "group",
+            "zarr_format": 3,
+        }
+        if zarr_json.exists():
+            with suppress(json.JSONDecodeError):
+                with open(zarr_json) as f:
+                    current_meta = json.load(f)
 
-            well_def = v05.WellDef(images=[v05.FieldOfView(path="0", acquisition=None)])
-            well_obj = v05.Well(version="0.5", well=well_def)
-
-            well_meta = {
-                "zarr_format": 3,
-                "node_type": "group",
-                "attributes": well_obj.model_dump(exclude_unset=True, by_alias=True),
-            }
-            well_zarr_json.parent.mkdir(parents=True, exist_ok=True)
-            well_zarr_json.write_text(json.dumps(well_meta, indent=2))
-
-            # Write image metadata for the field (field "0")
-            field_path = well_path / "0"
-            field_zarr_json = field_path / "zarr.json"
-
-            # Create image metadata with multiscales
-            from ome_writers._dimensions import dims_to_yaozarrs_v5
-
-            image = dims_to_yaozarrs_v5({"0": dims})
-            image_attrs = {"ome": image.model_dump(exclude_unset=True, by_alias=True)}
-
-            field_meta = {
-                "zarr_format": 3,
-                "node_type": "group",
-                "attributes": image_attrs,
-            }
-            field_zarr_json.parent.mkdir(parents=True, exist_ok=True)
-            field_zarr_json.write_text(json.dumps(field_meta, indent=2))
+        current_meta.setdefault("attributes", {}).update(attrs)
+        zarr_json.write_text(json.dumps(current_meta, indent=2))
 
     def _write_to_backend(
         self, array_key: str, index: tuple[int, ...], frame: np.ndarray
@@ -273,7 +318,9 @@ class AcquireZarrStream(MultiPositionOMEStream):
         self._stream.close()
         self._stream = None
         gc.collect()
-        self._patch_group_metadata()
+        # Only patch metadata for non-plate mode
+        if self._plate is None:
+            self._patch_group_metadata()
 
     def is_active(self) -> bool:
         if self._stream is None:
@@ -321,4 +368,5 @@ class AcquireZarrStream(MultiPositionOMEStream):
             output_key=array_key,
             dimensions=dimensions,
             data_type=dtype,
+            downsampling_method=self._downsampling_method,
         )
