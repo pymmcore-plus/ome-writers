@@ -6,6 +6,7 @@ import importlib.util
 import json
 import shutil
 from contextlib import suppress
+from itertools import product
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -113,6 +114,35 @@ class AcquireZarrStream(MultiPositionOMEStream):
 
         return self
 
+    def _create(
+        self,
+        store_path: str,
+        az_dims: list[acquire_zarr.Dimension],
+        dtype: np.dtype,
+        num_positions: int,
+    ) -> None:
+        """Create stream without HCS plates (standard multi-position mode)."""
+        # Create AcquireZarr array settings for each position
+        array_settings: list[acquire_zarr.ArraySettings] = []
+        for pos_idx in range(num_positions):
+            array_key = str(pos_idx)
+            array_settings.append(self._aqz_pos_array(array_key, az_dims, dtype))
+
+        for arr in array_settings:
+            for d in arr.dimensions:
+                assert d.chunk_size_px > 0, (d.name, d.chunk_size_px)
+                assert d.shard_size_chunks > 0, (d.name, d.shard_size_chunks)
+
+        # Create streams for each position
+        settings = self._aqz.StreamSettings(
+            arrays=array_settings,
+            store_path=store_path,
+            version=self._aqz.ZarrVersion.V3,
+        )
+        self._az_settings_keepalive = settings
+        self._stream = self._aqz.ZarrStream(settings)
+        self._patch_group_metadata()
+
     def _create_with_hcs_plates(
         self,
         store_path: str,
@@ -202,7 +232,6 @@ class AcquireZarrStream(MultiPositionOMEStream):
         # The dimensions may be in any order (e.g., [t, p, c] or [p, t, c]),
         # so we need to find where the position dimension is and iterate
         # in the correct order.
-        from itertools import product
 
         # Build ranges for all non-spatial dimensions in the order they appear
         all_dims_ranges = []
@@ -221,7 +250,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
             # idx, combo = 0, (0, 0, 0)
             # idx, combo = 1, (0, 0, 1)
             # idx, combo = 2, (0, 1, 0)
-            #...
+            # ...
             if position_dim_index >= 0:
                 pos_idx = combo[position_dim_index]
                 non_p_idx = tuple(
@@ -241,35 +270,6 @@ class AcquireZarrStream(MultiPositionOMEStream):
             array_key = f"{plate_path}/{row_name}/{col_name}/{fov_key}"
 
             self._indices[idx] = (array_key, non_p_idx)
-
-    def _create(
-        self,
-        store_path: str,
-        az_dims: list[acquire_zarr.Dimension],
-        dtype: np.dtype,
-        num_positions: int,
-    ) -> None:
-        """Create stream without HCS plates (standard multi-position mode)."""
-        # Create AcquireZarr array settings for each position
-        array_settings: list[acquire_zarr.ArraySettings] = []
-        for pos_idx in range(num_positions):
-            array_key = str(pos_idx)
-            array_settings.append(self._aqz_pos_array(array_key, az_dims, dtype))
-
-        for arr in array_settings:
-            for d in arr.dimensions:
-                assert d.chunk_size_px > 0, (d.name, d.chunk_size_px)
-                assert d.shard_size_chunks > 0, (d.name, d.shard_size_chunks)
-
-        # Create streams for each position
-        settings = self._aqz.StreamSettings(
-            arrays=array_settings,
-            store_path=store_path,
-            version=self._aqz.ZarrVersion.V3,
-        )
-        self._az_settings_keepalive = settings
-        self._stream = self._aqz.ZarrStream(settings)
-        self._patch_group_metadata()
 
     def _patch_group_metadata(self) -> None:
         """Patch the group metadata with OME NGFF 0.5 metadata.

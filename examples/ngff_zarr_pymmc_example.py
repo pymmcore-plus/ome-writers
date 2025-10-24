@@ -1,0 +1,63 @@
+"""HCS example using ome-writers and acquire-zarr with pymmcore_plus and useq."""
+
+from pathlib import Path
+
+import numpy as np
+import useq
+import zarr
+from pymmcore_plus import CMMCorePlus
+from pymmcore_plus.metadata import FrameMetaV1
+from useq import MDASequence
+
+import ome_writers as omew
+
+output_path = Path(__file__).parent / "acq_z.zarr"
+
+
+# Create MDA sequence with the plate plan
+seq = MDASequence(
+    axis_order="ptc",
+    stage_positions=[(0, 0, 0), (100, 100, 10)],
+    time_plan={"interval": 0.1, "loops": 3},
+    channels=["FITC"],
+)
+
+# Convert useq MDASequence to ome-writers Plate and Dimensions
+plate = omew.plate_from_useq(seq)
+dims = omew.dims_from_useq(seq, image_width=512, image_height=512)
+
+# Create acquire-zarr stream
+stream = omew.create_stream(
+    path=output_path,
+    dimensions=dims,
+    dtype=np.uint16,
+    backend="acquire-zarr",
+    plate=plate,
+    overwrite=True,
+    downsampling_method="mean",
+)
+
+# create CMMCorePlus instance and load system configuration
+core = CMMCorePlus()
+core.loadSystemConfiguration()
+
+
+# connect event handlers
+@core.mda.events.frameReady.connect
+def _on_frame_ready(
+    frame: np.ndarray, event: useq.MDAEvent, frame_meta: FrameMetaV1
+) -> None:
+    stream.append(frame)
+
+
+@core.mda.events.sequenceFinished.connect
+def _on_sequence_finished(sequence: useq.MDASequence) -> None:
+    stream.flush()
+
+    # open zarr group and print structure
+    gp = zarr.open_group(output_path, mode="r")
+    print(gp.tree())
+
+
+# run the MDA sequence
+core.mda.run(seq)
