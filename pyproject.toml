@@ -30,7 +30,7 @@ dependencies = ["numpy>=2", "typing-extensions>=4.10.0"]
 
 [project.optional-dependencies]
 tensorstore = ["tensorstore>=0.1.69,!=0.1.72", "yaozarrs[io]>=0.0.1rc2"]
-acquire-zarr = ["acquire-zarr>=0.5.2", "yaozarrs[io]>=0.0.1rc2"]
+acquire-zarr = ["acquire-zarr>=0.6.0", "yaozarrs[io]>=0.0.1rc2"]
 tifffile = ["tifffile>=2024.8.30", "ome-types>=0.6.1", "pydantic>=2.8"]
 
 [dependency-groups]
