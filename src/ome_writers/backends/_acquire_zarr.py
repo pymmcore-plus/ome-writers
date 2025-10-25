@@ -145,6 +145,90 @@ class AcquireZarrStream(MultiPositionOMEStream):
         This method uses the hcs_plates parameter in StreamSettings to properly
         structure the data as an HCS plate with wells and fields of view.
         """
+        # Create the acquire-zarr plate object
+        plate_aqz = self._to_acquire_zarr_plate(plate, az_dims, dtype)
+        fields_per_well = plate.field_count or 1
+
+        # Create stream with HCS configuration
+        settings = self._aqz.StreamSettings(
+            store_path=store_path,
+            version=self._aqz.ZarrVersion.V3,
+            hcs_plates=[plate_aqz],
+        )
+        self._az_settings_keepalive = settings
+        self._stream = self._aqz.ZarrStream(settings)
+
+        # Build indices mapping for writing
+        # We need to account for the dimension order when building indices.
+        # The dimensions may be in any order (e.g., [t, p, c] or [p, t, c]),
+        # so we need to find where the position dimension is and iterate
+        # in the correct order.
+
+        # Build ranges for all non-spatial dimensions in the order they appear
+        all_dims_ranges: list[range] = []
+        position_dim_index = -1
+        for d in self._all_dimensions:
+            if d.label in "xy":
+                continue
+            if d.label == "p":
+                position_dim_index = len(all_dims_ranges)
+            all_dims_ranges.append(range(d.size))
+
+        self._indices = {}
+        # remove any spaces from the plate name for acquire-zarr
+        plate_path = (plate.name or "plate").replace(" ", "_")
+        for idx, combo in enumerate(product(*all_dims_ranges)):
+            # Extract position index and non-position indices
+            # Example:
+            # idx, combo = 0, (0, 0, 0)
+            # idx, combo = 1, (0, 0, 1)
+            # idx, combo = 2, (0, 1, 0)
+            # ...
+            if position_dim_index >= 0:
+                pos_idx = combo[position_dim_index]
+                non_p_idx = tuple(
+                    v for i, v in enumerate(combo) if i != position_dim_index
+                )
+            else:
+                pos_idx = 0
+                non_p_idx = combo
+
+            # Map position index to well/FOV path
+            well_idx = pos_idx // fields_per_well
+            fov_idx_in_well = pos_idx % fields_per_well
+
+            well_pos = plate.wells[well_idx]
+            row_name, col_name = well_pos.path.split("/")
+            fov_key = f"fov{fov_idx_in_well}" if fields_per_well > 1 else "0"
+            array_key = f"{plate_path}/{row_name}/{col_name}/{fov_key}"
+
+            self._indices[idx] = (array_key, non_p_idx)
+
+    def _to_acquire_zarr_plate(
+        self,
+        plate: Plate,
+        az_dims: list[acquire_zarr.Dimension],
+        dtype: np.dtype,
+    ) -> acquire_zarr.Plate:
+        """Convert ome_writers Plate to acquire-zarr Plate object.
+
+        This method creates an acquire-zarr Plate object with proper well and
+        field of view structure from an ome_writers Plate object.
+
+        Parameters
+        ----------
+        plate : Plate
+            The ome_writers plate object to convert.
+        az_dims : list[acquire_zarr.Dimension]
+            The acquire-zarr dimensions for the arrays.
+        dtype : np.dtype
+            The NumPy data type for the image data.
+
+        Returns
+        -------
+        acquire_zarr.Plate
+            The created acquire-zarr Plate object.
+        """
         fields_per_well = plate.field_count or 1
 
         # Create acquisition metadata if provided
@@ -202,58 +286,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
             acquisitions=acquisitions if acquisitions else None,
         )
 
-        # Create stream with HCS configuration
-        settings = self._aqz.StreamSettings(
-            store_path=store_path,
-            version=self._aqz.ZarrVersion.V3,
-            hcs_plates=[plate_aqz],
-        )
-        self._az_settings_keepalive = settings
-        self._stream = self._aqz.ZarrStream(settings)
-
-        # Build indices mapping for writing
-        # We need to account for the dimension order when building indices.
-        # The dimensions may be in any order (e.g., [t, p, c] or [p, t, c]),
-        # so we need to find where the position dimension is and iterate
-        # in the correct order.
-
-        # Build ranges for all non-spatial dimensions in the order they appear
-        all_dims_ranges: list[range] = []
-        position_dim_index = -1
-        for d in self._all_dimensions:
-            if d.label in "xy":
-                continue
-            if d.label == "p":
-                position_dim_index = len(all_dims_ranges)
-            all_dims_ranges.append(range(d.size))
-
-        self._indices = {}
-        for idx, combo in enumerate(product(*all_dims_ranges)):
-            # Extract position index and non-position indices
-            # Example:
-            # idx, combo = 0, (0, 0, 0)
-            # idx, combo = 1, (0, 0, 1)
-            # idx, combo = 2, (0, 1, 0)
-            # ...
-            if position_dim_index >= 0:
-                pos_idx = combo[position_dim_index]
-                non_p_idx = tuple(
-                    v for i, v in enumerate(combo) if i != position_dim_index
-                )
-            else:
-                pos_idx = 0
-                non_p_idx = combo
-
-            # Map position index to well/FOV path
-            well_idx = pos_idx // fields_per_well
-            fov_idx_in_well = pos_idx % fields_per_well
-
-            well_pos = plate.wells[well_idx]
-            row_name, col_name = well_pos.path.split("/")
-            fov_key = f"fov{fov_idx_in_well}" if fields_per_well > 1 else "0"
-            array_key = f"{plate_path}/{row_name}/{col_name}/{fov_key}"
-
-            self._indices[idx] = (array_key, non_p_idx)
+        return plate_aqz
 
     def _patch_group_metadata(self) -> None:
         """Patch the group metadata with OME NGFF 0.5 metadata.

@@ -154,6 +154,9 @@ def dims_from_useq(
         **(units or {}),
     }
 
+    # TODO: implement proper chunk size handling. e.g. add a parameter that maps
+    # dimension labels to chunk sizes: chunk_sizes: Mapping[str, int]
+    # e.g. chunk_sizes={"t": 1, "z": 1, "c": 1, "y": 256, "x": 256}
     dims: list[Dimension] = []
     for ax, size in seq.sizes.items():
         if size:
@@ -161,12 +164,20 @@ def dims_from_useq(
             dim_label = cast("DimensionLabel", str(ax))
             if dim_label not in _units:
                 raise ValueError(f"Unsupported axis for OME: {ax}")
-            dims.append(Dimension(label=dim_label, size=size, unit=_units[dim_label]))
+            dims.append(
+                Dimension(
+                    label=dim_label, size=size, unit=_units[dim_label], chunk_size=1
+                )
+            )
 
     return [
         *dims,
-        Dimension(label="y", size=image_height, unit=_units["y"]),
-        Dimension(label="x", size=image_width, unit=_units["x"]),
+        Dimension(
+            label="y", size=image_height, unit=_units["y"], chunk_size=image_height
+        ),
+        Dimension(
+            label="x", size=image_width, unit=_units["x"], chunk_size=image_width
+        ),
     ]
 
 

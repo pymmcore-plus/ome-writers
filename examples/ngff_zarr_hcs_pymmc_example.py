@@ -1,6 +1,6 @@
 """HCS example using ome-writers and acquire-zarr with pymmcore_plus and useq."""
 
-# import json
+import json
 from pathlib import Path
 
 import numpy as np
@@ -9,11 +9,11 @@ import zarr
 from pymmcore_plus import CMMCorePlus
 from pymmcore_plus.metadata import FrameMetaV1
 from useq import GridRowsColumns, MDASequence, WellPlatePlan
+from yaozarrs import validate_ome_json
 
-# from yaozarrs import validate_ome_json
 import ome_writers as omew
 
-output_path = Path(__file__).parent / "acq_z.zarr"
+output_path = Path(__file__).parent / "acq_z_hcs.zarr"
 
 # Create a simple plate plan with 3 wells, 3 fov per well
 plate_plan = WellPlatePlan(
@@ -68,11 +68,11 @@ def _on_sequence_finished(sequence: useq.MDASequence) -> None:
 
     # validate OME-NGFF JSON at root
     # TODO: figure out what is the validation error
-    # zarr_json_path = output_path / "zarr.json"
-    # assert zarr_json_path.exists(), "zarr.json should exist at root"
-    # with open(zarr_json_path) as f:
-    #     root_meta = json.load(f)
-    #     validate_ome_json(json.dumps(root_meta))
+    zarr_json_path = output_path / "zarr.json"
+    assert zarr_json_path.exists(), "zarr.json should exist at root"
+    with open(zarr_json_path) as f:
+        root_meta = json.load(f)
+        validate_ome_json(json.dumps(root_meta))
 
 
 # run the MDA sequence
