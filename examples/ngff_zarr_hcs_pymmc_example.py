@@ -33,7 +33,9 @@ seq = MDASequence(
 
 # Convert useq MDASequence to ome-writers Plate and Dimensions
 plate = omew.plate_from_useq(seq)
-dims = omew.dims_from_useq(seq, image_width=512, image_height=512)
+dims = omew.dims_from_useq(
+    seq, image_width=512, image_height=512, chunk_sizes={"y": 256, "x": 256}
+)
 
 # Create acquire-zarr stream
 stream = omew.create_stream(

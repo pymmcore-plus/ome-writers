@@ -4,7 +4,6 @@ __all__ = [
     "Dimension",
     "DimensionLabel",
     "UnitTuple",
-    "dims_to_ngff_v5",
     "dims_to_ome",
     "dims_to_yaozarrs_v5",
     "ome_meta_v5",
@@ -245,7 +244,7 @@ def dims_to_yaozarrs_v5(array_dims: Mapping[str, Sequence[Dimension]]) -> yao_v0
         axis_order = {"time": 0, "channel": 1, "space": 2}
         sorted_items = sorted(
             zip(axes, scales, range(len(axes)), strict=True),
-            key=lambda x: (axis_order.get(x[0]["type"], 3), x[2])
+            key=lambda x: (axis_order.get(x[0]["type"], 3), x[2]),
         )
         axes = [item[0] for item in sorted_items]
         scales = [item[1] for item in sorted_items]
@@ -279,10 +278,7 @@ def dims_to_yaozarrs_v5(array_dims: Mapping[str, Sequence[Dimension]]) -> yao_v0
 
         # Get or create multiscale entry
         if axes_key not in multiscales_dict:
-            multiscales_dict[axes_key] = {
-                "axes": yao_axes,
-                "datasets": []
-            }
+            multiscales_dict[axes_key] = {"axes": yao_axes, "datasets": []}
 
         # Add the dataset to the corresponding group
         multiscales_dict[axes_key]["datasets"].append(ds)

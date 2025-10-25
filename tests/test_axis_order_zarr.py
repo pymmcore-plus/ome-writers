@@ -13,18 +13,21 @@ import pytest
 
 import ome_writers as omew
 
+pytest.importorskip("useq")
+pytest.importorskip("zarr")
+
 
 def create_unique_frame(
     p: int, t: int, c: int, shape: tuple[int, int] = (32, 32)
 ) -> np.ndarray:
     """Create a frame with a unique constant value based on indices.
 
-    The frame is filled with: value = p * 10000 + t * 1000 + c * 100
+    The frame is filled with: value = p * 1000 + t * 100 + c * 10
 
     This makes it easy to verify that frames are stored in the correct
     position by checking their mean value.
     """
-    value = p * 10000 + t * 1000 + c * 100
+    value = p * 1000 + t * 100 + c * 10
     return np.full(shape, value, dtype=np.uint16)
 
 
@@ -36,7 +39,7 @@ def verify_frame_value(
     Returns (is_correct, message).
     """
     mean = float(np.mean(array))
-    expected_value = expected_p * 10000 + expected_t * 1000 + expected_c * 100
+    expected_value = expected_p * 1000 + expected_t * 100 + expected_c * 10
 
     # For constant-filled arrays, mean should be exactly the fill value
     # Allow small tolerance for floating point arithmetic
@@ -61,7 +64,6 @@ def test_axis_order_tpc_without_plate(tmp_path: Path) -> None:
 
     Acquisition order with tpc: P0T0C0, P1T0C0, P0T1C0, P1T1C0, P0T2C0, P1T2C0
     """
-    pytest.importorskip("useq")
     from useq import MDASequence
 
     output_path = tmp_path / "test_tpc.zarr"
@@ -94,7 +96,6 @@ def test_axis_order_tpc_without_plate(tmp_path: Path) -> None:
 
     stream.flush()
 
-    # Verify data
     import zarr
 
     zg = zarr.open_group(output_path, mode="r")
@@ -106,9 +107,7 @@ def test_axis_order_tpc_without_plate(tmp_path: Path) -> None:
             for c in range(2):
                 frame_data = pos_array[t, c, :, :]
                 is_correct, msg = verify_frame_value(frame_data, p, t, c)
-                assert is_correct, (
-                    f"Position {p}, Time {t}, Channel {c}: {msg}"
-                )
+                assert is_correct, f"Position {p}, Time {t}, Channel {c}: {msg}"
 
 
 def test_axis_order_ptc_without_plate(tmp_path: Path) -> None:
@@ -121,7 +120,6 @@ def test_axis_order_ptc_without_plate(tmp_path: Path) -> None:
 
     Acquisition order with ptc: P0T0C0, P0T0C1, P0T1C0, P0T1C1, ..., P1T0C0, ...
     """
-    pytest.importorskip("useq")
     from useq import MDASequence
 
     output_path = tmp_path / "test_ptc.zarr"
@@ -166,9 +164,7 @@ def test_axis_order_ptc_without_plate(tmp_path: Path) -> None:
             for c in range(2):
                 frame_data = pos_array[t, c, :, :]
                 is_correct, msg = verify_frame_value(frame_data, p, t, c)
-                assert is_correct, (
-                    f"Position {p}, Time {p}, Channel {c}: {msg}"
-                )
+                assert is_correct, f"Position {p}, Time {p}, Channel {c}: {msg}"
 
 
 def test_axis_order_ctp_without_plate(tmp_path: Path) -> None:
@@ -180,7 +176,6 @@ def test_axis_order_ctp_without_plate(tmp_path: Path) -> None:
     Acquisition order with ctp: P0T0C0, P1T0C0, P0T1C0, P1T1C0, ..., P0T0C1, ...
     Dimension order: [c, t, p, y, x] (non-position: [c, t])
     """
-    pytest.importorskip("useq")
     from useq import MDASequence
 
     output_path = tmp_path / "test_ctp.zarr"
@@ -226,9 +221,7 @@ def test_axis_order_ctp_without_plate(tmp_path: Path) -> None:
                 # Index as [c, t, :, :] not [t, c, :, :]
                 frame_data = pos_array[c, t, :, :]
                 is_correct, msg = verify_frame_value(frame_data, p, t, c)
-                assert is_correct, (
-                    f"Position {p}, Time {t}, Channel {c}: {msg}"
-                )
+                assert is_correct, f"Position {p}, Time {t}, Channel {c}: {msg}"
 
 
 def test_axis_order_ptc_with_hcs_plate(tmp_path: Path) -> None:
@@ -238,7 +231,6 @@ def test_axis_order_ptc_with_hcs_plate(tmp_path: Path) -> None:
     per well, the axis_order is properly respected and frames are written to
     the correct field of view locations.
     """
-    pytest.importorskip("useq")
     from useq import GridRowsColumns, MDASequence, WellPlatePlan
 
     output_path = tmp_path / "test_ptc_plate.zarr"
@@ -310,7 +302,6 @@ def test_axis_order_tpc_with_hcs_plate(tmp_path: Path) -> None:
     This test uses a different axis order with HCS plates to ensure
     the fix works correctly in all scenarios.
     """
-    pytest.importorskip("useq")
     from useq import GridRowsColumns, MDASequence, WellPlatePlan
 
     output_path = tmp_path / "test_tpc_plate.zarr"
@@ -375,4 +366,3 @@ def test_axis_order_tpc_with_hcs_plate(tmp_path: Path) -> None:
                 frame_data = fov_array[t, c, :, :]
                 is_correct, msg = verify_frame_value(frame_data, p, t, c)
                 assert is_correct, f"{fov_path} (p={p}, t={t}, c={c}): {msg}"
-

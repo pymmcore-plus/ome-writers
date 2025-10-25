@@ -6,19 +6,23 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
-import useq
-import zarr
-from yaozarrs import validate_ome_json
 
 import ome_writers as omew
 
 try:
-    import useq
     from pymmcore_plus import CMMCorePlus
     from pymmcore_plus.metadata._ome import create_ome_metadata
 except ImportError:
     pytest.skip("pymmcore_plus is not installed", allow_module_level=True)
 
+
+pytest.importorskip("useq")
+pytest.importorskip("acquire_zarr")
+pytest.importorskip("yaozarrs")
+pytest.importorskip("zarr")
+
+import useq
+from yaozarrs import validate_ome_json
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -188,7 +192,6 @@ def test_pymmcore_plus_plate_zarr(tmp_path: Path) -> None:
         backend="acquire-zarr",
         plate=plate,
         overwrite=True,
-        # downsampling_method="mean",
     )
 
     def _on_frame_ready(
@@ -199,9 +202,11 @@ def test_pymmcore_plus_plate_zarr(tmp_path: Path) -> None:
     def _on_sequence_finished(sequence: useq.MDASequence) -> None:
         stream.flush()
 
-        zarr.open_group(output_path, mode="r")
-
         # validate OME-NGFF JSON at root
+        pytest.importorskip("zarr")
+        import zarr
+
+        zarr.open_group(output_path, mode="r")
         # TODO: figure out what is the validation error
         zarr_json_path = output_path / "zarr.json"
         assert zarr_json_path.exists(), "zarr.json should exist at root"

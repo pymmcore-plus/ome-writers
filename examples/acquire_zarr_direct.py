@@ -19,7 +19,6 @@ dtype = np.dtype("uint16")
 data = np.random.randint(0, 65536, size=(10, 2, 5, 512, 512), dtype=dtype)
 nt, nc, nz, ny, nx = data.shape
 
-
 dimensions = [
     Dimension(
         name="t",

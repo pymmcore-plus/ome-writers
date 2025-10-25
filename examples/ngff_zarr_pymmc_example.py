@@ -18,31 +18,16 @@ output_path = Path(__file__).parent / "acq_z.zarr"
 
 # Create MDA sequence with the plate plan
 seq = MDASequence(
-    axis_order="ptc",
+    axis_order="tpcz",
     stage_positions=[(0, 0, 0), (100, 100, 10)],
-    time_plan={"interval": 0.1, "loops": 3},
-    channels=["FITC"],
+    time_plan={"interval": 0.1, "loops": 10},
+    channels=["FITC", "DAPI"],
+    z_plan={"range": 4, "step": 1},
 )
 
 # Convert useq MDASequence to ome-writers Plate and Dimensions
 plate = omew.plate_from_useq(seq)
 dims = omew.dims_from_useq(seq, image_width=512, image_height=512)
-
-# add chunck sizes to dimensions for downsampling
-dims_chunked = []
-for dim in dims:
-    if dim.label in ("y", "x"):
-        dims_chunked.append(
-            omew.Dimension(
-                label=dim.label,
-                size=dim.size,
-                unit=dim.unit,
-                chunk_size=256,
-            )
-        )
-    else:
-        dims_chunked.append(dim)
-dims = dims_chunked
 
 # Create acquire-zarr stream
 stream = omew.create_stream(
@@ -52,7 +37,6 @@ stream = omew.create_stream(
     backend="acquire-zarr",
     plate=plate,
     overwrite=True,
-    downsampling_method="mean",
 )
 
 # create CMMCorePlus instance and load system configuration

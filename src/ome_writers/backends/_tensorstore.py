@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from typing_extensions import Self
 
@@ -49,7 +49,6 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         *,
         overwrite: bool = False,
         plate: Plate | None = None,
-        **kwargs: Any,
     ) -> Self:
         if plate is not None:
             raise NotImplementedError(

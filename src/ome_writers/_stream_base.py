@@ -4,7 +4,7 @@ import abc
 from abc import abstractmethod
 from itertools import product
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from typing_extensions import Self
 
@@ -39,7 +39,6 @@ class OMEStream(abc.ABC):
         *,
         overwrite: bool = False,
         plate: Plate | None = None,
-        **kwargs: Any,
     ) -> Self:
         """Create a new stream for path, dtype, and dimensions.
 
@@ -171,7 +170,7 @@ class MultiPositionOMEStream(OMEStream):
 
         # Build index mapping that respects the order of dimensions
         # Create ranges for ALL dimensions (including position) in their original order
-        all_dims_ranges = []
+        all_dims_ranges: list[range] = []
         position_dim_index = -1
         for d in dimensions:
             if d.label not in "yx":

@@ -8,7 +8,7 @@ import shutil
 from contextlib import suppress
 from itertools import product
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from typing_extensions import Self
 
@@ -51,9 +51,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
         dimensions: Sequence[Dimension],
         *,
         overwrite: bool = False,
-        downsampling_method: acquire_zarr.DownsamplingMethod | None = None,
         plate: Plate | None = None,
-        **kwargs: Any,
     ) -> Self:
         """Create a new stream for writing data.
 
@@ -70,21 +68,12 @@ class AcquireZarrStream(MultiPositionOMEStream):
         plate : Plate | None, optional
             Optional plate metadata for organizing multi-well acquisitions.
             If provided, the store will be structured as a plate with wells.
-        downsampling_method : acquire_zarr.DownsamplingMethod | None, optional
-            The method to use when generating multiscale (downsampled) image pyramids.
-            It works only if the chunk sizes is specified in the `dimensions` parameter.
-            If provided, acquire-zarr will automatically create additional downsampled
-            datasets for each array until the final spatial (XY) resolution
-            approximately matches the chunk size. Available methods include "mean",
-            "min", "max" and "decimate".
-            By default, None (no downsampling is performed).
 
         Returns
         -------
         Self
             The instance of the stream, allowing for chaining.
         """
-        self._downsampling_method = downsampling_method
         self._plate = plate
 
         # Use MultiPositionOMEStream to handle position logic
@@ -105,9 +94,6 @@ class AcquireZarrStream(MultiPositionOMEStream):
 
         # Dimensions will be the same across all positions, so we can create them once
         az_dims = [self._dim_toaqz_dim(dim) for dim in non_position_dims]
-
-        from rich import print
-        print(az_dims)
 
         if plate is not None:
             # Use HCS plate mode with acquire-zarr's hcs_plates parameter
@@ -161,18 +147,6 @@ class AcquireZarrStream(MultiPositionOMEStream):
         """
         fields_per_well = plate.field_count or 1
 
-        # Create array settings for each field of view
-        fovs_arrays_settings: list[acquire_zarr.ArraySettings] = []
-        for fov_idx in range(fields_per_well):
-            fov_key = f"fov{fov_idx}" if fields_per_well > 1 else "0"
-            fov_array = self._aqz.ArraySettings(
-                output_key=fov_key,
-                dimensions=az_dims,
-                data_type=dtype,
-                downsampling_method=self._downsampling_method,
-            )
-            fovs_arrays_settings.append(fov_array)
-
         # Create acquisition metadata if provided
         acquisitions = []
         if plate.acquisitions:
@@ -193,8 +167,14 @@ class AcquireZarrStream(MultiPositionOMEStream):
 
             # Create field of view entries for this well
             fov_entries = []
-            for fov_idx, fov_array in enumerate(fovs_arrays_settings):
+            for fov_idx in range(fields_per_well):
                 fov_key = f"fov{fov_idx}" if fields_per_well > 1 else "0"
+                # Create a new ArraySettings for each FOV to ensure proper configuration
+                fov_array = self._aqz.ArraySettings(
+                    output_key=fov_key,
+                    dimensions=az_dims,
+                    data_type=dtype,
+                )
                 fov_entries.append(
                     self._aqz.FieldOfView(
                         path=fov_key,
@@ -238,7 +218,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
         # in the correct order.
 
         # Build ranges for all non-spatial dimensions in the order they appear
-        all_dims_ranges = []
+        all_dims_ranges: list[range] = []
         position_dim_index = -1
         for d in self._all_dimensions:
             if d.label in "xy":
@@ -369,8 +349,5 @@ class AcquireZarrStream(MultiPositionOMEStream):
             The array settings for this position or well/field.
         """
         return self._aqz.ArraySettings(
-            output_key=array_key,
-            dimensions=dimensions,
-            data_type=dtype,
-            downsampling_method=self._downsampling_method,
+            output_key=array_key, dimensions=dimensions, data_type=dtype
         )

@@ -1,6 +1,7 @@
 """Tests for Dimension and Plate conversion methods."""
 
 from __future__ import annotations
+
 import json
 
 import numpy as np
@@ -359,5 +360,3 @@ def test_backward_compatibility_dims_to_yaozarrs_v5() -> None:
     # Validate using yaozarrs (convert Image object to dict first)
     zarr_meta = {"ome": zarr_meta.model_dump(exclude_unset=True, by_alias=True)}
     validate_ome_json(json.dumps(zarr_meta))
-
-

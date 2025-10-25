@@ -8,7 +8,7 @@ from contextlib import suppress
 from itertools import count
 from pathlib import Path
 from queue import Queue
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from typing_extensions import Self
 
@@ -82,7 +82,6 @@ class TifffileStream(MultiPositionOMEStream):
         *,
         overwrite: bool = False,
         plate: Plate | None = None,
-        **kwargs: Any,
     ) -> Self:
         if plate is not None:
             raise NotImplementedError(
