@@ -6,75 +6,103 @@ frames with unique statistical properties (mean, std) that encode the
 exact indices (p, t, c), making it easy to verify correctness.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
 
 import ome_writers as omew
 
+if TYPE_CHECKING:
+    from .conftest import AvailableBackend
+
 pytest.importorskip("useq")
-pytest.importorskip("zarr")
 
 
 def create_unique_frame(
-    p: int, t: int, c: int, shape: tuple[int, int] = (32, 32)
+    p: int, t: int, c: int, z: int, shape: tuple[int, int] = (32, 32)
 ) -> np.ndarray:
     """Create a frame with a unique constant value based on indices.
 
-    The frame is filled with: value = p * 1000 + t * 100 + c * 10
+    The frame is filled with: value = p * 10000 + t * 1000 + c * 100 + z * 10
 
     This makes it easy to verify that frames are stored in the correct
     position by checking their mean value.
     """
-    value = p * 1000 + t * 100 + c * 10
+    value = p * 10000 + t * 1000 + c * 100 + z * 10
     return np.full(shape, value, dtype=np.uint16)
 
 
 def verify_frame_value(
-    array: np.ndarray, expected_p: int, expected_t: int, expected_c: int
+    array: np.ndarray,
+    expected_p: int,
+    expected_t: int,
+    expected_c: int,
+    expected_z: int,
 ) -> tuple[bool, str]:
     """Verify that frame has the expected constant value.
 
     Returns (is_correct, message).
     """
     mean = float(np.mean(array))
-    expected_value = expected_p * 1000 + expected_t * 100 + expected_c * 10
+    expected_value = (
+        expected_p * 10000 + expected_t * 1000 + expected_c * 100 + expected_z * 10
+    )
 
     # For constant-filled arrays, mean should be exactly the fill value
     # Allow small tolerance for floating point arithmetic
     is_correct = abs(mean - expected_value) < 0.1
 
     if is_correct:
-        return True, f"Correct (p={expected_p}, t={expected_t}, c={expected_c})"
+        msg = (
+            f"Correct (p={expected_p}, t={expected_t}, c={expected_c}, z={expected_z})"
+        )
+        return True, msg
     else:
         return (
             False,
             f"Value mismatch: expected {expected_value} for "
-            f"(p={expected_p}, t={expected_t}, c={expected_c}), got {mean:.0f}",
+            f"(p={expected_p}, t={expected_t}, c={expected_c}, z={expected_z}), "
+            f"got {mean:.0f}",
         )
 
 
-def test_axis_order_tpc(tmp_path: Path) -> None:
-    """Test that axis_order='tpc' works correctly.
+@pytest.mark.parametrize("axis_order", ["tpzc", "ptzc", "cztp", "tpcz", "ptcz"])
+def test_axis_order(axis_order: str, backend: AvailableBackend, tmp_path: Path) -> None:
+    """Test that different axis_order values work correctly.
 
-    This test ensures that when using axis_order='tpc' (time, position, channel),
-    frames are written to the correct positions in the zarr array even though
-    the acquisition order differs from the default position-first order.
+    This test ensures that frames are written to the correct positions
+    regardless of the acquisition order specified by axis_order.
 
-    Acquisition order with tpc: P0T0C0, P1T0C0, P0T1C0, P1T1C0, P0T2C0, P1T2C0
+    Parameters
+    ----------
+    axis_order : str
+        The acquisition order (e.g., 'tpzc', 'ptzc', 'cztp').
+    backend : AvailableBackend
+        The backend to use for testing.
+    tmp_path : Path
+        Temporary directory for test output.
     """
     from useq import MDASequence
 
-    output_path = tmp_path / "test_tpc.zarr"
+    # Create output path - for TIFF backend, we need to explicitly add .ome.tiff
+    # because the backend strips and re-adds extensions
+    if backend.file_ext.endswith("tiff"):
+        output_path = tmp_path / f"test_{axis_order}.ome.tiff"
+    else:
+        output_path = tmp_path / f"test_{axis_order}.{backend.file_ext}"
 
-    # Create sequence with axis_order="tpc"
-    # 2 positions, 3 timepoints, 2 channels = 12 frames
+    # Create sequence with specified axis_order
+    # 2 positions, 3 timepoints, 2 channels, 4 z-slices = 48 frames
     seq = MDASequence(
-        axis_order="tpc",
+        axis_order=axis_order,
         stage_positions=[(0.0, 0.0), (1.0, 1.0)],
         time_plan={"interval": 0.1, "loops": 3},
         channels=["DAPI", "FITC"],
+        z_plan={"range": 3.0, "step": 1.0},
     )
 
     dims = omew.dims_from_useq(seq, image_width=32, image_height=32)
@@ -82,7 +110,7 @@ def test_axis_order_tpc(tmp_path: Path) -> None:
         path=output_path,
         dimensions=dims,
         dtype=np.uint16,
-        backend="acquire-zarr",
+        backend=backend.name,
         overwrite=True,
     )
 
@@ -91,232 +119,65 @@ def test_axis_order_tpc(tmp_path: Path) -> None:
         p = event.index.get("p", 0)
         t = event.index.get("t", 0)
         c = event.index.get("c", 0)
-        frame = create_unique_frame(p, t, c)
+        z = event.index.get("z", 0)
+        frame = create_unique_frame(p, t, c, z)
         stream.append(frame)
 
     stream.flush()
 
-    import zarr
+    # Verify data based on backend type
+    if backend.file_ext.endswith("zarr"):
+        import zarr
 
-    zg = zarr.open_group(output_path, mode="r")
+        zg = zarr.open_group(output_path, mode="r")
 
-    # Check all positions, timepoints, and channels
-    for p in range(2):
-        pos_array = zg[str(p)]
-        for t in range(3):
-            for c in range(2):
-                frame_data = pos_array[t, c, :, :]
-                is_correct, msg = verify_frame_value(frame_data, p, t, c)
-                assert is_correct, f"Position {p}, Time {t}, Channel {c}: {msg}"
+        # Determine the expected array indexing based on axis_order
+        # The dims are created in axis_order, so we need to know the non-position order
+        non_pos_dims = [d.label for d in dims if d.label not in "pyx"]
 
-
-def test_axis_order_ptc(tmp_path: Path) -> None:
-    """Test that axis_order='ptc' works correctly.
-
-    This test ensures that when using axis_order='ptc' (position, time, channel),
-    frames are written to the correct positions. This is the more traditional
-    acquisition order where all timepoints are acquired at a position before
-    moving to the next position.
-
-    Acquisition order with ptc: P0T0C0, P0T0C1, P0T1C0, P0T1C1, ..., P1T0C0, ...
-    """
-    from useq import MDASequence
-
-    output_path = tmp_path / "test_ptc.zarr"
-
-    # Create sequence with axis_order="ptc"
-    # 2 positions, 3 timepoints, 2 channels = 12 frames
-    seq = MDASequence(
-        axis_order="ptc",
-        stage_positions=[(0.0, 0.0), (1.0, 1.0)],
-        time_plan={"interval": 0.1, "loops": 3},
-        channels=["DAPI", "FITC"],
-    )
-
-    dims = omew.dims_from_useq(seq, image_width=32, image_height=32)
-    stream = omew.create_stream(
-        path=output_path,
-        dimensions=dims,
-        dtype=np.uint16,
-        backend="acquire-zarr",
-        overwrite=True,
-    )
-
-    # Write frames with unique statistics
-    for event in seq:
-        p = event.index.get("p", 0)
-        t = event.index.get("t", 0)
-        c = event.index.get("c", 0)
-        frame = create_unique_frame(p, t, c)
-        stream.append(frame)
-
-    stream.flush()
-
-    # Verify data
-    import zarr
-
-    zg = zarr.open_group(output_path, mode="r")
-
-    # Check all positions, timepoints, and channels
-    for p in range(2):
-        pos_array = zg[str(p)]
-        for t in range(3):
-            for c in range(2):
-                frame_data = pos_array[t, c, :, :]
-                is_correct, msg = verify_frame_value(frame_data, p, t, c)
-                assert is_correct, f"Position {p}, Time {p}, Channel {c}: {msg}"
-
-
-def test_axis_order_ctp(tmp_path: Path) -> None:
-    """Test that axis_order='ctp' works correctly.
-
-    This tests a different ordering where channels are acquired first,
-    then timepoints, then positions.
-
-    Acquisition order with ctp: P0T0C0, P1T0C0, P0T1C0, P1T1C0, ..., P0T0C1, ...
-    Dimension order: [c, t, p, y, x] (non-position: [c, t])
-    """
-    from useq import MDASequence
-
-    output_path = tmp_path / "test_ctp.zarr"
-
-    # Create sequence with axis_order="ctp"
-    seq = MDASequence(
-        axis_order="ctp",
-        stage_positions=[(0.0, 0.0), (1.0, 1.0)],
-        time_plan={"interval": 0.1, "loops": 3},
-        channels=["DAPI", "FITC"],
-    )
-
-    dims = omew.dims_from_useq(seq, image_width=32, image_height=32)
-    stream = omew.create_stream(
-        path=output_path,
-        dimensions=dims,
-        dtype=np.uint16,
-        backend="acquire-zarr",
-        overwrite=True,
-    )
-
-    # Write frames with unique values
-    for event in seq:
-        p = event.index.get("p", 0)
-        t = event.index.get("t", 0)
-        c = event.index.get("c", 0)
-        frame = create_unique_frame(p, t, c)
-        stream.append(frame)
-
-    stream.flush()
-
-    # Verify data
-    import zarr
-
-    zg = zarr.open_group(output_path, mode="r")
-
-    # For axis_order="ctp", dimensions are [c, t, p, y, x]
-    # So non-position dims are [c, t], meaning array is indexed as [c, t, y, x]
-    for p in range(2):
-        pos_array = zg[str(p)]
-        for c in range(2):
-            for t in range(3):
-                # Index as [c, t, :, :] not [t, c, :, :]
-                frame_data = pos_array[c, t, :, :]
-                is_correct, msg = verify_frame_value(frame_data, p, t, c)
-                assert is_correct, f"Position {p}, Time {t}, Channel {c}: {msg}"
-
-
-def test_axis_order_tensorstore(tmp_path: Path) -> None:
-    """Test that axis_order works with tensorstore backend."""
-    pytest.importorskip("tensorstore")
-    from useq import MDASequence
-
-    output_path = tmp_path / "test_tensorstore_tpc.zarr"
-
-    # Create sequence with axis_order="tpc"
-    seq = MDASequence(
-        axis_order="tpc",
-        stage_positions=[(0.0, 0.0), (1.0, 1.0)],
-        time_plan={"interval": 0.1, "loops": 3},
-        channels=["DAPI", "FITC"],
-    )
-
-    dims = omew.dims_from_useq(seq, image_width=32, image_height=32)
-    stream = omew.create_stream(
-        path=output_path,
-        dimensions=dims,
-        dtype=np.uint16,
-        backend="tensorstore",
-        overwrite=True,
-    )
-
-    # Write frames with unique statistics
-    for event in seq:
-        p = event.index.get("p", 0)
-        t = event.index.get("t", 0)
-        c = event.index.get("c", 0)
-        frame = create_unique_frame(p, t, c)
-        stream.append(frame)
-
-    stream.flush()
-
-    import zarr
-
-    zg = zarr.open_group(output_path, mode="r")
-
-    # Check all positions, timepoints, and channels
-    for p in range(2):
-        pos_array = zg[str(p)]
-        for t in range(3):
-            for c in range(2):
-                frame_data = pos_array[t, c, :, :]
-                is_correct, msg = verify_frame_value(frame_data, p, t, c)
-                assert is_correct, f"Position {p}, Time {t}, Channel {c}: {msg}"
-
-
-def test_axis_order_tiff(tmp_path: Path) -> None:
-    """Test that axis_order works with tiff backend."""
-    pytest.importorskip("tifffile")
-    from useq import MDASequence
-
-    output_path = tmp_path / "test_tiff_tpc.ome.tiff"
-
-    # Create sequence with axis_order="tpc"
-    seq = MDASequence(
-        axis_order="tpc",
-        stage_positions=[(0.0, 0.0), (1.0, 1.0)],
-        time_plan={"interval": 0.1, "loops": 3},
-        channels=["DAPI", "FITC"],
-    )
-
-    dims = omew.dims_from_useq(seq, image_width=32, image_height=32)
-    stream = omew.create_stream(
-        path=output_path,
-        dimensions=dims,
-        dtype=np.uint16,
-        backend="tiff",
-        overwrite=True,
-    )
-
-    # Write frames with unique statistics
-    for event in seq:
-        p = event.index.get("p", 0)
-        t = event.index.get("t", 0)
-        c = event.index.get("c", 0)
-        frame = create_unique_frame(p, t, c)
-        stream.append(frame)
-
-    stream.flush()
-
-    import tifffile
-
-    # For multi-position TIFF, separate files are created with _p{idx:03d} suffix
-    for p in range(2):
-        tiff_path = tmp_path / f"test_tiff_tpc_p{p:03d}.ome.tiff"
-
-        with tifffile.TiffFile(tiff_path) as tif:
-            data = tif.asarray()
-            # TIFF data shape is [t, c, y, x]
+        # Check all positions, timepoints, channels, and z-slices
+        for p in range(2):
+            pos_array = zg[str(p)]
             for t in range(3):
                 for c in range(2):
-                    frame_data = data[t, c, :, :]
-                    is_correct, msg = verify_frame_value(frame_data, p, t, c)
-                    assert is_correct, f"Position {p}, Time {t}, Channel {c}: {msg}"
+                    for z in range(4):
+                        # Build index dict for all dimensions
+                        indices = {"t": t, "c": c, "z": z}
+                        idx_tuple = tuple(indices[d] for d in non_pos_dims)
+                        frame_data = pos_array[(*idx_tuple, slice(None), slice(None))]
+
+                        is_correct, msg = verify_frame_value(frame_data, p, t, c, z)
+                        assert is_correct, (
+                            f"Position {p}, Time {t}, Channel {c}, Z {z}: {msg}"
+                        )
+
+    elif backend.file_ext.endswith("tiff"):
+        import tifffile
+
+        # For multi-position TIFF, the backend strips .ome.tiff extension,
+        # adds _p{idx:03d}, then adds .ome.tiff back
+        # So test_tpc.ome.tiff becomes test_tpc_p000.ome.tiff
+        base_path = str(output_path)
+        for possible_ext in [".ome.tiff", ".ome.tif", ".tiff", ".tif"]:
+            if base_path.endswith(possible_ext):
+                ext = possible_ext
+                base_name = base_path[: -len(possible_ext)]
+                break
+        else:
+            ext = ""
+            base_name = base_path
+
+        for p in range(2):
+            tiff_path = tmp_path / f"{Path(base_name).name}_p{p:03d}{ext}"
+
+            with tifffile.TiffFile(tiff_path) as tif:
+                data = tif.asarray()
+                # TIFF data is always stored in [t, c, z, y, x] order
+                for t in range(3):
+                    for c in range(2):
+                        for z in range(4):
+                            frame_data = data[t, c, z, :, :]
+                            is_correct, msg = verify_frame_value(frame_data, p, t, c, z)
+                            assert is_correct, (
+                                f"Position {p}, Time {t}, Channel {c}, Z {z}: {msg}"
+                            )
