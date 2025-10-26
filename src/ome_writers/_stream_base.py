@@ -48,6 +48,8 @@ class OMEStream(abc.ABC):
             NumPy data type for the image data.
         dimensions : Sequence[Dimension]
             Sequence of dimension information describing the data structure.
+            The order of dimensions in this sequence determines the acquisition order
+            (i.e., the order in which frames will be appended to the stream).
         overwrite : bool, optional
             Whether to overwrite existing files or directories. Default is False.
 
@@ -125,6 +127,15 @@ class MultiPositionOMEStream(OMEStream):
     ) -> tuple[int, Sequence[Dimension]]:
         """Initialize position tracking and return num_positions, non_position_dims.
 
+        The order of dimensions determines the acquisition order. This method builds
+        an index mapping that translates sequential append() calls to the correct
+        position and storage indices.
+
+        Parameters
+        ----------
+        dimensions : Sequence[Dimension]
+            All dimensions including position. The order determines acquisition order.
+
         Returns
         -------
         tuple[int, Sequence[Dimension]]
@@ -134,11 +145,44 @@ class MultiPositionOMEStream(OMEStream):
         position_dims = [d for d in dimensions if d.label == "p"]
         non_position_dims = [d for d in dimensions if d.label != "p"]
         num_positions = position_dims[0].size if position_dims else 1
-        non_p_ranges = [range(d.size) for d in non_position_dims if d.label not in "yx"]
-        range_iter = enumerate(product(range(num_positions), *non_p_ranges))
+
+        # Build dimension ranges (excluding x, y which are not iterated)
+        non_spatial_dims = [d for d in non_position_dims if d.label not in "yx"]
+
+        # Use the order of dimensions to determine acquisition order
+        # Create a mapping from label to range
+        dim_ranges = {d.label: range(d.size) for d in dimensions if d.label not in "yx"}
+
+        # Build ranges in the order dimensions appear
+        ordered_ranges = []
+        ordered_labels = []
+        for dim in dimensions:
+            if dim.label == "p":
+                ordered_ranges.append(range(num_positions))
+                ordered_labels.append("p")
+            elif dim.label in dim_ranges and dim.label not in "yx":
+                ordered_ranges.append(dim_ranges[dim.label])
+                ordered_labels.append(dim.label)
+
+        # Storage order is always: position, then non_position_dims order
+        storage_labels = ["p"] + [d.label for d in non_spatial_dims]
+
+        # Create index mapping
+        self._indices = {}
+        for i, acq_indices in enumerate(product(*ordered_ranges)):
+            # Map acquisition indices to storage indices
+            acq_dict = dict(zip(ordered_labels, acq_indices, strict=False))
+            pos = acq_dict.get("p", 0)
+
+            # Build storage index for non-position dimensions
+            storage_idx = tuple(
+                acq_dict[label]
+                for label in storage_labels[1:]  # skip 'p'
+            )
+
+            self._indices[i] = (str(pos), storage_idx)
 
         self._position_dim = position_dims[0] if position_dims else None
-        self._indices = {i: (str(pos), tuple(idx)) for i, (pos, *idx) in range_iter}
         self._append_count = 0
         self._num_positions = num_positions
         self._non_position_dims = non_position_dims

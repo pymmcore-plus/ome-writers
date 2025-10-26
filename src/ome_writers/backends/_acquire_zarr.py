@@ -65,6 +65,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
 
         # Dimensions will be the same across all positions, so we can create them once
         az_dims = [self._dim_toaqz_dim(dim) for dim in non_position_dims]
+
         # keep a strong reference (avoid segfaults)
         self._az_dims_keepalive = az_dims
 
@@ -79,6 +80,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
                 assert d.chunk_size_px > 0, (d.name, d.chunk_size_px)
                 assert d.shard_size_chunks > 0, (d.name, d.shard_size_chunks)
 
+        # keep a strong reference (avoid segfaults)
         self._az_arrays_keepalive = az_array_settings
 
         # Create streams for each position
@@ -87,7 +89,9 @@ class AcquireZarrStream(MultiPositionOMEStream):
             store_path=str(self._group_path),
             version=self._aqz.ZarrVersion.V3,
         )
+        # keep a strong reference (avoid segfaults)
         self._az_settings_keepalive = settings
+
         self._stream = self._aqz.ZarrStream(settings)
 
         self._patch_group_metadata()
@@ -122,6 +126,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
     ) -> None:
         """AcquireZarr-specific write implementation."""
         if self._stream is not None:
+            print(f"Appending {array_key} with index {index}")
             self._stream.append(frame, key=array_key)
 
     def flush(self) -> None:

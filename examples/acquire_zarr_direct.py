@@ -14,6 +14,8 @@ from acquire_zarr import (
     ZarrVersion,
 )
 
+output = Path("~/Desktop/some_path_ts.zarr").expanduser()
+
 # TCZYX
 dtype = np.dtype("uint16")
 data = np.random.randint(0, 65536, size=(10, 2, 5, 512, 512), dtype=dtype)
@@ -58,7 +60,6 @@ dimensions = [
     ),
 ]
 
-output = Path("~/Desktop/some_path_ts.zarr").expanduser()
 settings = StreamSettings(
     arrays=[
         ArraySettings(

@@ -183,6 +183,7 @@ class TifffileStream(MultiPositionOMEStream):
         self, array_key: str, index: tuple[int, ...], frame: np.ndarray
     ) -> None:
         """TIFF-specific write implementation."""
+        print(f"Appending {array_key} with index {index}")
         self._queues[int(array_key)].put(frame)
 
     def _update_position_metadata(self, position_idx: int, metadata: ome.OME) -> None:
