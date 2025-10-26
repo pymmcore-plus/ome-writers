@@ -15,8 +15,8 @@ backend = "acquire-zarr"
 # backend = "tensorstore"
 # backend = "tiff"
 
-# Create a MDASequence.
-# NOTE: the axis_order how the data will be appended to the stream.
+# Create a MDASequence. NOTE: the axis_order determines the order in which frames will
+# be appended to the stream.
 seq = MDASequence(
     axis_order="tpcz",
     stage_positions=[(0.0, 0.0), (10.0, 10.0)],
@@ -47,3 +47,5 @@ for event in seq:
     stream.append(frame)
 
 stream.flush()
+
+print("Data written successfully to", output_path)

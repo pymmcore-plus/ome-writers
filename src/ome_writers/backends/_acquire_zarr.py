@@ -126,7 +126,6 @@ class AcquireZarrStream(MultiPositionOMEStream):
     ) -> None:
         """AcquireZarr-specific write implementation."""
         if self._stream is not None:
-            print(f"Appending {array_key} with index {index}")
             self._stream.append(frame, key=array_key)
 
     def flush(self) -> None:

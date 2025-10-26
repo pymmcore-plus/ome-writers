@@ -149,9 +149,9 @@ class MultiPositionOMEStream(OMEStream):
         # Build dimension ranges (excluding x, y which are not iterated)
         non_spatial_dims = [d for d in non_position_dims if d.label not in "yx"]
 
-        # Use the order of dimensions to determine acquisition order
-        # Create a mapping from label to range
-        dim_ranges = {d.label: range(d.size) for d in dimensions if d.label not in "yx"}
+        # Use the order of dimensions to determine acquisition order. Create a mapping
+        # from label to range
+        dim_ranges = {d.label: range(d.size) for d in non_spatial_dims}
 
         # Build ranges in the order dimensions appear
         ordered_ranges = []
@@ -164,9 +164,6 @@ class MultiPositionOMEStream(OMEStream):
                 ordered_ranges.append(dim_ranges[dim.label])
                 ordered_labels.append(dim.label)
 
-        # Storage order is always: position, then non_position_dims order
-        storage_labels = ["p"] + [d.label for d in non_spatial_dims]
-
         # Create index mapping
         self._indices = {}
         for i, acq_indices in enumerate(product(*ordered_ranges)):
@@ -176,8 +173,7 @@ class MultiPositionOMEStream(OMEStream):
 
             # Build storage index for non-position dimensions
             storage_idx = tuple(
-                acq_dict[label]
-                for label in storage_labels[1:]  # skip 'p'
+                acq_dict[label] for label in [d.label for d in non_spatial_dims]
             )
 
             self._indices[i] = (str(pos), storage_idx)

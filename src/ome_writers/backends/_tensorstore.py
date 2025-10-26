@@ -95,7 +95,6 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         self, array_key: str, index: tuple[int, ...], frame: np.ndarray
     ) -> None:
         """TensorStore-specific write implementation."""
-        print(f"Appending {array_key} with index {index}")
         store = self._stores[array_key]
         future = store[index].write(frame)  # type: ignore[index]
         self._futures.append(future)
