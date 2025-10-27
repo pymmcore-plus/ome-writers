@@ -92,11 +92,17 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         }
 
     def _write_to_backend(
-        self, array_key: str, index: tuple[int, ...], frame: np.ndarray
+        self, array_key: str, index: dict[str, int], frame: np.ndarray
     ) -> None:
         """TensorStore-specific write implementation."""
         store = self._stores[array_key]
-        future = store[index].write(frame)  # type: ignore[index]
+
+        non_spatial_dims = [d for d in self._non_position_dims if d.label not in "yx"]
+        idx_tuple = tuple(index[d.label] for d in non_spatial_dims)
+
+        print(f"Writing to array {array_key} at index {idx_tuple}")
+
+        future = store[idx_tuple].write(frame)  # type: ignore[index]
         self._futures.append(future)
 
     def flush(self) -> None:

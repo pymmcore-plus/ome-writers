@@ -122,10 +122,15 @@ class AcquireZarrStream(MultiPositionOMEStream):
         zarr_json.write_text(json.dumps(current_meta, indent=2))
 
     def _write_to_backend(
-        self, array_key: str, index: tuple[int, ...], frame: np.ndarray
+        self, array_key: str, index: dict[str, int], frame: np.ndarray
     ) -> None:
         """AcquireZarr-specific write implementation."""
         if self._stream is not None:
+            # index may be a mapping (label -> index) from the base class; keep
+            # the log readable by showing the mapping but AcquireZarr's append
+            # API expects the full frame and a key (position), not the index.
+            display_idx = index if not isinstance(index, dict) else {k: index[k] for k in index}
+            print(f"Appending to array {array_key} at index {display_idx}")
             self._stream.append(frame, key=array_key)
 
     def flush(self) -> None:
