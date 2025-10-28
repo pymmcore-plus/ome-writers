@@ -142,21 +142,41 @@ class MultiPositionOMEStream(OMEStream):
             The number of positions and the non-position dimensions.
         """
         # Separate position dimension from other dimensions
+
         position_dims = [d for d in dimensions if d.label == "p"]
+        # e.g. [Dimension(label='p', size=2, unit=None, chunk_size=None)]
+
         non_position_dims = [d for d in dimensions if d.label != "p"]
+        # e.g. [
+        #   Dimension(label='t', size=10, unit=(1.0, 's'), chunk_size=None)
+        #   Dimension(label='c', size=2, unit=None, chunk_size=None)
+        #   Dimension(label='z', size=3, unit=(1.0, 'um'), chunk_size=None)
+        #   Dimension(label='y', size=32, unit=(1.0, 'um'), chunk_size=None)
+        #   Dimension(label='x', size=32, unit=(1.0, 'um'), chunk_size=None)
+        # ]
         num_positions = position_dims[0].size if position_dims else 1
 
         # Build dimension ranges (excluding x, y which are not iterated)
         non_spatial_dims = [d for d in non_position_dims if d.label not in "yx"]
+        # e.g. [
+        #   Dimension(label='t', size=10, unit=(1.0, 's'), chunk_size=None)
+        #   Dimension(label='c', size=2, unit=None, chunk_size=None)
+        #   Dimension(label='z', size=3, unit=(1.0, 'um'), chunk_size=None)
+        # ]
 
-        # Use the order of dimensions to determine acquisition order
+        # -----Use the order of dimensions to determine acquisition order-----
 
         # Create a mapping from label to range
         dim_ranges = {d.label: range(d.size) for d in non_spatial_dims}
+        # e.g. {'t': range(0, 10), 'c': range(0, 2), 'z': range(0, 3)}
 
         # Build ranges in the order dimensions appear
         ordered_ranges = []
+        # e.g. [range(0, 10), range(0, 2), range(0, 2), range(0, 3)]
+
         ordered_labels = []
+        # e.g. ['t', 'p', 'c', 'z']
+
         for dim in dimensions:
             if dim.label == "p":
                 ordered_ranges.append(range(num_positions))
@@ -168,15 +188,28 @@ class MultiPositionOMEStream(OMEStream):
         # Create index mapping. Store a storage-tuple of ints in the order of
         # non_spatial_dims so backends can directly use the tuple as an index.
         self._indices = {}
+        # e.g. {acq_index: (array_key/pos, non-position axis tuple)}
+        # {
+        #   0: ('0', (0, 0, 0)),
+        #   1: ('0', (0, 0, 1)),
+        #   ...,
+        #   6: ('1', (0, 0, 0)),
+        #   7: ('1', (0, 0, 1)),
+        #   ...,
+        # }
+
         for i, acq_indices in enumerate(product(*ordered_ranges)):
             # Map acquisition indices to storage indices
             acq_dict = dict(zip(ordered_labels, acq_indices, strict=False))
+            # e.g. {'t': 0, 'p': 0, 'c': 0, 'z': 0}
+
             pos = acq_dict.get("p", 0)
 
             # Build storage tuple for non-position, non-spatial dimensions
             storage_tuple: tuple[int, ...] = tuple(
                 acq_dict[d.label] for d in non_spatial_dims
             )
+            # e.g. (0, 0, 0) or (0, 0, 1) or (0, 0, 2), ...
 
             self._indices[i] = (str(pos), storage_tuple)
 

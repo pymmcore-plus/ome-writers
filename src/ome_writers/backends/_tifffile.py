@@ -285,37 +285,66 @@ class TifffileStream(MultiPositionOMEStream):
 
         # Separate position dimension from other dimensions
         position_dims = [d for d in dimensions if d.label == "p"]
+        # e.g. [Dimension(label='p', size=2, unit=None, chunk_size=None)]
+
         non_position_dims = [d for d in dimensions if d.label != "p"]
+        # e.g. [
+        #   Dimension(label='t', size=10, unit=(1.0, 's'), chunk_size=None)
+        #   Dimension(label='c', size=2, unit=None, chunk_size=None)
+        #   Dimension(label='z', size=3, unit=(1.0, 'um'), chunk_size=None)
+        #   Dimension(label='y', size=32, unit=(1.0, 'um'), chunk_size=None)
+        #   Dimension(label='x', size=32, unit=(1.0, 'um'), chunk_size=None)
+        # ]
+
         num_positions = position_dims[0].size if position_dims else 1
 
         # Build dimension ranges (excluding x, y which are not iterated)
         non_spatial_dims = [d for d in non_position_dims if d.label not in "yx"]
+        # e.g. [
+        #   Dimension(label='t', size=10, unit=(1.0, 's'), chunk_size=None)
+        #   Dimension(label='c', size=2, unit=None, chunk_size=None)
+        #   Dimension(label='z', size=3, unit=(1.0, 'um'), chunk_size=None)
+        # ]
 
-        # Use the order of dimensions to determine acquisition order
+        # -----Use the order of dimensions to determine acquisition order-----
 
         # Create a mapping from label to range
         dim_ranges = {d.label: range(d.size) for d in non_spatial_dims}
+        # e.g. {'t': range(0, 10), 'c': range(0, 2), 'z': range(0, 3)}
 
         # Build ranges in the order dimensions appear
-        acq_ordered_ranges = []
-        acq_ordered_labels = []
+        ordered_ranges = []
+        # e.g. [range(0, 10), range(0, 2), range(0, 2), range(0, 3)]
+
+        ordered_labels = []
+        # e.g. ['t', 'p', 'c', 'z']
+
         for dim in dimensions:
             if dim.label == "p":
-                acq_ordered_ranges.append(range(num_positions))
-                acq_ordered_labels.append("p")
+                ordered_ranges.append(range(num_positions))
+                ordered_labels.append("p")
             elif dim.label in dim_ranges and dim.label not in "yx":
-                acq_ordered_ranges.append(dim_ranges[dim.label])
-                acq_ordered_labels.append(dim.label)
+                ordered_ranges.append(dim_ranges[dim.label])
+                ordered_labels.append(dim.label)
 
         # TIFF storage order (excluding position and spatial dims)
         tiff_storage_labels = [d for d in "tcz" if d in dim_ranges]
+        # e.g. ['t', 'c', 'z']
 
         # Create index mapping from acquisition order to TIFF storage order.
         # Store a storage-tuple (in TIFF order) so buffering code can use the
         # tuple directly as the key.
         self._indices = {}
-        for i, acq_indices in enumerate(product(*acq_ordered_ranges)):
-            acq_dict = dict(zip(acq_ordered_labels, acq_indices, strict=False))
+        # e.g. {acq_index: (array_key/pos, non-position axis tuple)}
+        # {
+        #   0: ('0', (0, 0, 0)),
+        #   1: ('0', (0, 1, 0)),
+        #   2: ('0', (0, 0, 1)),
+        #   3: ('0', (0, 1, 1))
+        #   ...
+        # }
+        for i, acq_indices in enumerate(product(*ordered_ranges)):
+            acq_dict = dict(zip(ordered_labels, acq_indices, strict=False))
             pos = acq_dict.get("p", 0)
 
             # Build storage tuple in TIFF order [t, c, z]
@@ -325,10 +354,6 @@ class TifffileStream(MultiPositionOMEStream):
 
             self._indices[i] = (str(pos), storage_tuple)
 
-        # Keep the TIFF storage label ordering handy for later conversion when
-        # buffering frames (flush expects tuple keys in TIFF order)
-        self._tiff_storage_labels = tiff_storage_labels
-
         self._position_dim = position_dims[0] if position_dims else None
         self._append_count = 0
         self._num_positions = num_positions
@@ -336,6 +361,14 @@ class TifffileStream(MultiPositionOMEStream):
 
         # Return dimensions in TIFF order [t, c, z, y, x]
         dim_map = {d.label: d for d in non_position_dims}
+        # e.g. always tczyx:
+        # [
+        #     Dimension(label='t', size=10, unit=(1.0, 's'), chunk_size=None),
+        #     Dimension(label='c', size=2, unit=None, chunk_size=None),
+        #     Dimension(label='z', size=3, unit=(1.0, 'um'), chunk_size=None),
+        #     Dimension(label='y', size=32, unit=(1.0, 'um'), chunk_size=None),
+        #     Dimension(label='x', size=32, unit=(1.0, 'um'), chunk_size=None)
+        # ]
         tczyx_dims: list[Dimension] = []
         for label in "tczyx":
             if label in dim_map:
@@ -389,10 +422,9 @@ class TifffileStream(MultiPositionOMEStream):
         if self._use_memmap:
             # Memmap mode: write directly to disk-backed array
             p_idx = int(array_key)
-            storage_idx = index
             mm = self._memmaps[p_idx]
             # place 2D frame into memmap at storage_idx
-            storage_idx_tuple = tuple([int(i) for i in storage_idx])
+            storage_idx_tuple = tuple([int(i) for i in index])
             idx = (*storage_idx_tuple, slice(None), slice(None))
             mm[cast("tuple[Any, ...]", idx)] = frame
 
