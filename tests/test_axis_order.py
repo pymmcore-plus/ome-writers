@@ -143,6 +143,7 @@ def test_axis_order(
 
     # Verify data based on backend type
     if backend.file_ext.endswith("zarr"):
+        pytest.importorskip("zarr", reason="zarr not installed")
         import zarr
 
         zg = zarr.open_group(output_path, mode="r")
@@ -168,6 +169,7 @@ def test_axis_order(
                         )
 
     elif backend.file_ext.endswith("tiff"):
+        pytest.importorskip("tifffile", reason="tifffile not installed")
         import tifffile
 
         # For multi-position TIFF, the backend strips .ome.tiff extension,
