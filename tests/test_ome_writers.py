@@ -25,6 +25,40 @@ def validate_path(path: Path) -> None:
         validate_zarr_store(path)
 
 
+def validate_zarr_ome_metadata(path: Path) -> None:
+    """Validate OME-NGFF metadata in a zarr store using yaozarrs."""
+    pytest.importorskip("yaozarrs")
+    from yaozarrs import validate_ome_json
+
+    # Validate root metadata
+    zarr_json_path = path / "zarr.json"
+    assert zarr_json_path.exists(), f"zarr.json should exist at {path}"
+
+    with open(zarr_json_path) as f:
+        root_meta = json.load(f)
+
+    # Only validate if this is a group with OME metadata
+    if root_meta.get("node_type") == "group":
+        # Check if it has OME attributes before validating
+        if "ome" in root_meta.get("attributes", {}):
+            # Validate root OME-NGFF metadata
+            validate_ome_json(json.dumps(root_meta))
+
+        # Check for numeric position folders (0, 1, 2, etc.) that are also groups
+        for item in path.iterdir():
+            if item.is_dir() and item.name.isdigit():
+                pos_zarr_json = item / "zarr.json"
+                if pos_zarr_json.exists():
+                    with open(pos_zarr_json) as f:
+                        pos_meta = json.load(f)
+                    # Only validate if it's a group with OME metadata
+                    if (
+                        pos_meta.get("node_type") == "group"
+                        and "ome" in pos_meta.get("attributes", {})
+                    ):
+                        validate_ome_json(json.dumps(pos_meta))
+
+
 def test_minimal_2d_dimensions(backend: AvailableBackend, tmp_path: Path) -> None:
     """Test with minimal 2D dimensions (just x and y)."""
     data_gen, dimensions, dtype = omew.fake_data_for_sizes(
@@ -171,6 +205,58 @@ def test_data_integrity_roundtrip(
     stream.flush()
     assert not stream.is_active()
     validate_path(output_path)
+
+
+def test_zarr_ome_metadata_validation(
+    zarr_backend: AvailableBackend, tmp_path: Path
+) -> None:
+    """Test that zarr OME-NGFF metadata is properly validated using yaozarrs."""
+    pytest.importorskip("yaozarrs")
+
+    data_gen, dimensions, dtype = omew.fake_data_for_sizes(
+        sizes={"t": 2, "c": 2, "z": 3, "y": 64, "x": 64},
+        chunk_sizes={"y": 32, "x": 32},
+    )
+
+    output_path = tmp_path / f"test_validation.{zarr_backend.file_ext}"
+
+    # Create and write data
+    stream = zarr_backend.cls()
+    stream = stream.create(str(output_path), dtype, dimensions)
+
+    for frame in data_gen:
+        stream.append(frame)
+
+    stream.flush()
+
+    # Validate using yaozarrs
+    validate_zarr_ome_metadata(output_path)
+
+
+def test_zarr_multiposition_ome_metadata_validation(
+    zarr_backend: AvailableBackend, tmp_path: Path
+) -> None:
+    """Test OME-NGFF metadata validation for multi-position zarr datasets."""
+    pytest.importorskip("yaozarrs")
+
+    data_gen, dimensions, dtype = omew.fake_data_for_sizes(
+        sizes={"p": 3, "t": 2, "c": 2, "y": 32, "x": 32},
+        chunk_sizes={"y": 16, "x": 16},
+    )
+
+    output_path = tmp_path / f"test_multipos_validation.{zarr_backend.file_ext}"
+
+    # Create and write data
+    stream = zarr_backend.cls()
+    stream = stream.create(str(output_path), dtype, dimensions)
+
+    for frame in data_gen:
+        stream.append(frame)
+
+    stream.flush()
+
+    # Validate using yaozarrs - should validate root and all positions
+    validate_zarr_ome_metadata(output_path)
 
 
 def test_multiposition_acquisition(backend: AvailableBackend, tmp_path: Path) -> None:

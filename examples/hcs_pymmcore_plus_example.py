@@ -81,6 +81,7 @@ stream = omew.create_stream(
     dtype=np.uint16,
     backend=backend,
     overwrite=True,
+    plate=plate,
 )
 
 
@@ -130,7 +131,7 @@ def _on_sequence_finished(sequence: useq.MDASequence) -> None:
     # validate OME-NGFF JSON at root
     import json
 
-    zarr_json_path = path / "zarr.json"
+    zarr_json_path = path / "96-well" / "zarr.json"
     assert zarr_json_path.exists(), "zarr.json should exist at root"
     with open(zarr_json_path) as f:
         root_meta = json.load(f)

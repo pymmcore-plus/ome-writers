@@ -206,3 +206,122 @@ def test_axis_order(
                             assert is_correct, (
                                 f"Position {p}, Time {t}, Channel {c}, Z {z}: {msg}"
                             )
+
+
+@pytest.mark.parametrize("axis_order", ["tpc", "ptc", "ctp"])
+def test_axis_order_with_plate(axis_order: str, tmp_path: Path) -> None:
+    """Test that axis_order works correctly with HCS plate acquisitions.
+
+    This test verifies that frames are written to the correct positions
+    in a plate structure when using different axis_order values.
+
+    Parameters
+    ----------
+    axis_order : str
+        The acquisition order (e.g., 'tpc', 'ptc', 'ctp').
+    tmp_path : Path
+        Temporary directory for test output.
+    """
+    pytest.importorskip("acquire_zarr", reason="acquire-zarr not installed")
+    from useq import GridRowsColumns, MDASequence, WellPlatePlan
+
+    # Create a simple plate plan: 2 wells, 2 fields per well
+    plate_plan = WellPlatePlan(
+        plate="96-well",
+        a1_center_xy=(0.0, 0.0),
+        selected_wells=([0, 1], [0, 0]),  # A1, B1
+        well_points_plan=GridRowsColumns(rows=1, columns=2),  # 2 FOV per well
+    )
+
+    # Create sequence with specified axis_order
+    # 2 wells x 2 fields x 2 timepoints x 2 channels = 16 frames
+    seq = MDASequence(
+        axis_order=axis_order,
+        stage_positions=plate_plan,
+        time_plan={"interval": 0.1, "loops": 2},
+        channels=["DAPI", "FITC"],
+    )
+
+    output_path = tmp_path / f"plate_{axis_order}.ome.zarr"
+
+    # Get plate and dimensions from sequence
+    plate = omew.plate_from_useq(seq)
+    assert plate is not None
+    assert len(plate.wells) == 2
+    assert plate.field_count == 2
+
+    dims = omew.dims_from_useq(seq, image_width=32, image_height=32)
+
+    # Create stream with plate
+    stream = omew.create_stream(
+        path=str(output_path),
+        dimensions=dims,
+        dtype=np.uint16,
+        backend="acquire-zarr",
+        plate=plate,
+        overwrite=True,
+    )
+
+    # Write frames with unique values
+    for event in seq:
+        p = event.index.get("p", 0)
+        t = event.index.get("t", 0)
+        c = event.index.get("c", 0)
+        z = event.index.get("z", 0)
+        frame = create_unique_frame(p, t, c, z)
+        stream.append(frame)
+
+    stream.flush()
+
+    # Verify data in plate structure
+    import zarr
+
+    # The plate structure should have wells A/01 and B/01, each with 2 fields
+    plate_name_sanitized = plate.name.replace(" ", "_")
+    plate_dir = output_path / plate_name_sanitized
+
+    # Verify wells exist
+    well_a01 = plate_dir / "A" / "01"
+    well_b01 = plate_dir / "B" / "01"
+    assert well_a01.exists(), "Well A/01 should exist"
+    assert well_b01.exists(), "Well B/01 should exist"
+
+    # Map global position index to well and field
+    # p=0: Well A/01, field 0
+    # p=1: Well A/01, field 1
+    # p=2: Well B/01, field 0
+    # p=3: Well B/01, field 1
+    position_map = [
+        (well_a01, 0),  # p=0
+        (well_a01, 1),  # p=1
+        (well_b01, 0),  # p=2
+        (well_b01, 1),  # p=3
+    ]
+
+    # Determine the expected array indexing based on axis_order
+    non_pos_dims = [d.label for d in dims if d.label not in "pyx"]
+
+    # Check all positions, timepoints, and channels
+    for p in range(4):
+        well_path, field_idx = position_map[p]
+        field_name = f"fov{field_idx}" if plate.field_count > 1 else "0"
+        field_path = well_path / field_name
+
+        assert field_path.exists(), f"Field {field_name} should exist at {well_path}"
+
+        # Open the field array
+        field_array = zarr.open_array(field_path, mode="r")
+
+        for t in range(2):
+            for c in range(2):
+                # Build index tuple based on non-position dimensions
+                indices = {"t": t, "c": c, "z": 0}
+                idx_tuple = tuple(indices.get(d, 0) for d in non_pos_dims)
+
+                frame_data = field_array[(*idx_tuple, slice(None), slice(None))]
+
+                is_correct, msg = verify_frame_value(frame_data, p, t, c, 0)
+                assert is_correct, (
+                    f"Well {well_path.name}, Field {field_idx}, "
+                    f"Time {t}, Channel {c}: {msg}"
+                )

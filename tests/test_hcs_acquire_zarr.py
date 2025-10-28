@@ -302,6 +302,7 @@ def test_hcs_large_plate_from_useq(tmp_path: Path) -> None:
 def test_hcs_metadata_validation(tmp_path: Path) -> None:
     """Test that HCS plate metadata is properly validated using yaozarrs."""
     from useq import GridRowsColumns, MDASequence, WellPlatePlan
+    from yaozarrs import validate_ome_json
 
     from ome_writers import dims_from_useq, plate_from_useq
 
@@ -333,17 +334,15 @@ def test_hcs_metadata_validation(tmp_path: Path) -> None:
         plate=plate,
         overwrite=True,
     ) as stream:
-        # 2 wells × 1 field × 1 channel = 2 frames
+        # 2 wells x 1 field x 1 channel = 2 frames
         for _ in range(2):
             frame = np.random.randint(0, 100, (32, 32), dtype=np.uint16)
             stream.append(frame)
 
-    # Validate the Zarr store structure
-    # Note: acquire-zarr may not fully implement OME-Zarr v0.5 metadata yet,
-    # so we'll do basic structural validation instead
+    # Validate the Zarr store structure using yaozarrs
     import json
 
-    # Check that plate metadata exists
+    # Check that plate metadata exists at root
     zarr_json_path = output_path / "zarr.json"
     assert zarr_json_path.exists(), "zarr.json should exist at root"
 
@@ -353,10 +352,36 @@ def test_hcs_metadata_validation(tmp_path: Path) -> None:
     # Verify it's a group
     assert root_meta.get("node_type") == "group", "Root should be a group"
 
+    # For plate structures, the OME metadata is at the plate level
     # Check that wells exist
     plate_name_sanitized = plate.name.replace(" ", "_")
     plate_dir = output_path / plate_name_sanitized
     assert plate_dir.exists(), f"Plate directory {plate_name_sanitized} should exist"
+
+    # Validate plate-level OME-NGFF metadata using yaozarrs
+    plate_zarr_json = plate_dir / "zarr.json"
+    assert plate_zarr_json.exists(), "zarr.json should exist at plate level"
+
+    with open(plate_zarr_json) as f:
+        plate_meta = json.load(f)
+
+    # The plate metadata should have OME metadata with plate information
+    assert "ome" in plate_meta.get(
+        "attributes", {}
+    ), "Plate metadata should have OME attributes"
+    assert (
+        "plate" in plate_meta["attributes"]["ome"]
+    ), "OME metadata should have plate information"
+
+    # Validate using yaozarrs
+    validate_ome_json(json.dumps(plate_meta))
+
+    # Verify wells exist for basic structure check
+    for well_pos in plate.wells:
+        row, col = well_pos.path.split("/")
+        well_dir = plate_dir / row / col / "0"  # Single FOV
+
+        assert well_dir.exists(), f"Well {well_pos.path}/0 should exist"
 
     # Cleanup
     shutil.rmtree(output_path)
