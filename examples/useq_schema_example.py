@@ -31,7 +31,7 @@ tiff_memmap = True
 seq = useq.MDASequence(
     axis_order="tpcz",
     stage_positions=[(0.0, 0.0), (10.0, 10.0)],
-    time_plan={"interval": 0.5, "loops": 300},
+    time_plan={"interval": 0.5, "loops": 10},
     channels=["DAPI", "FITC"],
     z_plan={"range": 2, "step": 1.0},
 )
