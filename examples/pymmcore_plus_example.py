@@ -101,7 +101,8 @@ def _on_sequence_finished(sequence: useq.MDASequence) -> None:
         warnings.warn(
             "Skipping zarr structure printout and OME-NGFF validation because zarr is "
             "not installed. Please install it via 'pip install zarr>=3' to enable these"
-            " features.", stacklevel=2
+            " features.",
+            stacklevel=2,
         )
         return
 
@@ -120,6 +121,7 @@ def _on_sequence_finished(sequence: useq.MDASequence) -> None:
 
     # validate OME-NGFF JSON at root
     import json
+
     zarr_json_path = path / "zarr.json"
     assert zarr_json_path.exists(), "zarr.json should exist at root"
     with open(zarr_json_path) as f:

@@ -52,9 +52,8 @@ def validate_zarr_ome_metadata(path: Path) -> None:
                     with open(pos_zarr_json) as f:
                         pos_meta = json.load(f)
                     # Only validate if it's a group with OME metadata
-                    if (
-                        pos_meta.get("node_type") == "group"
-                        and "ome" in pos_meta.get("attributes", {})
+                    if pos_meta.get("node_type") == "group" and "ome" in pos_meta.get(
+                        "attributes", {}
                     ):
                         validate_ome_json(json.dumps(pos_meta))
 

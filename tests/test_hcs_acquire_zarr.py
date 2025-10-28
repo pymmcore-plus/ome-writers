@@ -366,12 +366,12 @@ def test_hcs_metadata_validation(tmp_path: Path) -> None:
         plate_meta = json.load(f)
 
     # The plate metadata should have OME metadata with plate information
-    assert "ome" in plate_meta.get(
-        "attributes", {}
-    ), "Plate metadata should have OME attributes"
-    assert (
-        "plate" in plate_meta["attributes"]["ome"]
-    ), "OME metadata should have plate information"
+    assert "ome" in plate_meta.get("attributes", {}), (
+        "Plate metadata should have OME attributes"
+    )
+    assert "plate" in plate_meta["attributes"]["ome"], (
+        "OME metadata should have plate information"
+    )
 
     # Validate using yaozarrs
     validate_ome_json(json.dumps(plate_meta))
