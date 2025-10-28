@@ -213,8 +213,5 @@ class MultiPositionOMEStream(OMEStream):
             msg = "Stream is closed or uninitialized. Call create() first."
             raise RuntimeError(msg)
         array_key, index = self._indices[self._append_count]
-
-        print(f"Writing to array {array_key} at index {index}")
-
         self._write_to_backend(array_key, index, frame)
         self._append_count += 1

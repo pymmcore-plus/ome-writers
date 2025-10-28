@@ -70,8 +70,11 @@ def verify_frame_value(
         )
 
 
+@pytest.mark.parametrize("tiff_mmmap", [True, False])
 @pytest.mark.parametrize("axis_order", ["tpzc", "ptzc", "cztp", "tpcz", "ptcz"])
-def test_axis_order(axis_order: str, backend: AvailableBackend, tmp_path: Path) -> None:
+def test_axis_order(
+    axis_order: str, backend: AvailableBackend, tiff_mmmap: bool, tmp_path: Path
+) -> None:
     """Test that different axis_order values work correctly.
 
     This test ensures that frames are written to the correct positions
@@ -93,6 +96,8 @@ def test_axis_order(axis_order: str, backend: AvailableBackend, tmp_path: Path) 
     if backend.file_ext.endswith("tiff"):
         output_path = tmp_path / f"test_{axis_order}.ome.tiff"
     else:
+        if tiff_mmmap:
+            pytest.skip("Memory-mapped option only applies to TIFF backend.")
         output_path = tmp_path / f"test_{axis_order}.{backend.file_ext}"
 
     # Create sequence with specified axis_order
@@ -106,13 +111,24 @@ def test_axis_order(axis_order: str, backend: AvailableBackend, tmp_path: Path) 
     )
 
     dims = omew.dims_from_useq(seq, image_width=32, image_height=32)
-    stream = omew.create_stream(
-        path=output_path,
-        dimensions=dims,
-        dtype=np.uint16,
-        backend=backend.name,
-        overwrite=True,
-    )
+
+    if backend.file_ext.endswith("tiff"):
+        # For TIFF, enable memory mapping option
+        stream = omew.TifffileStream(use_memmap=tiff_mmmap)
+        stream.create(
+            path=output_path,
+            dimensions=dims,
+            dtype=np.uint16,
+            overwrite=True,
+        )
+    else:
+        stream = omew.create_stream(
+            path=output_path,
+            dimensions=dims,
+            dtype=np.uint16,
+            backend=backend.name,
+            overwrite=True,
+        )
 
     # Write frames with unique statistics
     for event in seq:

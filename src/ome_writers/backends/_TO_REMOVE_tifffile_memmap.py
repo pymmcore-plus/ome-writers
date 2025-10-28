@@ -7,9 +7,9 @@ import warnings
 from contextlib import suppress
 from itertools import count
 from pathlib import Path
-from queue import Queue
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
+import numpy as np
 from typing_extensions import Self
 
 from ome_writers._dimensions import dims_to_ome
@@ -17,8 +17,8 @@ from ome_writers._stream_base import MultiPositionOMEStream
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
+    from queue import Queue
 
-    import numpy as np
     import ome_types.model as ome
 
     from ome_writers._dimensions import Dimension
@@ -31,18 +31,23 @@ else:
 class TifffileStream(MultiPositionOMEStream):
     """A concrete OMEStream implementation for writing to OME-TIFF files.
 
-    This writer is designed for deterministic acquisitions where the full experiment
-    shape is known ahead of time. It works by creating all necessary OME-TIFF
-    files at the start of the acquisition and using memory-mapped arrays for
-    efficient, sequential writing of incoming frames.
+    This writer uses memory-mapped arrays for efficient, low-RAM writing of
+    image data to disk. It supports arbitrary acquisition axis orders by
+    mapping acquisition indices to TIFF storage order [t, c, z, y, x] internally.
 
-    If a 'p' (position) dimension is included in the dimensions, a separate
-    OME-TIFF file will be created for each position.
+    During acquisition, frames are written directly to temporary memory-mapped
+    files on disk. When flush() is called, these memmaps are converted to final
+    OME-TIFF files with proper metadata.
+
+    If a 'p' (position) dimension is included, a separate OME-TIFF file will
+    be created for each position.
 
     Attributes
     ----------
-    _writers : Dict[int, np.memmap]
-        A dictionary mapping position index to its numpy memmap array.
+    _memmaps : dict[int, np.memmap]
+        Per-position memory-mapped arrays for efficient disk-backed storage.
+    _memmap_paths : dict[int, str]
+        Paths to temporary memmap files, cleaned up after flush().
     """
 
     @classmethod
@@ -67,10 +72,23 @@ class TifffileStream(MultiPositionOMEStream):
 
         self._tf = tifffile
         self._ome = ome_types.model
-        # Using dictionaries to handle multi-position ('p') acquisitions
-        self._threads: dict[int, WriterThread] = {}
-        self._queues: dict[int, Queue[np.ndarray | None]] = {}
         self._is_active = False
+        # Memmap store per-position for efficient on-disk writes
+        self._memmaps: dict[int, np.memmap] = {}
+        self._memmap_paths: dict[int, str] = {}
+        self._tiff_shape: tuple[int, ...] = ()
+        self._frame_count = 0
+        self._flush_interval = 100  # Flush every N frames for durability
+
+    def __del__(self) -> None:
+        """Cleanup memmap files on object deletion."""
+        # Best-effort cleanup if flush() was never called
+        if hasattr(self, "_memmap_paths"):
+            for mp in self._memmap_paths.values():
+                try:
+                    Path(mp).unlink(missing_ok=True)
+                except Exception:
+                    pass
 
     # ------------------------PUBLIC METHODS------------------------ #
 
@@ -82,26 +100,37 @@ class TifffileStream(MultiPositionOMEStream):
         *,
         overwrite: bool = False,
     ) -> Self:
-        # Use MultiPositionOMEStream to handle position logic
-        num_positions, tczyx_dims = self._init_positions(dimensions)
+        # Use TIFF-specific position initialization so we build storage-tuples
+        # in TIFF storage order (t, c, z). This allows buffering frames and
+        # writing them in the order expected by the TIFF writer regardless of
+        # acquisition axis_order.
+        num_positions, tczyx_dims = self._init_positions_tiff(dimensions)
         self._delete_existing = overwrite
         self._path = Path(self._normalize_path(path))
         shape_5d = tuple(d.size for d in tczyx_dims)
+        # keep TIFF shape for flush ordering
+        self._tiff_shape = shape_5d
 
         fnames = self._prepare_files(self._path, num_positions, overwrite)
 
-        # Create a memmap for each position
+        # Initialize memmaps and store per-position OME XML
+        self._dtype = np.dtype(dtype)
+        self._position_ome_xml: dict[int, str] = {}
         for p_idx, fname in enumerate(fnames):
-            ome = dims_to_ome(tczyx_dims, dtype=dtype, tiff_file_name=fname)
-            self._queues[p_idx] = q = Queue()  # type: ignore
-            self._threads[p_idx] = thread = WriterThread(
-                fname,
-                shape=shape_5d,
-                dtype=dtype,
-                image_queue=q,
-                ome_xml=ome.to_xml(),
+            # create memmap file for this position with shape [t,c,z,y,x]
+            mm_path = Path(f"{fname}.memmap")
+            # ensure parent exists (should already)
+            mm = np.memmap(
+                str(mm_path), dtype=self._dtype, mode="w+", shape=shape_5d, order="C"
             )
-            thread.start()
+            self._memmaps[p_idx] = mm
+            self._memmap_paths[p_idx] = str(mm_path)
+
+            ome = dims_to_ome(tczyx_dims, dtype=dtype, tiff_file_name=fname)
+            self._position_ome_xml[p_idx] = ome.to_xml()
+
+        # keep filenames for flush
+        self._filenames = fnames
 
         self._is_active = True
         return self
@@ -112,15 +141,32 @@ class TifffileStream(MultiPositionOMEStream):
 
     def flush(self) -> None:
         """Flush all pending writes to the underlying TIFF files."""
-        # Signal the threads to stop by putting None in each queue
-        for queue in self._queues.values():
-            queue.put(None)
+        # Flush memmaps to OME-TIFF files per position.
+        for p_idx in list(self._memmaps.keys()):
+            mm = self._memmaps[p_idx]
+            # ensure memmap is flushed to disk
+            mm.flush()
 
-        # Wait for the thread to finish
-        for thread in self._threads.values():
-            thread.join(timeout=5)
+            fname = self._filenames[p_idx]
+            # write memmap array directly; tifffile will read from the memmap
+            self._tf.imwrite(
+                fname,
+                mm,
+                bigtiff=True,
+                ome=False,
+                description=self._position_ome_xml.get(p_idx, ""),
+                photometric=self._tf.PHOTOMETRIC.MINISBLACK,
+                planarconfig=self._tf.PLANARCONFIG.SEPARATE,
+            )
 
-        # Mark as inactive after flushing - this is consistent with other backends
+            # remove underlying memmap file
+            mp = self._memmap_paths.get(p_idx)
+            # delete memmap object and file
+            del self._memmaps[p_idx]
+            if mp:
+                Path(mp).unlink(missing_ok=True)
+
+        self._memmap_paths.clear()
         self._is_active = False
 
     def update_ome_metadata(self, metadata: ome.OME) -> None:
@@ -139,7 +185,8 @@ class TifffileStream(MultiPositionOMEStream):
         if not isinstance(metadata, self._ome.OME):  # pragma: no cover
             raise TypeError(f"Expected OME metadata, got {type(metadata)}")
 
-        for position_idx in self._threads:
+        # Update metadata for each position file
+        for position_idx in range(len(self._filenames)):
             self._update_position_metadata(position_idx, metadata)
 
     # -----------------------PRIVATE METHODS------------------------ #
@@ -179,19 +226,108 @@ class TifffileStream(MultiPositionOMEStream):
 
         return fnames
 
+    def _init_positions_tiff(
+        self, dimensions: Sequence[Dimension]
+    ) -> tuple[int, Sequence[Dimension]]:
+        """Initialize positions with TIFF-specific dimension ordering.
+
+        TIFF files must be stored in [t, c, z, y, x] order. This method builds
+        an index mapping that respects the acquisition order (dimension sequence)
+        while ensuring frames are queued in TIFF storage order.
+        """
+        from itertools import product
+
+        # Separate position dimension from other dimensions
+        position_dims = [d for d in dimensions if d.label == "p"]
+        non_position_dims = [d for d in dimensions if d.label != "p"]
+        num_positions = position_dims[0].size if position_dims else 1
+
+        # Get non-spatial dimensions (excluding x, y)
+        non_spatial_dims = [d for d in non_position_dims if d.label not in "yx"]
+
+        # Build dimension ranges for acquisition order
+        dim_ranges = {d.label: range(d.size) for d in non_spatial_dims}
+
+        # Build acquisition order ranges (includes position)
+        acq_ordered_ranges = []
+        acq_ordered_labels = []
+        for dim in dimensions:
+            if dim.label == "p":
+                acq_ordered_ranges.append(range(num_positions))
+                acq_ordered_labels.append("p")
+            elif dim.label in dim_ranges and dim.label not in "yx":
+                acq_ordered_ranges.append(dim_ranges[dim.label])
+                acq_ordered_labels.append(dim.label)
+
+        # TIFF storage order (excluding position and spatial dims)
+        tiff_storage_labels = [d for d in "tcz" if d in dim_ranges]
+
+        # Create index mapping from acquisition order to TIFF storage order.
+        # Store a storage-tuple (in TIFF order) so buffering code can use the
+        # tuple directly as the key.
+        self._indices = {}
+        for i, acq_indices in enumerate(product(*acq_ordered_ranges)):
+            acq_dict = dict(zip(acq_ordered_labels, acq_indices, strict=False))
+            pos = acq_dict.get("p", 0)
+
+            # Build storage tuple in TIFF order [t, c, z]
+            storage_tuple: tuple[int, ...] = tuple(
+                acq_dict[label] for label in tiff_storage_labels
+            )
+
+            self._indices[i] = (str(pos), storage_tuple)
+
+        # Keep the TIFF storage label ordering handy for later conversion when
+        # buffering frames (flush expects tuple keys in TIFF order)
+        self._tiff_storage_labels = tiff_storage_labels
+
+        self._position_dim = position_dims[0] if position_dims else None
+        self._append_count = 0
+        self._num_positions = num_positions
+        self._non_position_dims = non_position_dims
+
+        # Return dimensions in TIFF order [t, c, z, y, x]
+        dim_map = {d.label: d for d in non_position_dims}
+        tczyx_dims: list[Dimension] = []
+        for label in "tczyx":
+            if label in dim_map:
+                tczyx_dims.append(dim_map[label])  # type: ignore
+
+        return num_positions, tczyx_dims
+
     def _write_to_backend(
         self, array_key: str, index: tuple[int, ...], frame: np.ndarray
     ) -> None:
-        """TIFF-specific write implementation."""
-        self._queues[int(array_key)].put(frame)
+        """Write frame directly to memmap at TIFF storage index.
+
+        `index` is expected to be a storage-tuple in TIFF order (t,c,z...).
+        Frames are written to memory-mapped files and persisted by the OS
+        automatically. Explicit flush happens only during flush() method.
+        """
+        p_idx = int(array_key)
+        storage_idx = index
+        mm = self._memmaps[p_idx]
+        # place 2D frame into memmap at storage_idx
+        storage_idx_tuple = tuple(int(i) for i in storage_idx)
+        idx = (*storage_idx_tuple, slice(None), slice(None))
+        mm[cast("tuple[Any, ...]", idx)] = frame
+
+        # Periodic flush for durability without per-frame overhead
+        self._frame_count += 1
+        if self._frame_count % self._flush_interval == 0:
+            for memmap in self._memmaps.values():
+                try:
+                    memmap.flush()
+                except Exception:
+                    pass
 
     def _update_position_metadata(self, position_idx: int, metadata: ome.OME) -> None:
         """Add OME metadata to TIFF file efficiently without rewriting image data."""
-        thread = self._threads[position_idx]
-        if not Path(thread._path).exists():  # pragma: no cover
+        fname = self._filenames[position_idx]
+        if not Path(fname).exists():  # pragma: no cover
             warnings.warn(
                 f"TIFF file for position {position_idx} does not exist at "
-                f"{thread._path}. Not writing metadata.",
+                f"{fname}. Not writing metadata.",
                 stacklevel=2,
             )
             return
@@ -210,11 +346,9 @@ class TifffileStream(MultiPositionOMEStream):
         try:
             # TODO:
             # consider a lock on the tiff file itself to prevent concurrent writes?
-            self._tf.tiffcomment(thread._path, comment=ascii_xml)
+            self._tf.tiffcomment(fname, comment=ascii_xml)
         except Exception as e:
-            raise RuntimeError(
-                f"Failed to update OME metadata in {thread._path}"
-            ) from e
+            raise RuntimeError(f"Failed to update OME metadata in {fname}") from e
 
 
 class WriterThread(threading.Thread):
