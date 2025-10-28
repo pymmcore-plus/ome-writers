@@ -308,7 +308,7 @@ class TifffileStream(MultiPositionOMEStream):
         storage_idx = index
         mm = self._memmaps[p_idx]
         # place 2D frame into memmap at storage_idx
-        storage_idx_tuple = tuple(int(i) for i in storage_idx)
+        storage_idx_tuple = tuple([int(i) for i in storage_idx])
         idx = (*storage_idx_tuple, slice(None), slice(None))
         mm[cast("tuple[Any, ...]", idx)] = frame
 
