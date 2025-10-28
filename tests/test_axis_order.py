@@ -185,16 +185,25 @@ def test_axis_order(
             ext = ""
             base_name = base_path
 
+        # Determine the expected storage order from the dims
+        # (TIFF can store in any order matching the dimension order)
+        non_pos_dims = [d.label for d in dims if d.label not in "pyx"]
+
         for p in range(2):
             tiff_path = tmp_path / f"{Path(base_name).name}_p{p:03d}{ext}"
 
             with tifffile.TiffFile(tiff_path) as tif:
+                print(tif.ome_metadata)
                 data = tif.asarray()
-                # TIFF data is always stored in [t, c, z, y, x] order
+                print(data.shape)
+                # TIFF data is stored in the order matching non_pos_dims
                 for t in range(3):
                     for c in range(2):
                         for z in range(4):
-                            frame_data = data[t, c, z, :, :]
+                            # Build index dict for all dimensions
+                            indices = {"t": t, "c": c, "z": z}
+                            idx_tuple = tuple(indices[d] for d in non_pos_dims)
+                            frame_data = data[(*idx_tuple, slice(None), slice(None))]
                             is_correct, msg = verify_frame_value(frame_data, p, t, c, z)
                             assert is_correct, (
                                 f"Position {p}, Time {t}, Channel {c}, Z {z}: {msg}"
