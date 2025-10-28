@@ -113,7 +113,7 @@ class MultiPositionOMEStream(OMEStream):
         # dimension info for position dimension, if any
         self._position_dim: Dimension | None = None
         # A mapping of indices to (array_key, non-position index)
-        self._indices: dict[int, tuple[str, dict[str, int]]] = {}
+        self._indices: dict[int, tuple[str, tuple[int, ...]]] = {}
         # number of times append() has been called
         self._append_count = 0
         # number of positions in the stream
@@ -165,20 +165,20 @@ class MultiPositionOMEStream(OMEStream):
                 ordered_ranges.append(dim_ranges[dim.label])
                 ordered_labels.append(dim.label)
 
-        # Create index mapping. Store a mapping (label -> index) for visibility
-        # and to allow backends to construct whatever tuple ordering they need.
+        # Create index mapping. Store a storage-tuple of ints in the order of
+        # non_spatial_dims so backends can directly use the tuple as an index.
         self._indices = {}
         for i, acq_indices in enumerate(product(*ordered_ranges)):
             # Map acquisition indices to storage indices
             acq_dict = dict(zip(ordered_labels, acq_indices, strict=False))
             pos = acq_dict.get("p", 0)
 
-            # Build storage index map for non-position, non-spatial dimensions
-            storage_map: dict[str, int] = {
-                d.label: acq_dict[d.label] for d in non_spatial_dims
-            }
+            # Build storage tuple for non-position, non-spatial dimensions
+            storage_tuple: tuple[int, ...] = tuple(
+                acq_dict[d.label] for d in non_spatial_dims
+            )
 
-            self._indices[i] = (str(pos), storage_map)
+            self._indices[i] = (str(pos), storage_tuple)
 
         self._position_dim = position_dims[0] if position_dims else None
         self._append_count = 0
@@ -189,7 +189,7 @@ class MultiPositionOMEStream(OMEStream):
 
     @abstractmethod
     def _write_to_backend(
-        self, array_key: str, index: dict[str, int], frame: np.ndarray
+        self, array_key: str, index: tuple[int, ...], frame: np.ndarray
     ) -> None:
         """Backend-specific write implementation.
 
@@ -213,5 +213,8 @@ class MultiPositionOMEStream(OMEStream):
             msg = "Stream is closed or uninitialized. Call create() first."
             raise RuntimeError(msg)
         array_key, index = self._indices[self._append_count]
+
+        print(f"Writing to array {array_key} at index {index}")
+
         self._write_to_backend(array_key, index, frame)
         self._append_count += 1

@@ -71,9 +71,6 @@ class TifffileStream(MultiPositionOMEStream):
         self._threads: dict[int, WriterThread] = {}
         self._queues: dict[int, Queue[np.ndarray | None]] = {}
         self._is_active = False
-        # Buffer to store frames until flush, allowing reordering
-        self._frame_buffer: dict[int, dict[tuple[int, ...], np.ndarray]] = {}
-        self._tiff_shape: tuple[int, ...] = ()
 
     # ------------------------PUBLIC METHODS------------------------ #
 
@@ -85,47 +82,26 @@ class TifffileStream(MultiPositionOMEStream):
         *,
         overwrite: bool = False,
     ) -> Self:
-        _, _dms = self._init_positions(dimensions)
-        from rich import print
-        print()
-        print('---------------------')
-        print(_dms)
-        print(self._indices)
-
-        # For TIFF, we need to handle the acquisition order specially because
-        # TIFF files are always stored in [t, c, z, y, x] order regardless of
-        # acquisition order. We'll build the index mapping to respect acquisition
-        # order while ensuring frames are written in TIFF storage order.
-        num_positions, tczyx_dims = self._init_positions_tiff(dimensions)
-
-        print('@@@@@@@@@@@@@@@@')
-        print(self._indices)
-        print(tczyx_dims)
-        print('---------------------')
-        print()
-
+        # Use MultiPositionOMEStream to handle position logic
+        num_positions, tczyx_dims = self._init_positions(dimensions)
         self._delete_existing = overwrite
         self._path = Path(self._normalize_path(path))
         shape_5d = tuple(d.size for d in tczyx_dims)
-        self._tiff_shape = shape_5d
 
         fnames = self._prepare_files(self._path, num_positions, overwrite)
 
-        # Initialize frame buffers for each position
-        for p_idx in range(num_positions):
-            self._frame_buffer[p_idx] = {}
-            self._queues[p_idx] = Queue()
-
-        # Create threads but don't start them yet - we'll start them in flush()
+        # Create a memmap for each position
         for p_idx, fname in enumerate(fnames):
             ome = dims_to_ome(tczyx_dims, dtype=dtype, tiff_file_name=fname)
-            self._threads[p_idx] = WriterThread(
+            self._queues[p_idx] = q = Queue()  # type: ignore
+            self._threads[p_idx] = thread = WriterThread(
                 fname,
                 shape=shape_5d,
                 dtype=dtype,
-                image_queue=self._queues[p_idx],
+                image_queue=q,
                 ome_xml=ome.to_xml(),
             )
+            thread.start()
 
         self._is_active = True
         return self
@@ -136,27 +112,15 @@ class TifffileStream(MultiPositionOMEStream):
 
     def flush(self) -> None:
         """Flush all pending writes to the underlying TIFF files."""
-        # Write buffered frames in correct order (row-major storage order)
-        for p_idx, frame_dict in self._frame_buffer.items():
-            # Start the writer thread for this position
-            self._threads[p_idx].start()
+        # Signal the threads to stop by putting None in each queue
+        for queue in self._queues.values():
+            queue.put(None)
 
-            # Generate all possible indices in row-major order
-            from itertools import product
-
-            for storage_idx in product(*[range(s) for s in self._tiff_shape[:-2]]):
-                if storage_idx in frame_dict:
-                    self._queues[p_idx].put(frame_dict[storage_idx])
-
-            # Signal completion
-            self._queues[p_idx].put(None)
-
-        # Wait for threads to finish
+        # Wait for the thread to finish
         for thread in self._threads.values():
             thread.join(timeout=5)
 
-        # Clear buffers
-        self._frame_buffer.clear()
+        # Mark as inactive after flushing - this is consistent with other backends
         self._is_active = False
 
     def update_ome_metadata(self, metadata: ome.OME) -> None:
@@ -179,84 +143,6 @@ class TifffileStream(MultiPositionOMEStream):
             self._update_position_metadata(position_idx, metadata)
 
     # -----------------------PRIVATE METHODS------------------------ #
-
-    def _init_positions_tiff(
-        self, dimensions: Sequence[Dimension]
-    ) -> tuple[int, Sequence[Dimension]]:
-        """Initialize positions with TIFF-specific dimension ordering.
-
-        TIFF files must be stored in [t, c, z, y, x] order. This method builds
-        an index mapping that respects the acquisition order (dimension sequence)
-        while ensuring frames are queued in TIFF storage order.
-
-        Parameters
-        ----------
-        dimensions : Sequence[Dimension]
-            All dimensions including position, in acquisition order.
-
-        Returns
-        -------
-        tuple[int, Sequence[Dimension]]
-            Number of positions and dimensions in TIFF order [t, c, z, y, x].
-        """
-        from itertools import product
-
-        # Separate position and non-position dimensions
-        position_dims = [d for d in dimensions if d.label == "p"]
-        non_position_dims = [d for d in dimensions if d.label != "p"]
-        num_positions = position_dims[0].size if position_dims else 1
-
-        # Get non-spatial dimensions (excluding x, y)
-        non_spatial_dims = [d for d in non_position_dims if d.label not in "yx"]
-
-        # Build dimension ranges for acquisition order
-        dim_ranges = {d.label: range(d.size) for d in non_spatial_dims}
-
-        # Build acquisition order ranges (includes position)
-        acq_ordered_ranges = []
-        acq_ordered_labels = []
-        for dim in dimensions:
-            if dim.label == "p":
-                acq_ordered_ranges.append(range(num_positions))
-                acq_ordered_labels.append("p")
-            elif dim.label in dim_ranges and dim.label not in "yx":
-                acq_ordered_ranges.append(dim_ranges[dim.label])
-                acq_ordered_labels.append(dim.label)
-
-        # TIFF storage order (excluding position and spatial dims)
-        tiff_storage_labels = [d for d in "tcz" if d in dim_ranges]
-
-        # Create index mapping from acquisition order to TIFF storage order.
-        # Store a mapping (label -> index) so the backend can control how it
-        # constructs tuple keys for buffering/writing.
-        self._indices = {}
-        for i, acq_indices in enumerate(product(*acq_ordered_ranges)):
-            # zip(strict=False) is invalid on dict(); use normal zip()
-            acq_dict = dict(zip(acq_ordered_labels, acq_indices))
-            pos = acq_dict.get("p", 0)
-
-            # Build storage index map in TIFF order [t, c, z]
-            storage_map: dict[str, int] = {label: acq_dict[label] for label in tiff_storage_labels}
-
-            self._indices[i] = (str(pos), storage_map)
-
-        # Keep the TIFF storage label ordering handy for later conversion when
-        # buffering frames (flush expects tuple keys in TIFF order)
-        self._tiff_storage_labels = tiff_storage_labels
-
-        self._position_dim = position_dims[0] if position_dims else None
-        self._append_count = 0
-        self._num_positions = num_positions
-        self._non_position_dims = non_position_dims
-
-        # Return dimensions in TIFF order [t, c, z, y, x]
-        dim_map = {d.label: d for d in non_position_dims}
-        tczyx_dims: list[Dimension] = []
-        for label in "tczyx":
-            if label in dim_map:
-                tczyx_dims.append(dim_map[label])  # type: ignore
-
-        return num_positions, tczyx_dims
 
     def _prepare_files(
         self, path: Path, num_positions: int, overwrite: bool
@@ -294,14 +180,10 @@ class TifffileStream(MultiPositionOMEStream):
         return fnames
 
     def _write_to_backend(
-        self, array_key: str, index: dict[str, int], frame: np.ndarray
+        self, array_key: str, index: tuple[int, ...], frame: np.ndarray
     ) -> None:
-        """TIFF-specific write implementation - buffers frames for reordering."""
-        p_idx = int(array_key)
-        storage_idx = tuple(index[label] for label in self._tiff_storage_labels)
-        self._frame_buffer[p_idx][storage_idx] = frame
-        print(f"Buffered frame for position {array_key} at index {storage_idx}")
-
+        """TIFF-specific write implementation."""
+        self._queues[int(array_key)].put(frame)
 
     def _update_position_metadata(self, position_idx: int, metadata: ome.OME) -> None:
         """Add OME metadata to TIFF file efficiently without rewriting image data."""
