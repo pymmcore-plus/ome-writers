@@ -61,14 +61,14 @@ path = output_path / f"{ext}_example.ome.{ext}"
 if backend == "tiff":
     stream = omew.TifffileStream(use_memmap=tiff_memmap)
     stream.create(
-        path=path,
+        path=str(path),
         dimensions=dims,
         dtype=np.uint16,
         overwrite=True,
     )
 else:
     stream = omew.create_stream(
-        path=path,
+        path=str(path),
         dimensions=dims,
         dtype=np.uint16,
         backend=backend,
