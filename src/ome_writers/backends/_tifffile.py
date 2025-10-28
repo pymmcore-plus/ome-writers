@@ -402,7 +402,6 @@ class TifffileStream(MultiPositionOMEStream):
                 for memmap in self._memmaps.values():
                     try:
                         memmap.flush()
-                        print(f"Flushed memmap after {self._frame_count} frames.")
                     except Exception:
                         pass
         else:
