@@ -41,17 +41,19 @@ seq = useq.MDASequence(
 dims = omew.dims_from_useq(seq, image_width=32, image_height=32)
 
 # Create an stream using the selected backend
+ext = "tiff" if backend == "tiff" else "zarr"
+path = output_path / f"{ext}_example.ome.{ext}"
 if backend == "tiff":
     stream = omew.TifffileStream(use_memmap=tiff_memmap)
     stream.create(
-        path=output_path / "tiff_example.tiff",
+        path=path,
         dimensions=dims,
         dtype=np.uint8,
         overwrite=True,
     )
 else:
     stream = omew.create_stream(
-        path=output_path / "zarr_example.zarr",
+        path=path,
         dimensions=dims,
         dtype=np.uint8,
         backend=backend,
@@ -59,11 +61,12 @@ else:
     )
 
 # Simulate acquisition and append frames to the stream iterating over the MDASequence
-for _event in seq:
+for event in seq:
+    print(f"Event Index: {event.index}")
     # create a dummy frame
     frame = np.random.randint(0, 255, size=(32, 32), dtype=np.uint8)
     stream.append(frame)
 
 stream.flush()
 
-print("Data written successfully to", output_path)
+print("Data written successfully to", output_path / f"{ext}_example.ome.{ext}")

@@ -46,10 +46,9 @@ seq = useq.MDASequence(
 )
 # -------------------------------------------------------------------------#
 
+# Initialize pymmcore-plus core and load system configuration
 core = CMMCorePlus.instance()
 core.loadSystemConfiguration()
-
-core.setExposure(50)
 
 # Convert the MDASequence to ome_writers dimensions
 dims = omew.dims_from_useq(
@@ -57,17 +56,19 @@ dims = omew.dims_from_useq(
 )
 
 # Create an stream using the selected backend
+ext = "tiff" if backend == "tiff" else "zarr"
+path = output_path / f"{ext}_example.ome.{ext}"
 if backend == "tiff":
     stream = omew.TifffileStream(use_memmap=tiff_memmap)
     stream.create(
-        path=output_path / "tiff_example.tiff",
+        path=path,
         dimensions=dims,
         dtype=np.uint16,
         overwrite=True,
     )
 else:
     stream = omew.create_stream(
-        path=output_path / "zarr_example.zarr",
+        path=path,
         dimensions=dims,
         dtype=np.uint16,
         backend=backend,
@@ -87,7 +88,7 @@ def _on_frame_ready(
 @core.mda.events.sequenceFinished.connect
 def _on_sequence_finished(sequence: useq.MDASequence) -> None:
     stream.flush()
-    print("Data written successfully to", output_path)
+    print("Data written successfully to", path)
 
 
 # Start the acquisition
