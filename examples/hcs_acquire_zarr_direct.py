@@ -6,7 +6,7 @@ import acquire_zarr as aqz
 import numpy as np
 import zarr
 
-output = Path(__file__).parent / "acq_z_hcs_direct.zarr"
+output = Path("~/Desktop/acq_z_hcs_direct.zarr").expanduser()
 
 
 # Configure field of view arrays (matching ngff_zarr_hcs_pymmc_example.py specs)

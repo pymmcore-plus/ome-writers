@@ -1,4 +1,4 @@
-"""Example of acquiring a 5D dataset into an OME-NGFF Zarr using acquire-zarr."""
+"""Basic example of using ome_writers."""
 
 from __future__ import annotations
 
@@ -14,12 +14,13 @@ from acquire_zarr import (
     ZarrVersion,
 )
 
-output = Path(__file__).parent / "acq_z_direct.zarr"
+output = Path("~/Desktop/some_path_ts.zarr").expanduser()
 
 # TCZYX
 dtype = np.dtype("uint16")
 data = np.random.randint(0, 65536, size=(10, 2, 5, 512, 512), dtype=dtype)
 nt, nc, nz, ny, nx = data.shape
+
 
 dimensions = [
     Dimension(

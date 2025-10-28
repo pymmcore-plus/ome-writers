@@ -158,39 +158,91 @@ class MultiPositionOMEStream(OMEStream):
     ) -> tuple[int, Sequence[Dimension]]:
         """Initialize position tracking and return num_positions, non_position_dims.
 
+        The order of dimensions determines the acquisition order. This method builds
+        an index mapping that translates sequential append() calls to the correct
+        position and storage indices.
+
+        Parameters
+        ----------
+        dimensions : Sequence[Dimension]
+            All dimensions including position. The order determines acquisition order.
+
         Returns
         -------
         tuple[int, Sequence[Dimension]]
             The number of positions and the non-position dimensions.
         """
         # Separate position dimension from other dimensions
+
         position_dims = [d for d in dimensions if d.label == "p"]
+        # e.g. [Dimension(label='p', size=2, unit=None, chunk_size=None)]
+
         non_position_dims = [d for d in dimensions if d.label != "p"]
+        # e.g. [
+        #   Dimension(label='t', size=10, unit=(1.0, 's'), chunk_size=None)
+        #   Dimension(label='c', size=2, unit=None, chunk_size=None)
+        #   Dimension(label='z', size=3, unit=(1.0, 'um'), chunk_size=None)
+        #   Dimension(label='y', size=32, unit=(1.0, 'um'), chunk_size=None)
+        #   Dimension(label='x', size=32, unit=(1.0, 'um'), chunk_size=None)
+        # ]
         num_positions = position_dims[0].size if position_dims else 1
 
-        # Build index mapping that respects the order of dimensions
-        # Create ranges for ALL dimensions (including position) in their original order
-        all_dims_ranges: list[range] = []
-        position_dim_index = -1
-        for d in dimensions:
-            if d.label not in "yx":
-                if d.label == "p":
-                    position_dim_index = len(all_dims_ranges)
-                all_dims_ranges.append(range(d.size))
+        # Build dimension ranges (excluding x, y which are not iterated)
+        non_spatial_dims = [d for d in non_position_dims if d.label not in "yx"]
+        # e.g. [
+        #   Dimension(label='t', size=10, unit=(1.0, 's'), chunk_size=None)
+        #   Dimension(label='c', size=2, unit=None, chunk_size=None)
+        #   Dimension(label='z', size=3, unit=(1.0, 'um'), chunk_size=None)
+        # ]
 
-        # Generate all combinations in the order specified by dimensions
+        # -----Use the order of dimensions to determine acquisition order-----
+
+        # Create a mapping from label to range
+        dim_ranges = {d.label: range(d.size) for d in non_spatial_dims}
+        # e.g. {'t': range(0, 10), 'c': range(0, 2), 'z': range(0, 3)}
+
+        # Build ranges in the order dimensions appear
+        ordered_ranges = []
+        # e.g. [range(0, 10), range(0, 2), range(0, 2), range(0, 3)]
+
+        ordered_labels = []
+        # e.g. ['t', 'p', 'c', 'z']
+
+        for dim in dimensions:
+            if dim.label == "p":
+                ordered_ranges.append(range(num_positions))
+                ordered_labels.append("p")
+            elif dim.label in dim_ranges and dim.label not in "yx":
+                ordered_ranges.append(dim_ranges[dim.label])
+                ordered_labels.append(dim.label)
+
+        # Create index mapping. Store a storage-tuple of ints in the order of
+        # non_spatial_dims so backends can directly use the tuple as an index.
         self._indices = {}
-        for idx, combo in enumerate(product(*all_dims_ranges)):
-            # Extract position index and non-position indices
-            if position_dim_index >= 0:
-                array_key = str(combo[position_dim_index])
-                non_p_idx = tuple(
-                    v for i, v in enumerate(combo) if i != position_dim_index
-                )
-            else:
-                array_key = "0"
-                non_p_idx = combo
-            self._indices[idx] = (array_key, non_p_idx)
+        # e.g. {acq_index: (array_key/pos, non-position axis tuple)}
+        # {
+        #   0: ('0', (0, 0, 0)),
+        #   1: ('0', (0, 0, 1)),
+        #   ...,
+        #   6: ('1', (0, 0, 0)),
+        #   7: ('1', (0, 0, 1)),
+        #   ...,
+        # }
+
+        for i, acq_indices in enumerate(product(*ordered_ranges)):
+            # Map acquisition indices to storage indices
+            acq_dict = dict(zip(ordered_labels, acq_indices, strict=False))
+            # e.g. {'t': 0, 'p': 0, 'c': 0, 'z': 0}
+
+            pos = acq_dict.get("p", 0)
+
+            # Build storage tuple for non-position, non-spatial dimensions
+            storage_tuple: tuple[int, ...] = tuple(
+                acq_dict[d.label] for d in non_spatial_dims
+            )
+            # e.g. (0, 0, 0) or (0, 0, 1) or (0, 0, 2), ...
+
+            self._indices[i] = (str(pos), storage_tuple)
 
         self._position_dim = position_dims[0] if position_dims else None
         self._append_count = 0

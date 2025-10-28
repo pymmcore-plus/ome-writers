@@ -95,6 +95,9 @@ class AcquireZarrStream(MultiPositionOMEStream):
         # Dimensions will be the same across all positions, so we can create them once
         az_dims = [self._dim_toaqz_dim(dim) for dim in non_position_dims]
 
+        # keep a strong reference (avoid segfaults)
+        self._az_dims_keepalive = az_dims
+
         if plate is not None:
             # Use HCS plate mode with acquire-zarr's hcs_plates parameter
             self._create_with_hcs_plates(str(self._group_path), az_dims, dtype, plate)
@@ -113,24 +116,31 @@ class AcquireZarrStream(MultiPositionOMEStream):
     ) -> None:
         """Create stream without HCS plates (standard multi-position mode)."""
         # Create AcquireZarr array settings for each position
-        array_settings: list[acquire_zarr.ArraySettings] = []
-        for pos_idx in range(num_positions):
-            array_key = str(pos_idx)
-            array_settings.append(self._aqz_pos_array(array_key, az_dims, dtype))
+        az_array_settings = [
+            self._aqz_pos_array(str(pos_idx), az_dims, dtype)
+            for pos_idx in range(num_positions)
+        ]
 
-        for arr in array_settings:
+        for arr in az_array_settings:
             for d in arr.dimensions:
                 assert d.chunk_size_px > 0, (d.name, d.chunk_size_px)
                 assert d.shard_size_chunks > 0, (d.name, d.shard_size_chunks)
 
+        # keep a strong reference (avoid segfaults)
+        self._az_settings_keepalive = az_array_settings
+
         # Create streams for each position
         settings = self._aqz.StreamSettings(
-            arrays=array_settings,
+            arrays=az_array_settings,
             store_path=store_path,
             version=self._aqz.ZarrVersion.V3,
         )
+
+        # keep a strong reference (avoid segfaults)
         self._az_settings_keepalive = settings
+
         self._stream = self._aqz.ZarrStream(settings)
+
         self._patch_group_metadata()
 
     def _create_with_hcs_plates(
@@ -155,7 +165,10 @@ class AcquireZarrStream(MultiPositionOMEStream):
             version=self._aqz.ZarrVersion.V3,
             hcs_plates=[plate_aqz],
         )
+
+        # keep a strong reference (avoid segfaults)
         self._az_settings_keepalive = settings
+
         self._stream = self._aqz.ZarrStream(settings)
 
         # Build indices mapping for writing
