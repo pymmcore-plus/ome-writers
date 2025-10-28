@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import uuid
+from collections import namedtuple
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, NamedTuple, TypeAlias
 
 import numpy as np
 
 from ome_writers import __version__
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Sequence
+
+    from ome_writers import Dimension
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -156,3 +162,76 @@ def dims_to_ome(
 
     ome = m.OME(images=images, creator=f"ome_writers v{__version__}")
     return ome
+
+
+class DimensionIndexIterator:
+    """Iterator yielding multidimensional indices in acquisition order.
+
+    Takes dimensions in acquisition order and yields named tuples with indices
+    reordered to match the desired output dimension order.
+
+    Parameters
+    ----------
+    dims : Sequence[Dimension]
+        Dimensions in acquisition order (slowest to fastest varying).
+    output_order : str, optional
+        Desired output dimension order, by default "ptcz".
+        Only dimensions in this string are included in the output.
+
+    Examples
+    --------
+    >>> dims = [
+    ...     Dimension(label='t', size=10, unit=(1.0, 's'), chunk_size=1),
+    ...     Dimension(label='p', size=2, unit=None, chunk_size=1),
+    ...     Dimension(label='z', size=7, unit=(1.0, 'um'), chunk_size=1),
+    ...     Dimension(label='c', size=2, unit=None, chunk_size=1),
+    ...     Dimension(label='y', size=512, unit=None, chunk_size=1),
+    ...     Dimension(label='x', size=512, unit=None, chunk_size=1),
+    ... ]
+    >>> for idx in DimensionIndexIterator(dims, output_order="ptcz"):
+    ...     print(idx)
+    FrameIndex(p=0, t=0, c=0, z=0)
+    FrameIndex(p=0, t=0, c=1, z=0)
+    ...
+    """
+
+    def __init__(
+        self,
+        dims: Sequence[Dimension],
+        output_order: Sequence[str] = ("p", "t", "c", "z"),
+    ) -> None:
+        self.output_order = [str(o).lower() for o in output_order]
+
+        # Filter to dimensions in output_order, preserving acquisition order
+        self.iter_dims = [d for d in dims if d.label in self.output_order]
+
+        # Shape for iteration (in acquisition order)
+        self.shape = tuple(d.size for d in self.iter_dims)
+
+        # Create named tuple with fields in output order
+        field_names = [
+            label
+            for label in self.output_order
+            if any(d.label == label for d in self.iter_dims)
+        ]
+        self.FrameIndex = namedtuple("FrameIndex", field_names)  # type: ignore
+
+        # Pre-compute mapping from output positions to acquisition positions
+        acq_labels = [d.label for d in self.iter_dims]
+        self.output_to_acq = [acq_labels.index(f) for f in field_names]
+
+    def __iter__(self) -> Iterator:
+        """Yield indices in acquisition order, formatted in output order."""
+        if not self.shape:
+            return
+
+        for i in range(int(np.prod(self.shape))):
+            # Unravel flat index to multi-dim indices (acquisition order)
+            acq_indices = np.unravel_index(i, self.shape)
+            # Reorder to output order and convert to Python ints
+            output_indices = tuple(int(acq_indices[j]) for j in self.output_to_acq)
+            yield self.FrameIndex(*output_indices)  # type: ignore
+
+    def __len__(self) -> int:
+        """Return total number of frames."""
+        return int(np.prod(self.shape)) if self.shape else 0
