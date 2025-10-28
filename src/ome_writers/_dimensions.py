@@ -181,12 +181,12 @@ class DimensionIndexIterator:
     Examples
     --------
     >>> dims = [
-    ...     Dimension(label='t', size=10, unit=(1.0, 's'), chunk_size=1),
-    ...     Dimension(label='p', size=2, unit=None, chunk_size=1),
-    ...     Dimension(label='z', size=7, unit=(1.0, 'um'), chunk_size=1),
-    ...     Dimension(label='c', size=2, unit=None, chunk_size=1),
-    ...     Dimension(label='y', size=512, unit=None, chunk_size=1),
-    ...     Dimension(label='x', size=512, unit=None, chunk_size=1),
+    ...     Dimension(label="t", size=10, unit=(1.0, "s"), chunk_size=1),
+    ...     Dimension(label="p", size=2, unit=None, chunk_size=1),
+    ...     Dimension(label="z", size=7, unit=(1.0, "um"), chunk_size=1),
+    ...     Dimension(label="c", size=2, unit=None, chunk_size=1),
+    ...     Dimension(label="y", size=512, unit=None, chunk_size=1),
+    ...     Dimension(label="x", size=512, unit=None, chunk_size=1),
     ... ]
     >>> for idx in DimensionIndexIterator(dims, output_order="ptcz"):
     ...     print(idx)
