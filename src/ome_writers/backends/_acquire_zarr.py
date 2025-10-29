@@ -51,7 +51,9 @@ class AcquireZarrStream(MultiPositionOMEStream):
         overwrite: bool = False,
     ) -> Self:
         # Use MultiPositionOMEStream to handle position logic
-        num_positions, non_position_dims = self._init_positions(dimensions)
+        num_positions, non_position_dims = self._init_positions(
+            dimensions, enforce_ome_order=False
+        )
         self._group_path = Path(self._normalize_path(path))
 
         # Check if directory exists and handle overwrite parameter
@@ -65,7 +67,6 @@ class AcquireZarrStream(MultiPositionOMEStream):
 
         # Dimensions will be the same across all positions, so we can create them once
         az_dims = [self._dim_toaqz_dim(dim) for dim in non_position_dims]
-
         # keep a strong reference (avoid segfaults)
         self._az_dims_keepalive = az_dims
 
@@ -80,7 +81,6 @@ class AcquireZarrStream(MultiPositionOMEStream):
                 assert d.chunk_size_px > 0, (d.name, d.chunk_size_px)
                 assert d.shard_size_chunks > 0, (d.name, d.shard_size_chunks)
 
-        # keep a strong reference (avoid segfaults)
         self._az_arrays_keepalive = az_array_settings
 
         # Create streams for each position
@@ -89,9 +89,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
             store_path=str(self._group_path),
             version=self._aqz.ZarrVersion.V3,
         )
-        # keep a strong reference (avoid segfaults)
         self._az_settings_keepalive = settings
-
         self._stream = self._aqz.ZarrStream(settings)
 
         self._patch_group_metadata()
@@ -124,7 +122,10 @@ class AcquireZarrStream(MultiPositionOMEStream):
     def _write_to_backend(
         self, array_key: str, index: tuple[int, ...], frame: np.ndarray
     ) -> None:
-        """AcquireZarr-specific write implementation."""
+        """AcquireZarr-specific write implementation.
+
+        NOTE: For AcquireZarr, frames are written sequentially, so index is not used.
+        """
         if self._stream is not None:
             self._stream.append(frame, key=array_key)
 

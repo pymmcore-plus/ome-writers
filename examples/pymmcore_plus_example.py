@@ -32,9 +32,6 @@ backend = "acquire-zarr"
 # backend = "tensorstore"
 # backend = "tiff"
 
-# Only used if backend is "tiff". Leave True by default
-tiff_memmap = True
-
 # Create a MDASequence. NOTE: the axis_order determines the order in which frames will
 # be appended to the stream.
 seq = useq.MDASequence(
@@ -58,23 +55,13 @@ dims = omew.dims_from_useq(
 # Create an stream using the selected backend
 ext = "tiff" if backend == "tiff" else "zarr"
 path = output_path / f"{ext}_example.ome.{ext}"
-if backend == "tiff":
-    stream = omew.TifffileStream(use_memmap=tiff_memmap)
-    stream.create(
-        path=str(path),
-        dimensions=dims,
-        dtype=np.uint16,
-        overwrite=True,
-    )
-else:
-    stream = omew.create_stream(
-        path=str(path),
-        dimensions=dims,
-        dtype=np.uint16,
-        backend=backend,
-        overwrite=True,
-    )
-
+stream = omew.create_stream(
+    path=str(path),
+    dimensions=dims,
+    dtype=np.uint16,
+    backend=backend,
+    overwrite=True,
+)
 
 # Append frames to the stream on frameReady event
 @core.mda.events.frameReady.connect

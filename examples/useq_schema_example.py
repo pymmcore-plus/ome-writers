@@ -19,22 +19,22 @@ except ImportError as e:
 output_path = Path("~/Desktop/").expanduser()
 
 # Choose backend: acquire-zarr, tensorstore, or tiff
-backend = "acquire-zarr"
-# backend = "tensorstore"
+# backend = "acquire-zarr"
+backend = "tensorstore"
 # backend = "tiff"
-
-# Only used if backend is "tiff". Leave True by default
-tiff_memmap = True
 
 # Create a MDASequence. NOTE: the axis_order determines the order in which frames will
 # be appended to the stream.
 seq = useq.MDASequence(
-    axis_order="tpcz",
-    stage_positions=[(0.0, 0.0), (10.0, 10.0)],
-    time_plan={"interval": 0.5, "loops": 10},
+    axis_order="pzc",
+    # stage_positions=[(0.0, 0.0), (10.0, 10.0)],
+    stage_positions=[(0.0, 0.0)],
+    # time_plan={"interval": 0.5, "loops": 10},
     channels=["DAPI", "FITC"],
     z_plan={"range": 2, "step": 1.0},
 )
+print()
+print(f"ACQUISITION ORDER: {seq.axis_order}")
 # -------------------------------------------------------------------------#
 
 # Convert the MDASequence to ome_writers dimensions
@@ -43,26 +43,19 @@ dims = omew.dims_from_useq(seq, image_width=32, image_height=32)
 # Create an stream using the selected backend
 ext = "tiff" if backend == "tiff" else "zarr"
 path = output_path / f"{ext}_example.ome.{ext}"
-if backend == "tiff":
-    stream = omew.TifffileStream(use_memmap=tiff_memmap)
-    stream.create(
-        path=str(path),
-        dimensions=dims,
-        dtype=np.uint8,
-        overwrite=True,
-    )
-else:
-    stream = omew.create_stream(
-        path=str(path),
-        dimensions=dims,
-        dtype=np.uint8,
-        backend=backend,
-        overwrite=True,
-    )
+
+stream = omew.create_stream(
+    path=str(path),
+    dimensions=dims,
+    dtype=np.uint8,
+    backend=backend,
+    overwrite=True,
+)
+
 
 # Simulate acquisition and append frames to the stream iterating over the MDASequence
 for event in seq:
-    print(f"Event Index: {event.index}")
+    print(f"\nEvent Index: {event.index}")
     # create a dummy frame
     frame = np.random.randint(0, 255, size=(32, 32), dtype=np.uint8)
     stream.append(frame)

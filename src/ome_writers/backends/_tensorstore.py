@@ -70,7 +70,6 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
                     ) from e
                 else:
                     raise
-
         return self
 
     def _create_spec(
@@ -96,6 +95,7 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
     ) -> None:
         """TensorStore-specific write implementation."""
         store = self._stores[array_key]
+        # Named tuples work directly as indices
         future = store[index].write(frame)  # type: ignore[index]
         self._futures.append(future)
 

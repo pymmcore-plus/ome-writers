@@ -70,10 +70,9 @@ def verify_frame_value(
         )
 
 
-@pytest.mark.parametrize("tiff_mmmap", [True, False])
-@pytest.mark.parametrize("axis_order", ["tpzc", "ptzc", "cztp", "tpcz", "ptcz"])
+@pytest.mark.parametrize("axis_order", ["ptzc", "ptcz", "tpzc","cztp", "tpcz"])
 def test_axis_order(
-    axis_order: str, backend: AvailableBackend, tiff_mmmap: bool, tmp_path: Path
+    axis_order: str, backend: AvailableBackend, tmp_path: Path
 ) -> None:
     """Test that different axis_order values work correctly.
 
@@ -96,8 +95,8 @@ def test_axis_order(
     if backend.file_ext.endswith("tiff"):
         output_path = tmp_path / f"test_{axis_order}.ome.tiff"
     else:
-        if tiff_mmmap:
-            pytest.skip("Memory-mapped option only applies to TIFF backend.")
+        # if tiff_mmmap:
+        #     pytest.skip("Memory-mapped option only applies to TIFF backend.")
         output_path = tmp_path / f"test_{axis_order}.{backend.file_ext}"
 
     # Create sequence with specified axis_order
@@ -112,23 +111,13 @@ def test_axis_order(
 
     dims = omew.dims_from_useq(seq, image_width=32, image_height=32)
 
-    if backend.file_ext.endswith("tiff"):
-        # For TIFF, enable memory mapping option
-        stream = omew.TifffileStream(use_memmap=tiff_mmmap)
-        stream.create(
-            path=output_path,
-            dimensions=dims,
-            dtype=np.uint16,
-            overwrite=True,
-        )
-    else:
-        stream = omew.create_stream(
-            path=output_path,
-            dimensions=dims,
-            dtype=np.uint16,
-            backend=backend.name,
-            overwrite=True,
-        )
+    stream = omew.create_stream(
+        path=str(output_path),
+        dimensions=dims,
+        dtype=np.uint16,
+        backend=backend.name,
+        overwrite=True,
+    )
 
     # Write frames with unique statistics
     for event in seq:
@@ -142,25 +131,32 @@ def test_axis_order(
     stream.flush()
 
     # Verify data based on backend type
-    if backend.file_ext.endswith("zarr"):
+    if backend.name in ("acquire-zarr", "tensorstore"):
         pytest.importorskip("zarr", reason="zarr not installed")
         import zarr
 
         zg = zarr.open_group(output_path, mode="r")
 
-        # Determine the expected array indexing based on axis_order
-        # The dims are created in axis_order, so we need to know the non-position order
-        non_pos_dims = [d.label for d in dims if d.label not in "pyx"]
+        # For tensorstore data is stored in OME-NGFF standard order (TCZYX)
+        # For acquire-zarr data is stored in acquisition order
 
         # Check all positions, timepoints, channels, and z-slices
+        # Get the dimension order from dims (which reflects storage order)
+        non_pos_dims = [d.label for d in dims if d.label not in "pyx"]
         for p in range(2):
             pos_array = zg[str(p)]
             for t in range(3):
                 for c in range(2):
                     for z in range(4):
-                        # Build index dict for all dimensions
-                        indices = {"t": t, "c": c, "z": z}
-                        idx_tuple = tuple(indices[d] for d in non_pos_dims)
+                        # Build index based on storage order
+                        if backend.name == "acquire-zarr":
+                            # AcquireZarr stores in acquisition order
+                            indices = {"t": t, "c": c, "z": z}
+                            idx_tuple = tuple(indices[d] for d in non_pos_dims)
+                        else:
+                            # TensorStore stores in OME-NGFF order (TCZYX)
+                            idx_tuple = (t, c, z)
+
                         frame_data = pos_array[(*idx_tuple, slice(None), slice(None))]
 
                         is_correct, msg = verify_frame_value(frame_data, p, t, c, z)
@@ -168,7 +164,7 @@ def test_axis_order(
                             f"Position {p}, Time {t}, Channel {c}, Z {z}: {msg}"
                         )
 
-    elif backend.file_ext.endswith("tiff"):
+    elif backend.name == "tiff":
         pytest.importorskip("tifffile", reason="tifffile not installed")
         import tifffile
 
@@ -185,22 +181,20 @@ def test_axis_order(
             ext = ""
             base_name = base_path
 
-        # Determine the expected storage order from the dims
-        # (TIFF can store in any order matching the dimension order)
+        # TIFF data is stored in acquisition order (axis_order)
+        # Get the dimension order from dims (which reflects acquisition order)
         non_pos_dims = [d.label for d in dims if d.label not in "pyx"]
 
         for p in range(2):
             tiff_path = tmp_path / f"{Path(base_name).name}_p{p:03d}{ext}"
 
             with tifffile.TiffFile(tiff_path) as tif:
-                print(tif.ome_metadata)
                 data = tif.asarray()
-                print(data.shape)
-                # TIFF data is stored in the order matching non_pos_dims
+                # TIFF data is stored in acquisition order
                 for t in range(3):
                     for c in range(2):
                         for z in range(4):
-                            # Build index dict for all dimensions
+                            # Build index based on acquisition order
                             indices = {"t": t, "c": c, "z": z}
                             idx_tuple = tuple(indices[d] for d in non_pos_dims)
                             frame_data = data[(*idx_tuple, slice(None), slice(None))]
