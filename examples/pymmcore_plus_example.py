@@ -63,6 +63,7 @@ stream = omew.create_stream(
     overwrite=True,
 )
 
+
 # Append frames to the stream on frameReady event
 @core.mda.events.frameReady.connect
 def _on_frame_ready(

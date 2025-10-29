@@ -70,10 +70,8 @@ def verify_frame_value(
         )
 
 
-@pytest.mark.parametrize("axis_order", ["ptzc", "ptcz", "tpzc","cztp", "tpcz"])
-def test_axis_order(
-    axis_order: str, backend: AvailableBackend, tmp_path: Path
-) -> None:
+@pytest.mark.parametrize("axis_order", ["ptzc", "ptcz", "tpzc", "cztp", "tpcz"])
+def test_axis_order(axis_order: str, backend: AvailableBackend, tmp_path: Path) -> None:
     """Test that different axis_order values work correctly.
 
     This test ensures that frames are written to the correct positions
