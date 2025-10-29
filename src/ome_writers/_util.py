@@ -223,7 +223,7 @@ class DimensionIndexIterator:
 
         # Pre-compute mapping from output positions to acquisition positions
         acq_labels = [d.label for d in self.iter_dims]
-        self.output_to_acq = [acq_labels.index(f) for f in field_names]
+        self._output_to_acq = [acq_labels.index(f) for f in field_names]  # type: ignore
 
         # Create a namedtuple for the frame index
         self.FrameIndex = namedtuple("FrameIndex", field_names)  # type: ignore
@@ -237,7 +237,7 @@ class DimensionIndexIterator:
             # Unravel flat index to multi-dim indices (acquisition order)
             acq_indices = np.unravel_index(i, self.shape)
             # Reorder to output order and convert to Python ints
-            output_indices = tuple(int(acq_indices[j]) for j in self.output_to_acq)
+            output_indices = tuple(int(acq_indices[j]) for j in self._output_to_acq)
             yield self.FrameIndex(*output_indices)  # type: ignore
 
     def __len__(self) -> int:

@@ -136,9 +136,6 @@ def test_axis_order(axis_order: str, backend: AvailableBackend, tmp_path: Path) 
 
         zg = zarr.open_group(output_path, mode="r")
 
-        # For tensorstore data is stored in OME-NGFF standard order (TCZYX)
-        # For acquire-zarr data is stored in acquisition order
-
         # we are only validating tensorstore because acquire-zarr allows to save
         # data in acquisition order and thus the validation will fail in some cases
         if backend.name == "tensorstore":
@@ -157,11 +154,11 @@ def test_axis_order(axis_order: str, backend: AvailableBackend, tmp_path: Path) 
                     for z in range(4):
                         # Build index based on storage order
                         if backend.name == "acquire-zarr":
-                            # AcquireZarr stores in acquisition order
+                            # acquire-zarr data is stored in acquisition order
                             indices = {"t": t, "c": c, "z": z}
                             idx_tuple = tuple(indices[d] for d in non_pos_dims)
                         else:
-                            # TensorStore stores in OME-NGFF order (TCZYX)
+                            # tensorstore data is stored in OME-NGFF order (TCZYX)
                             idx_tuple = (t, c, z)
 
                         frame_data = pos_array[(*idx_tuple, slice(None), slice(None))]

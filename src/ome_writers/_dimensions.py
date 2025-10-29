@@ -11,11 +11,6 @@ from ome_writers import __version__
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from ome_writers import Dimension
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     import ome_types
 
 OME_DIM_TYPE = {"y": "space", "x": "space", "z": "space", "t": "time", "c": "channel"}

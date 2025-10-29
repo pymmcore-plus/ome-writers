@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import abc
 from abc import abstractmethod
-from collections import namedtuple
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -208,17 +207,14 @@ class MultiPositionOMEStream(OMEStream):
         # or [FrameIndex(t=0, c=0, z=0), FrameIndex(t=0, c=1, z=0), ...]
 
         # Build the indices mapping
-        self._indices: dict[int, tuple[str, tuple]] = {}
+        self._indices = {}
         for frame_idx, named_idx in enumerate(dim_iter):
             if hasattr(named_idx, "p"):
                 pos_idx = named_idx.p
-                # Filter out 'p' field and create new named tuple with remaining fields
+                # Filter out 'p' field and create storage index as a plain tuple
                 storage_fields = [f for f in named_idx._fields if f != "p"]
-                StorageIndex = namedtuple("StorageIndex", storage_fields)
-                storage_idx = StorageIndex(
-                    *(getattr(named_idx, f) for f in storage_fields)
-                )
-                # e.g. [StorageIndex(t=0, c=0, z=0), StorageIndex(t=0, c=1, z=0), ...]
+                storage_idx = tuple(getattr(named_idx, f) for f in storage_fields)
+                # e.g. (t=0, c=0, z=0) represented as a tuple (0, 0, 0)
             else:
                 pos_idx = 0
                 storage_idx = named_idx
