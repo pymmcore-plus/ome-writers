@@ -8,11 +8,14 @@ exact indices (p, t, c), making it easy to verify correctness.
 
 from __future__ import annotations
 
+from contextlib import suppress
+from os import path
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
+import yaozarrs
 
 import ome_writers as omew
 
@@ -138,6 +141,13 @@ def test_axis_order(axis_order: str, backend: AvailableBackend, tmp_path: Path) 
         # For tensorstore data is stored in OME-NGFF standard order (TCZYX)
         # For acquire-zarr data is stored in acquisition order
 
+        # we are only validating tensorstore because acquire-zarr allows to save
+        # data in acquisition order and thus the validation will fail in some cases
+        if backend.name == "tensorstore":
+            with suppress(ImportError):
+                from yaozarrs import validate_zarr_store
+                validate_zarr_store(output_path)
+
         # Check all positions, timepoints, channels, and z-slices
         # Get the dimension order from dims (which reflects storage order)
         non_pos_dims = [d.label for d in dims if d.label not in "pyx"]
@@ -200,3 +210,7 @@ def test_axis_order(axis_order: str, backend: AvailableBackend, tmp_path: Path) 
                             assert is_correct, (
                                 f"Position {p}, Time {t}, Channel {c}, Z {z}: {msg}"
                             )
+                            with suppress(ImportError):
+                                from ome_types import validate_xml
+                                assert tif.ome_metadata is not None
+                                validate_xml(tif.ome_metadata)

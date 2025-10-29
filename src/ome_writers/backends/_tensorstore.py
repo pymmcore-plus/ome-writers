@@ -53,7 +53,9 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         num_positions, non_position_dims = self._init_positions(dimensions)
         self._delete_existing = overwrite
 
-        self._create_group(self._normalize_path(path), dimensions)
+        # Pass non_position_dims (storage order) to _create_group so metadata
+        # matches the actual array dimension order (TCZYX)
+        self._create_group(self._normalize_path(path), non_position_dims)
 
         # Create stores for each array
         for pos_idx in range(num_positions):
@@ -113,19 +115,17 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         self._group_path = Path(path)
         self._group_path.mkdir(parents=True, exist_ok=True)
 
-        # Determine array keys and dimensions based on position dimension
-        position_dims = [d for d in dims if d.label == "p"]
-        non_position_dims = [d for d in dims if d.label != "p"]
-
-        # Determine number of positions (1 if no position dimension)
-        num_positions = position_dims[0].size if position_dims else 1
+        # dims are already non-position dimensions in storage order (TCZYX)
+        # coming from _init_positions()
+        # Determine number of positions from self._num_positions
+        num_positions = self._num_positions
 
         array_dims: dict[str, Sequence[Dimension]] = {}
         for pos_idx in range(num_positions):
             array_key = str(pos_idx)
             self._array_paths[array_key] = self._group_path / array_key
-            # Use non_position_dims for multi-pos, full dims for single pos
-            array_dims[array_key] = non_position_dims if self._position_dim else dims
+            # Use dims (non-position dimensions in storage order)
+            array_dims[array_key] = dims
 
         group_zarr = self._group_path / "zarr.json"
         group_meta = {
