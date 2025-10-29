@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import namedtuple
 from itertools import product
 from typing import TYPE_CHECKING, cast, get_args
 
@@ -204,9 +203,13 @@ class DimensionIndexIterator:
     def __init__(
         self,
         dims: Sequence[Dimension],
-        output_order: Sequence[str] = ("p", "t", "c", "z"),
+        position_key: DimensionLabel = "p",
+        output_order: Sequence[DimensionLabel] = ("t", "c", "z"),
     ) -> None:
-        self.output_order = [str(o).lower() for o in output_order]
+        if position_key in output_order:
+            raise ValueError("position_key should not be in output_order")
+
+        self.output_order = [position_key] + [str(o).lower() for o in output_order]
 
         # Filter to dimensions in output_order, preserving acquisition order
         self.iter_dims = [d for d in dims if d.label in self.output_order]
@@ -223,12 +226,9 @@ class DimensionIndexIterator:
 
         # Pre-compute mapping from output positions to acquisition positions
         acq_labels = [d.label for d in self.iter_dims]
-        self._output_to_acq = [acq_labels.index(f) for f in field_names]  # type: ignore
+        self._output_to_acq = [acq_labels.index(f) for f in field_names]
 
-        # Create a namedtuple for the frame index
-        self.FrameIndex = namedtuple("FrameIndex", field_names)  # type: ignore
-
-    def __iter__(self) -> Iterator:
+    def __iter__(self) -> Iterator[tuple[int, tuple]]:
         """Yield indices in acquisition order, formatted in output order."""
         if not self.shape:
             return
@@ -237,8 +237,10 @@ class DimensionIndexIterator:
             # Unravel flat index to multi-dim indices (acquisition order)
             acq_indices = np.unravel_index(i, self.shape)
             # Reorder to output order and convert to Python ints
-            output_indices = tuple(int(acq_indices[j]) for j in self._output_to_acq)
-            yield self.FrameIndex(*output_indices)  # type: ignore
+            pos_key, *output_indices = tuple(
+                int(acq_indices[j]) for j in self._output_to_acq
+            )
+            yield pos_key, tuple(output_indices)
 
     def __len__(self) -> int:
         """Return total number of frames."""

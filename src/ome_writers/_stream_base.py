@@ -13,6 +13,8 @@ if TYPE_CHECKING:
 
     import numpy as np
 
+    from ome_writers._dimensions import DimensionLabel
+
     from ._dimensions import Dimension
 
 
@@ -114,9 +116,6 @@ class MultiPositionOMEStream(OMEStream):
     def __init__(self) -> None:
         # dimension info for position dimension, if any
         self._position_dim: Dimension | None = None
-        # A mapping of frame indices to (array_key, named_index)
-        # where named_index is a NamedTuple with .t, .c, .z etc attributes
-        self._indices: dict[int, tuple[str, tuple]] = {}
         # number of times append() has been called
         self._append_count = 0
         # number of positions in the stream
@@ -193,32 +192,19 @@ class MultiPositionOMEStream(OMEStream):
 
         # Use DimensionIndexIterator to generate indices in acquisition order
         # but formatted for storage order
-        storage_order_labels = [
+        storage_order_labels: list[DimensionLabel] = [
             d.label for d in non_position_dims_storage_order if d.label not in "yx"
         ]
 
         # Create iterator that yields indices in acquisition order but with fields
         # matching storage order
-        dim_iter = DimensionIndexIterator(
-            dimensions,  # acquisition order
-            output_order=["p", *storage_order_labels],  # storage order for output
-        )
         # e.g. [FrameIndex(p=0, t=0, c=0, z=0), FrameIndex(p=0, t=0, c=1, z=0), ...]
-        # or [FrameIndex(t=0, c=0, z=0), FrameIndex(t=0, c=1, z=0), ...]
-
-        # Build the indices mapping
-        self._indices = {}
-        for frame_idx, named_idx in enumerate(dim_iter):
-            if hasattr(named_idx, "p"):
-                pos_idx = named_idx.p
-                # Filter out 'p' field and create storage index as a plain tuple
-                storage_fields = [f for f in named_idx._fields if f != "p"]
-                storage_idx = tuple(getattr(named_idx, f) for f in storage_fields)
-                # e.g. (t=0, c=0, z=0) represented as a tuple (0, 0, 0)
-            else:
-                pos_idx = 0
-                storage_idx = named_idx
-            self._indices[frame_idx] = (str(pos_idx), storage_idx)
+        self._dim_iter = iter(
+            DimensionIndexIterator(
+                dimensions,  # acquisition order
+                output_order=storage_order_labels,  # storage order for output
+            )
+        )
 
         self._position_dim = position_dims[0] if position_dims else None
         self._append_count = 0
@@ -259,6 +245,6 @@ class MultiPositionOMEStream(OMEStream):
         if not self.is_active():
             msg = "Stream is closed or uninitialized. Call create() first."
             raise RuntimeError(msg)
-        array_key, index = self._indices[self._append_count]
-        self._write_to_backend(array_key, index, frame)
+        position_key, index = next(self._dim_iter)
+        self._write_to_backend(str(position_key), index, frame)
         self._append_count += 1
