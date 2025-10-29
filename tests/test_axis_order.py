@@ -9,13 +9,11 @@ exact indices (p, t, c), making it easy to verify correctness.
 from __future__ import annotations
 
 from contextlib import suppress
-from os import path
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
-import yaozarrs
 
 import ome_writers as omew
 
@@ -146,6 +144,7 @@ def test_axis_order(axis_order: str, backend: AvailableBackend, tmp_path: Path) 
         if backend.name == "tensorstore":
             with suppress(ImportError):
                 from yaozarrs import validate_zarr_store
+
                 validate_zarr_store(output_path)
 
         # Check all positions, timepoints, channels, and z-slices
@@ -212,5 +211,6 @@ def test_axis_order(axis_order: str, backend: AvailableBackend, tmp_path: Path) 
                             )
                             with suppress(ImportError):
                                 from ome_types import validate_xml
+
                                 assert tif.ome_metadata is not None
                                 validate_xml(tif.ome_metadata)
