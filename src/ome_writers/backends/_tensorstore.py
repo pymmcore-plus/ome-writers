@@ -137,9 +137,7 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
             "zarr_format": 3,
             "node_type": "group",
             "attributes": {
-                "ome": dims_to_yaozarrs_v5(array_dims=array_dims).model_dump_json(
-                    indent=2
-                )
+                "ome": dims_to_yaozarrs_v5(array_dims=array_dims).model_dump()
             },
         }
         group_zarr.write_text(json.dumps(group_meta, indent=2))
