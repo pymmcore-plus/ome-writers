@@ -49,18 +49,19 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         *,
         overwrite: bool = False,
     ) -> Self:
-        # Use MultiPositionOMEStream to handle position logic
-        num_positions, non_position_dims = self._init_positions(dimensions)
+        # Initialize dimensions from MultiPositionOMEStream
+        self._init_dimensions(dimensions)
+
         self._delete_existing = overwrite
 
-        # Pass non_position_dims (storage order) to _create_group so metadata
+        # Pass self._non_position_dims (storage order) to _create_group so metadata
         # matches the actual array dimension order (TCZYX)
-        self._create_group(self._normalize_path(path), non_position_dims)
+        self._create_group(self._normalize_path(path), self.storage_order_dims)
 
         # Create stores for each array
-        for pos_idx in range(num_positions):
+        for pos_idx in range(self.num_positions):
             array_key = str(pos_idx)
-            spec = self._create_spec(dtype, non_position_dims, array_key)
+            spec = self._create_spec(dtype, self.storage_order_dims, array_key)
             try:
                 self._stores[array_key] = self._ts.open(spec).result()
             except ValueError as e:
@@ -115,13 +116,8 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         self._group_path = Path(path)
         self._group_path.mkdir(parents=True, exist_ok=True)
 
-        # dims are already non-position dimensions in storage order (TCZYX)
-        # coming from _init_positions()
-        # Determine number of positions from self._num_positions
-        num_positions = self._num_positions
-
         array_dims: dict[str, Sequence[Dimension]] = {}
-        for pos_idx in range(num_positions):
+        for pos_idx in range(self.num_positions):
             array_key = str(pos_idx)
             self._array_paths[array_key] = self._group_path / array_key
             # Use dims (non-position dimensions in storage order)

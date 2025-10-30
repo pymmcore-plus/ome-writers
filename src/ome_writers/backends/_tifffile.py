@@ -82,20 +82,20 @@ class TifffileStream(MultiPositionOMEStream):
         *,
         overwrite: bool = False,
     ) -> Self:
-        # Use MultiPositionOMEStream to handle position logic
-        # TIFF can store in acquisition order, no need to enforce TCZYX
-        num_positions, tczyx_dims = self._init_positions(
-            dimensions, enforce_ome_order=False
-        )
+        # Initialize dimensions from MultiPositionOMEStream
+        self._init_dimensions(dimensions, enforce_ome_order=False)
+
         self._delete_existing = overwrite
         self._path = Path(self._normalize_path(path))
-        shape_5d = tuple(d.size for d in tczyx_dims)
+        shape_5d = tuple(d.size for d in self.storage_order_dims)
 
-        fnames = self._prepare_files(self._path, num_positions, overwrite)
+        fnames = self._prepare_files(self._path, self.num_positions, overwrite)
 
         # Create a memmap for each position
         for p_idx, fname in enumerate(fnames):
-            ome = dims_to_ome(tczyx_dims, dtype=dtype, tiff_file_name=fname)
+            ome = dims_to_ome(
+                self.storage_order_dims, dtype=dtype, tiff_file_name=fname
+            )
             self._queues[p_idx] = q = Queue()  # type: ignore
             self._threads[p_idx] = thread = WriterThread(
                 fname,

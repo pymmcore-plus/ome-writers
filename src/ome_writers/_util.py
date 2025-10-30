@@ -6,14 +6,14 @@ from typing import TYPE_CHECKING, cast, get_args
 import numpy as np
 import numpy.typing as npt
 
-from ome_writers import Dimension, DimensionLabel
+from ._dimensions import Dimension, DimensionLabel
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Sequence
 
     import useq
 
-    from ome_writers import UnitTuple
+    from ._dimensions import UnitTuple
 
 
 VALID_LABELS = get_args(DimensionLabel)
@@ -25,6 +25,7 @@ DEFAULT_UNITS: Mapping[DimensionLabel, UnitTuple | None] = {
     "c": None,
     "p": None,
 }
+OME_NGFF_ORDER = {"t": 0, "c": 1, "z": 2, "y": 3, "x": 4}
 
 
 def fake_data_for_sizes(
@@ -169,6 +170,12 @@ def dims_from_useq(
     ]
 
 
+def reorder_to_ome_ngff(dims_order: list[Dimension]) -> list[Dimension]:
+    """Reorder dimensions to OME-NGFF TCZYX order."""
+    dims_order.sort(key=lambda d: OME_NGFF_ORDER.get(d.label, 5))
+    return dims_order
+
+
 class DimensionIndexIterator:
     """Iterator yielding multidimensional indices in acquisition order.
 
@@ -177,11 +184,14 @@ class DimensionIndexIterator:
 
     Parameters
     ----------
-    dims : Sequence[Dimension]
-        Dimensions in acquisition order (slowest to fastest varying).
-    output_order : str, optional
-        Desired output dimension order, by default "ptcz".
-        Only dimensions in this string are included in the output.
+    acquisition_order : Sequence[Dimension]
+        Dimensions in acquisition order (slowest to fastest varying). It must not
+        include the positional label defined by `position_key`.
+    storage_order_dimensions : Sequence[DimensionLabel]
+        Dimensions labels in storage order (as stored on disk - tcz if
+        `enforce_ome_order` is True). It must not include the x or y labels
+    position_key : DimensionLabel, optional
+        The label used for the position dimension. Default is "p".
 
     Examples
     --------
@@ -202,17 +212,26 @@ class DimensionIndexIterator:
 
     def __init__(
         self,
-        dims: Sequence[Dimension],
+        acquisition_order_dimensions: Sequence[Dimension],
+        storage_order_dimensions: Sequence[DimensionLabel],
         position_key: DimensionLabel = "p",
-        output_order: Sequence[DimensionLabel] = ("t", "c", "z"),
     ) -> None:
-        if position_key in output_order:
-            raise ValueError("position_key should not be in output_order")
+        if (
+            "y" in storage_order_dimensions
+            or "x" in storage_order_dimensions
+            or position_key in storage_order_dimensions
+        ):
+            raise ValueError(
+                "storage_order_dimensions should not include 'y', 'x', and "
+                f"{position_key}."
+            )
 
-        self.output_order = [position_key] + [str(o).lower() for o in output_order]
+        output_labels_order = [position_key, *list(storage_order_dimensions)]
 
         # Filter to dimensions in output_order, preserving acquisition order
-        self.iter_dims = [d for d in dims if d.label in self.output_order]
+        self.iter_dims = [
+            d for d in acquisition_order_dimensions if d.label in output_labels_order
+        ]
 
         # Shape for iteration (in acquisition order)
         self.shape = tuple(d.size for d in self.iter_dims)
@@ -220,7 +239,7 @@ class DimensionIndexIterator:
         # Create named tuple with fields in output order
         field_names = [
             label
-            for label in self.output_order
+            for label in output_labels_order
             if any(d.label == label for d in self.iter_dims)
         ]
 

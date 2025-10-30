@@ -7,15 +7,17 @@ from typing import TYPE_CHECKING
 
 from typing_extensions import Self
 
+from ome_writers._util import DimensionIndexIterator, reorder_to_ome_ngff
+
+from ._dimensions import Dimension
+
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
     from types import TracebackType
 
     import numpy as np
 
-    from ome_writers._dimensions import DimensionLabel
-
-    from ._dimensions import Dimension
+    from ._dimensions import Dimension, DimensionLabel
 
 
 OME_NGFF_ORDER = {"t": 0, "c": 1, "z": 2, "y": 3, "x": 4}
@@ -114,20 +116,17 @@ class MultiPositionOMEStream(OMEStream):
     """
 
     def __init__(self) -> None:
-        # dimension info for position dimension, if any
-        self._position_dim: Dimension | None = None
-        # number of times append() has been called
-        self._append_count = 0
-        # number of positions in the stream
+        # property to track number of positions
         self._num_positions = 0
-        # non-position dimensions
-        # (e.g. time, z, c, y, x) that are not
-        self._non_position_dims: Sequence[Dimension] = []
+        # property to track non-position dimensions in storage order (as stored on disk)
+        self._storage_order_dims: Sequence[Dimension] = []
+        # iterator to yield (position_key, index) tuples in acquisition order
+        self._dim_iter: Iterator[tuple[int, tuple[int, ...]]] = iter(())
 
-    def _init_positions(
-        self, dimensions: Sequence[Dimension], *, enforce_ome_order: bool = True
-    ) -> tuple[int, Sequence[Dimension]]:
-        """Initialize position tracking.
+    def _init_dimensions(
+        self, dimensions: Sequence[Dimension], enforce_ome_order: bool = True
+    ) -> None:
+        """Initialize dimensions.
 
         This method performs two related tasks:
 
@@ -154,6 +153,16 @@ class MultiPositionOMEStream(OMEStream):
            (e.g. with attributes like `.t`, `.c`, `.z`) that can be used for array
            indexing.
 
+        Properties
+        ----------
+        num_positions : int
+            The number of positions in the stream.
+        storage_order_dims : Sequence[Dimension]
+            The non-position dimensions in storage order (as stored on disk - TCZYX if
+            `enforce_ome_order` is True).
+        dim_iter : Iterator[tuple[int, tuple[int, ...]]]
+            An iterator over (position_key, index) tuples in acquisition order.
+
         Parameters
         ----------
         dimensions : Sequence[Dimension]
@@ -162,61 +171,45 @@ class MultiPositionOMEStream(OMEStream):
             If True, reorder dimensions to OME storage order (TCZYX) so that the data
             saved to disk will follow OME-NGFF order. This is required for OME-NGFF
             (Zarr). If False, keep acquisition order. Default is True.
-
-        Returns
-        -------
-        tuple[int, Sequence[Dimension]]
-            The number of positions and the non-position dimensions in the
-            appropriate storage order (if enforce_ome_order is True, OME-NGFF order,
-            otherwise acquisition order). This tuple will be used by each backend
-            to create arrays with the correct dimension ordering.
         """
-        from ome_writers._util import DimensionIndexIterator
-
-        # Separate position dimension from other dimensions
-        position_dims = [d for d in dimensions if d.label == "p"]
-        non_position_dims_acq_order = [d for d in dimensions if d.label != "p"]
-        num_positions = position_dims[0].size if position_dims else 1
-
-        # Determine storage order based on enforce_ome_order flag
-        if enforce_ome_order:
-            # Reorder non-position dimensions to OME storage order (TCZYX)
-            # This is required for OME-NGFF (Zarr) spec compliance (but not for
-            # acquire-zarr at the moment)
-            non_position_dims_storage_order = self._reorder_to_ome_ngff(
-                non_position_dims_acq_order
-            )
-        else:
-            # Keep acquisition order (for TIFF)
-            non_position_dims_storage_order = non_position_dims_acq_order
-
-        # Use DimensionIndexIterator to generate indices in acquisition order
-        # but formatted for storage order
-        storage_order_labels: list[DimensionLabel] = [
-            d.label for d in non_position_dims_storage_order if d.label not in "yx"
-        ]
+        # Get positions dim size
+        position_dims = self._get_position_dim(dimensions)
+        self._num_positions = position_dims.size if position_dims else 1
 
         # Create iterator that yields indices in acquisition order but with fields
         # matching storage order
-        # e.g. [FrameIndex(p=0, t=0, c=0, z=0), FrameIndex(p=0, t=0, c=1, z=0), ...]
-        self._dim_iter = iter(
-            DimensionIndexIterator(
-                dimensions,  # acquisition order
-                output_order=storage_order_labels,  # storage order for output
-            )
-        )
+        non_position_dims = [d for d in dimensions if d.label != "p"]
+        if enforce_ome_order:
+            self._storage_order_dims = reorder_to_ome_ngff(list(non_position_dims))
+        else:
+            self._storage_order_dims = list(non_position_dims)
 
-        self._position_dim = position_dims[0] if position_dims else None
-        self._append_count = 0
-        self._num_positions = num_positions
-        self._non_position_dims = non_position_dims_storage_order
+        storage_order_labels: list[DimensionLabel] = [
+            d.label for d in self._storage_order_dims if d.label not in "yx"
+        ]
+        self._dim_iter = iter(DimensionIndexIterator(dimensions, storage_order_labels))
 
-        return num_positions, non_position_dims_storage_order
+    @property
+    def num_positions(self) -> int:
+        """Return the number of positions in the stream."""
+        return self._num_positions
 
-    def _reorder_to_ome_ngff(self, dims_order: list[Dimension]) -> list[Dimension]:
-        """Reorder dimensions to OME-NGFF TCZYX order."""
-        dims_order.sort(key=lambda d: OME_NGFF_ORDER.get(d.label, 5))
-        return dims_order
+    @property
+    def storage_order_dims(self) -> Sequence[Dimension]:
+        """Return the non-position dimensions in storage order (as stored on disk)."""
+        return self._storage_order_dims
+
+    @property
+    def dim_iter(self) -> Iterator[tuple[int, tuple[int, ...]]]:
+        """Return an iterator over (position_key, index) tuples."""
+        return self._dim_iter
+
+    def _get_position_dim(self, dimensions: Sequence[Dimension]) -> Dimension | None:
+        """Return the position Dimension if it exists, else None."""
+        for dim in dimensions:
+            if dim.label == "p":
+                return dim
+        return None
 
     @abstractmethod
     def _write_to_backend(
@@ -247,4 +240,3 @@ class MultiPositionOMEStream(OMEStream):
             raise RuntimeError(msg)
         position_key, index = next(self._dim_iter)
         self._write_to_backend(str(position_key), index, frame)
-        self._append_count += 1

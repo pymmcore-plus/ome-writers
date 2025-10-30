@@ -50,10 +50,9 @@ class AcquireZarrStream(MultiPositionOMEStream):
         *,
         overwrite: bool = False,
     ) -> Self:
-        # Use MultiPositionOMEStream to handle position logic
-        num_positions, non_position_dims = self._init_positions(
-            dimensions, enforce_ome_order=False
-        )
+        # Initialize dimensions from MultiPositionOMEStream
+        self._init_dimensions(dimensions, enforce_ome_order=False)
+
         self._group_path = Path(self._normalize_path(path))
 
         # Check if directory exists and handle overwrite parameter
@@ -66,14 +65,14 @@ class AcquireZarrStream(MultiPositionOMEStream):
             shutil.rmtree(self._group_path)
 
         # Dimensions will be the same across all positions, so we can create them once
-        az_dims = [self._dim_toaqz_dim(dim) for dim in non_position_dims]
+        az_dims = [self._dim_toaqz_dim(dim) for dim in self.storage_order_dims]
         # keep a strong reference (avoid segfaults)
         self._az_dims_keepalive = az_dims
 
         # Create AcquireZarr array settings for each position
         az_array_settings = [
             self._aqz_pos_array(pos_idx, az_dims, dtype)
-            for pos_idx in range(num_positions)
+            for pos_idx in range(self.num_positions)
         ]
 
         for arr in az_array_settings:
@@ -103,8 +102,8 @@ class AcquireZarrStream(MultiPositionOMEStream):
         positions).  This method manually writes the OME NGFF v0.5 metadata with our
         manually constructed metadata.
         """
-        dims = self._non_position_dims
-        attrs = ome_meta_v5({str(i): dims for i in range(self._num_positions)})
+        dims = self.storage_order_dims
+        attrs = ome_meta_v5({str(i): dims for i in range(self.num_positions)})
         zarr_json = Path(self._group_path) / "zarr.json"
         current_meta: dict = {
             "consolidated_metadata": None,
