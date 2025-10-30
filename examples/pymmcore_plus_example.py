@@ -90,12 +90,16 @@ def _on_sequence_finished(sequence: useq.MDASequence) -> None:
         with suppress(ImportError):
             import tifffile
             from ome_types import validate_xml
-        for pos in range(len(seq.stage_positions)):
-            tiff_path = output_path / f"{ext}_example_p{pos:03d}.ome.{ext}"
-            with tifffile.TiffFile(tiff_path) as tif:
-                assert tif.ome_metadata is not None
-                validate_xml(tif.ome_metadata)
-                print(f"OME-TIFF file for position {pos} validated successfully.")
+            n_pos = len(seq.stage_positions)
+            for pos in range(len(seq.stage_positions)):
+                if n_pos == 1:
+                    tiff_path = path
+                else:
+                    tiff_path = output_path / f"{ext}_example_p{pos:03d}.ome.{ext}"
+                with tifffile.TiffFile(tiff_path) as tif:
+                    assert tif.ome_metadata is not None
+                    validate_xml(tif.ome_metadata)
+                    print(f"OME-TIFF file for position {pos} validated successfully.")
 
 
 # Start the acquisition
