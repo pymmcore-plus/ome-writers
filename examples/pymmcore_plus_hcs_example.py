@@ -1,6 +1,5 @@
 """Example of using ome_writers with useq.MDASequence and pymmcore-plus."""
 
-from contextlib import suppress
 from pathlib import Path
 
 import numpy as np
@@ -103,15 +102,13 @@ def _on_sequence_finished(sequence: useq.MDASequence) -> None:
     # --------------------------------------------------------------------------------
 
     if backend in {"acquire-zarr", "tensorstore"}:
-        with suppress(ImportError):
+        try:
             from yaozarrs import validate_zarr_store
-            # from yaozarrs import validate_ome_json
-
-            # gp = zarr.open_group(path, mode="r")
-            # print(gp.tree())
-
-            # # validate OME-NGFF JSON at root
-            # import json
+        except ImportError:
+            print("yaozarrs is not installed; skipping Zarr validation.")
+        else:
+            validate_zarr_store(path)
+            print("Zarr store validated successfully.")
 
             # zarr_json_path = path / "96-well" / "zarr.json"
             # assert zarr_json_path.exists(), "zarr.json should exist at root"
@@ -119,16 +116,22 @@ def _on_sequence_finished(sequence: useq.MDASequence) -> None:
             #     root_meta = json.load(f)
             #     validate_ome_json(json.dumps(root_meta))
 
-            validate_zarr_store(path)
-            print("Zarr store validated successfully.")
-
     elif backend == "tiff":
-        with suppress(ImportError):
+        try:
             import tifffile
             from ome_types import validate_xml
-
+        except ImportError:
+            print(
+                "tifffile or ome-types is not installed; skipping OME-TIFF validation."
+            )
+        else:
+            # Validate OME-TIFF metadata for each position
+            n_pos = len(seq.stage_positions)
             for pos in range(len(seq.stage_positions)):
-                tiff_path = output_path / f"{ext}_example_p{pos:03d}.ome.{ext}"
+                if n_pos == 1:
+                    tiff_path = path
+                else:
+                    tiff_path = output_path / f"{ext}_example_p{pos:03d}.ome.{ext}"
                 with tifffile.TiffFile(tiff_path) as tif:
                     assert tif.ome_metadata is not None
                     validate_xml(tif.ome_metadata)

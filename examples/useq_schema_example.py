@@ -21,8 +21,8 @@ output_path = Path("~/Desktop/").expanduser()
 
 # Choose backend: acquire-zarr, tensorstore, or tiff
 # backend = "acquire-zarr"
-backend = "tensorstore"
-# backend = "tiff"
+# backend = "tensorstore"
+backend = "tiff"
 
 # Create a MDASequence. NOTE: the axis_order determines the order in which frames will
 # be appended to the stream.
@@ -62,17 +62,22 @@ stream.flush()
 print("Data written successfully to", output_path / f"{ext}_example.ome.{ext}")
 
 if backend in {"acquire-zarr", "tensorstore"}:
-    with suppress(ImportError):
+    try:
         from yaozarrs import validate_zarr_store
-
+    except ImportError:
+        print("yaozarrs is not installed; skipping Zarr validation.")
+    else:
         validate_zarr_store(path)
         print("Zarr store validated successfully.")
 
 elif backend == "tiff":
-    with suppress(ImportError):
+    try:
         import tifffile
         from ome_types import validate_xml
-
+    except ImportError:
+        print("tifffile or ome-types is not installed; skipping OME-TIFF validation.")
+    else:
+        # Validate OME-TIFF metadata for each position
         n_pos = len(seq.stage_positions)
         for pos in range(len(seq.stage_positions)):
             if n_pos == 1:
