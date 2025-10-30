@@ -1,6 +1,5 @@
 """Example of using ome_writers with useq.MDASequence."""
 
-from contextlib import suppress
 from pathlib import Path
 
 import numpy as np
