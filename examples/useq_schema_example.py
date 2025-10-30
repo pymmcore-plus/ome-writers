@@ -1,5 +1,6 @@
 """Example of using ome_writers with useq.MDASequence."""
 
+from contextlib import suppress
 from pathlib import Path
 
 import numpy as np
@@ -59,3 +60,22 @@ for event in seq:
 stream.flush()
 
 print("Data written successfully to", output_path / f"{ext}_example.ome.{ext}")
+
+if backend == "tensorstore":
+    with suppress(ImportError):
+        from yaozarrs import validate_zarr_store
+
+        validate_zarr_store(path)
+        print("Zarr store validated successfully.")
+
+elif backend == "tiff":
+    with suppress(ImportError):
+        import tifffile
+        from ome_types import validate_xml
+
+        for pos in range(len(seq.stage_positions)):
+            tiff_path = output_path / f"{ext}_example_p{pos:03d}.ome.{ext}"
+            with tifffile.TiffFile(tiff_path) as tif:
+                assert tif.ome_metadata is not None
+                validate_xml(tif.ome_metadata)
+                print(f"OME-TIFF file for position {pos} validated successfully.")
