@@ -72,6 +72,7 @@ elif backend == "tiff":
     with suppress(ImportError):
         import tifffile
         from ome_types import validate_xml
+
         n_pos = len(seq.stage_positions)
         for pos in range(len(seq.stage_positions)):
             if n_pos == 1:
