@@ -96,25 +96,30 @@ class AcquireZarrStream(MultiPositionOMEStream):
         self._az_settings_keepalive = settings
         self._stream = self._aqz.ZarrStream(settings)
 
-        self._patch_group_metadata()
         return self
 
-    def _patch_group_metadata(self) -> None:
-        """Patch the group metadata with OME NGFF 0.5 metadata.
+    def _patch_metadata_to_ngff_v05(self) -> None:
+        """Patch the Zarr group metadata to ensure OME-NGFF v0.5 compliance.
 
-        This method exists because there are cases in which the standard acquire-zarr
-        API is not flexible enough to handle all the cases we need (such as multiple
-        positions).  This method manually writes the OME NGFF v0.5 metadata with our
-        manually constructed metadata.
+        This is necessary for two main reasons:
 
-        In addition, if the data was not stored in OME-NGFF order, this method adds
-        a transpose codec to each position array metadata to indicate how to read
-        the data back in OME-NGFF order.
+        1. To support datasets containing multiple positions.
+        2. To ensure data conforms to the OME-NGFF TCZYX dimension specification.
+
+        This method writes OME-NGFF v0.5-compliant metadata for both the group and
+        its position arrays using the `ome_meta_v5()` utility function, regardless of
+        the order in which the data was originally stored. Since `acquire-zarr` allows
+        writing data to disk in arbitrary dimension orders (e.g., TZCYX), the stored
+        arrays may not follow the mandated OME-NGFF TCZYX convention.
+
+        When the stored order differs from TCZYX, this method inserts a *transpose*
+        codec into each position's array metadata to indicate how the data should be
+        reordered on read, ensuring it can always be interpreted correctly in
+        OME-NGFF order.
         """
-        dims = self.storage_order_dims
-        reordered_dims = reorder_to_ome_ngff(list(dims))
-        if reordered_dims != dims:
-            original_labels = [d.label for d in dims]
+        reordered_dims = reorder_to_ome_ngff(list(self.storage_order_dims))
+        if reordered_dims != self.storage_order_dims:
+            original_labels = [d.label for d in self.storage_order_dims]
             ome_labels = [d.label for d in reordered_dims]
             transpose_order = [
                 ome_labels.index(label) for label in original_labels
@@ -137,7 +142,8 @@ class AcquireZarrStream(MultiPositionOMEStream):
         current_meta.setdefault("attributes", {}).update(attrs)
         zarr_json.write_text(json.dumps(current_meta, indent=2))
 
-        self._rearrange_positions_metadata(reordered_dims, transpose_order)
+        if transpose_order is not None:
+            self._rearrange_positions_metadata(reordered_dims, transpose_order)
 
     def _rearrange_positions_metadata(
         self, reordered_dims: Sequence[Dimension], transpose_order: list[int] | None
@@ -194,7 +200,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
         self._stream.close()
         self._stream = None
         gc.collect()
-        self._patch_group_metadata()
+        self._patch_metadata_to_ngff_v05()
 
     def is_active(self) -> bool:
         if self._stream is None:
