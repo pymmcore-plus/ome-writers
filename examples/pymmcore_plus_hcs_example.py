@@ -1,7 +1,6 @@
 """Example of using ome_writers with useq.MDASequence and pymmcore-plus."""
 
 from contextlib import suppress
-import warnings
 from pathlib import Path
 
 import numpy as np
@@ -127,6 +126,7 @@ def _on_sequence_finished(sequence: useq.MDASequence) -> None:
         with suppress(ImportError):
             import tifffile
             from ome_types import validate_xml
+
             for pos in range(len(seq.stage_positions)):
                 tiff_path = output_path / f"{ext}_example_p{pos:03d}.ome.{ext}"
                 with tifffile.TiffFile(tiff_path) as tif:
