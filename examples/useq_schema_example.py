@@ -61,7 +61,7 @@ stream.flush()
 
 print("Data written successfully to", output_path / f"{ext}_example.ome.{ext}")
 
-if backend == "tensorstore":
+if backend in {"acquire-zarr", "tensorstore"}:
     with suppress(ImportError):
         from yaozarrs import validate_zarr_store
 
