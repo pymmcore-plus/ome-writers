@@ -176,6 +176,7 @@ class MultiPositionOMEStream(OMEStream):
 
         # Filter out the position dimension to get only non-position dimensions (no 'p')
         non_position_dims = [d for d in dimensions if d.label != "p"]
+
         # If enforcing OME order, reorder non-position dims (no 'p') to OME-NGFF TCZYX
         if enforce_ome_order:
             self._storage_order_dims = reorder_to_ome_ngff(list(non_position_dims))
@@ -187,6 +188,7 @@ class MultiPositionOMEStream(OMEStream):
         storage_order_labels: list[DimensionLabel] = [
             d.label for d in self._storage_order_dims if d.label not in "yx"
         ]
+
         # Create iterator yielding (position_key, index_tuple) in acquisition order
         self._dim_iter = iter(DimensionIndexIterator(dimensions, storage_order_labels))
 

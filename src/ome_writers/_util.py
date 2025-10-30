@@ -246,6 +246,10 @@ class DimensionIndexIterator:
                 f"{position_key}."
             )
 
+        # Store acquisition order labels and position key for __iter__ method
+        self._acq_dims_labels = [d.label for d in acquisition_order_dimensions]
+        self._position_key = position_key
+
         # Build the desired output order: position first, then storage dims
         output_labels_order = [position_key, *list(storage_order_dimensions)]
 
@@ -269,14 +273,23 @@ class DimensionIndexIterator:
         if not self.shape:
             return
 
+        # Determine position key depending if it was included in acquisition dims
+        has_pos_key = False if self._position_key not in self._acq_dims_labels else True
         # Iterate over all possible flat indices
         for i in range(int(np.prod(self.shape))):
             # Unravel flat index to multi-dim indices (acquisition order)
             acq_indices = np.unravel_index(i, self.shape)
-            # Reorder to output order and convert to Python ints
-            pos_key, *out_idxs = tuple(int(acq_indices[j]) for j in self._output_to_acq)
-            # Yield position key and index tuple in storage order
-            yield pos_key, tuple(out_idxs)
+            # Map acquisition indices to output indices
+            all_output_indices = tuple(int(acq_indices[j]) for j in self._output_to_acq)
+            # If position dimension is present, extract position key from indices
+            if has_pos_key:
+                pos_key, *output_indices = all_output_indices
+                # Yield position key and index tuple in storage order
+                yield pos_key, tuple(output_indices)
+            # Otherwise, just use the output indices as they are
+            else:
+                # Yield position key and index tuple in storage order
+                yield 0, tuple(all_output_indices)
 
     def __len__(self) -> int:
         """Return total number of frames."""

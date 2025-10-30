@@ -13,6 +13,7 @@ from typing_extensions import Self
 
 from ome_writers._ngff_metadata import ome_meta_v5
 from ome_writers._stream_base import MultiPositionOMEStream
+from ome_writers._util import reorder_to_ome_ngff
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -51,6 +52,10 @@ class AcquireZarrStream(MultiPositionOMEStream):
         overwrite: bool = False,
     ) -> Self:
         # Initialize dimensions from MultiPositionOMEStream
+        # NOTE: since acquire-zarr can save data in any order, we do not enforce
+        # OME-NGFF order here. However, to always have valid OME-NGFF metadata, we will
+        # patch the metadata at the end in _patch_group_metadata by adding a
+        # transposition codec at the array level.
         self._init_dimensions(dimensions, enforce_ome_order=False)
 
         self._group_path = Path(self._normalize_path(path))
@@ -103,7 +108,17 @@ class AcquireZarrStream(MultiPositionOMEStream):
         manually constructed metadata.
         """
         dims = self.storage_order_dims
-        attrs = ome_meta_v5({str(i): dims for i in range(self.num_positions)})
+        reordered_dims = reorder_to_ome_ngff(list(dims))
+        if reordered_dims != dims:
+            original_labels = [d.label for d in dims]
+            ome_labels = [d.label for d in reordered_dims]
+            transpose_order = [
+                ome_labels.index(label) for label in original_labels
+            ] + list(range(len(original_labels), len(reordered_dims)))
+        else:
+            transpose_order = None
+
+        attrs = ome_meta_v5({str(i): reordered_dims for i in range(self.num_positions)})
         zarr_json = Path(self._group_path) / "zarr.json"
         current_meta: dict = {
             "consolidated_metadata": None,
@@ -117,6 +132,35 @@ class AcquireZarrStream(MultiPositionOMEStream):
 
         current_meta.setdefault("attributes", {}).update(attrs)
         zarr_json.write_text(json.dumps(current_meta, indent=2))
+
+        # Patch array metadata for each position so that when reading back,
+        # the metadata reflects the OME-NGFF order
+        for pos in range(self.num_positions):
+            array_zarr_json = Path(self._group_path) / str(pos) / "zarr.json"
+            if array_zarr_json.exists():
+                with open(array_zarr_json) as f:
+                    array_meta = json.load(f)
+
+                array_meta["dimension_names"] = [d.label for d in reordered_dims]
+                array_meta["shape"] = [d.size for d in reordered_dims]
+                chunk_shape = [
+                    d.chunk_size if d.chunk_size is not None else d.size
+                    for d in reordered_dims
+                ]
+                array_meta["chunk_grid"]["configuration"]["chunk_shape"] = chunk_shape
+                array_meta["codecs"][0]["configuration"]["chunk_shape"] = chunk_shape
+
+                if transpose_order:
+                    array_meta["codecs"][0]["configuration"]["codecs"].insert(
+                        0,
+                        {
+                            "name": "transpose",
+                            "configuration": {"order": transpose_order},
+                        },
+                    )
+
+                with open(array_zarr_json, "w") as f:
+                    json.dump(array_meta, f, indent=2)
 
     def _write_to_backend(
         self, array_key: str, index: tuple[int, ...], frame: np.ndarray
