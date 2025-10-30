@@ -163,14 +163,14 @@ class AcquireZarrStream(MultiPositionOMEStream):
                     json.dump(array_meta, f, indent=2)
 
     def _write_to_backend(
-        self, array_key: str, index: tuple[int, ...], frame: np.ndarray
+        self, position_key: str, index: tuple[int, ...], frame: np.ndarray
     ) -> None:
         """AcquireZarr-specific write implementation.
 
         NOTE: For AcquireZarr, frames are written sequentially, so index is not used.
         """
         if self._stream is not None:
-            self._stream.append(frame, key=array_key)
+            self._stream.append(frame, key=position_key)
 
     def flush(self) -> None:
         if not self._stream:  # pragma: no cover

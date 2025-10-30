@@ -185,13 +185,13 @@ class TifffileStream(MultiPositionOMEStream):
         return fnames
 
     def _write_to_backend(
-        self, array_key: str, index: tuple[int, ...], frame: np.ndarray
+        self, position_key: str, index: tuple[int, ...], frame: np.ndarray
     ) -> None:
         """TIFF-specific write implementation.
 
         For TIFF, frames are written sequentially, so the index is not used.
         """
-        self._queues[int(array_key)].put(frame)
+        self._queues[int(position_key)].put(frame)
 
     def _update_position_metadata(self, position_idx: int, metadata: ome.OME) -> None:
         """Add OME metadata to TIFF file efficiently without rewriting image data."""

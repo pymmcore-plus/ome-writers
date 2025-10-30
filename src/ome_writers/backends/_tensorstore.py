@@ -94,10 +94,10 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         }
 
     def _write_to_backend(
-        self, array_key: str, index: tuple[int, ...], frame: np.ndarray
+        self, position_key: str, index: tuple[int, ...], frame: np.ndarray
     ) -> None:
         """TensorStore-specific write implementation."""
-        store = self._stores[array_key]
+        store = self._stores[position_key]
         # Named tuples work directly as indices
         future = store[index].write(frame)  # type: ignore[index]
         self._futures.append(future)

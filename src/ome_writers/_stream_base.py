@@ -216,18 +216,17 @@ class MultiPositionOMEStream(OMEStream):
 
     @abstractmethod
     def _write_to_backend(
-        self, array_key: str, index: tuple[int, ...], frame: np.ndarray
+        self, position_key: str, index: tuple[int, ...], frame: np.ndarray
     ) -> None:
         """Backend-specific write implementation.
 
         Parameters
         ----------
-        array_key : str
+        position_key : str
             The key for the position in the backend (e.g., Zarr group).
         index : tuple[int, ...]
-            A named tuple with the storage indices. The tuple has attributes
-            like .t, .c, .z etc. based on which dimensions are present.
-            Can be used directly for array indexing or converted to regular tuple.
+            A tuple of storage indices for the non-spatial dimensions (e.g., (t, c, z))
+            in storage order. Can be used directly for array indexing.
         frame : np.ndarray
             The frame data to write.
 
