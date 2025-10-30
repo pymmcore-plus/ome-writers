@@ -106,6 +106,10 @@ class AcquireZarrStream(MultiPositionOMEStream):
         API is not flexible enough to handle all the cases we need (such as multiple
         positions).  This method manually writes the OME NGFF v0.5 metadata with our
         manually constructed metadata.
+
+        In addition, if the data was not stored in OME-NGFF order, this method adds
+        a transpose codec to each position array metadata to indicate how to read
+        the data back in OME-NGFF order.
         """
         dims = self.storage_order_dims
         reordered_dims = reorder_to_ome_ngff(list(dims))
@@ -133,8 +137,19 @@ class AcquireZarrStream(MultiPositionOMEStream):
         current_meta.setdefault("attributes", {}).update(attrs)
         zarr_json.write_text(json.dumps(current_meta, indent=2))
 
-        # Patch array metadata for each position so that when reading back,
-        # the metadata reflects the OME-NGFF order
+        self._rearrange_positions_metadata(reordered_dims, transpose_order)
+
+    def _rearrange_positions_metadata(
+        self, reordered_dims: Sequence[Dimension], transpose_order: list[int] | None
+    ) -> None:
+        """Reorganize metadata for each position array.
+
+        This method uses the [zarr transpose codec](https://zarr-specs.readthedocs.io/en/latest/v3/codecs/transpose/index.html)
+        to indicate the transposition needed to go from the stored order to the
+        OME-NGFF order and will allow to read the data back in OME-NGFF order.
+
+        (As suggested in https://github.com/acquire-project/acquire-zarr/issues/171#issuecomment-3458544335).
+        """
         for pos in range(self.num_positions):
             array_zarr_json = Path(self._group_path) / str(pos) / "zarr.json"
             if array_zarr_json.exists():
