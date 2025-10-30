@@ -79,7 +79,7 @@ def _on_sequence_finished(sequence: useq.MDASequence) -> None:
     stream.flush()
     print("Data written successfully to", path)
 
-    if backend == "tensorstore":
+    if backend in {"acquire-zarr", "tensorstore"}:
         with suppress(ImportError):
             from yaozarrs import validate_zarr_store
 

@@ -21,9 +21,9 @@ except ImportError as e:
 output_path = Path("~/Desktop/").expanduser()
 
 # Choose backend: acquire-zarr, tensorstore, or tiff
-# backend = "acquire-zarr"
-backend = "tensorstore"
-# backend = "tiff"
+backend = "acquire-zarr"
+# backend = "tensorstore"  # not yet implemented for plates
+# backend = "tiff"  # not yet implemented for plates
 
 # Create a simple plate plan with 3 wells, 3 fov per well
 plate_plan = useq.WellPlatePlan(
