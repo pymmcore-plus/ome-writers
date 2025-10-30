@@ -7,7 +7,10 @@ from typing import TYPE_CHECKING
 
 from typing_extensions import Self
 
-from ome_writers._util import DimensionIndexIterator, reorder_to_ome_ngff
+from ome_writers._util import (
+    DimensionIndexIterator,
+    reorder_to_ome_ngff,
+)
 
 from ._dimensions import Dimension
 
@@ -18,9 +21,6 @@ if TYPE_CHECKING:
     import numpy as np
 
     from ._dimensions import Dimension, DimensionLabel
-
-
-OME_NGFF_ORDER = {"t": 0, "c": 1, "z": 2, "y": 3, "x": 4}
 
 
 class OMEStream(abc.ABC):
