@@ -261,10 +261,11 @@ class DimensionIndexIterator:
         if not self._shape:
             return
 
-        for acq_idx in np.ndindex(*self._shape):  # iterate over all acquisition indices
-            # extract position index
+        # Iterate over all acquisition indices
+        for acq_idx in np.ndindex(*self._shape):
+            # Extract position index
             pos = int(acq_idx[self._pos_idx]) if self._pos_idx is not None else 0
-            # build storage-ordered tuple from acquisition indices
+            # Build storage-ordered tuple from acquisition indices
             out = tuple(int(acq_idx[i]) for i in self._stor_idx)
             yield pos, out
 
