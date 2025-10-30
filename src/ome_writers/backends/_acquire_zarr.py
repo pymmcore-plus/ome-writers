@@ -238,10 +238,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
                 with open(zarr_json) as f:
                     current_meta = json.load(f)
 
-
-        current_meta.setdefault("attributes", {}).update(attrs.model_dump())
-        from rich import print
-        print(current_meta)
+        current_meta.setdefault("attributes", {}).update({"ome": attrs.model_dump()})
         zarr_json.write_text(json.dumps(current_meta, indent=2))
 
         if transpose_order is not None:
