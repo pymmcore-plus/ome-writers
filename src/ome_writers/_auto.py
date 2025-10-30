@@ -87,17 +87,8 @@ def create_stream(
         NumPy data type for the image data.
     dimensions : Sequence[DimensionInfo]
         Sequence of dimension information describing the data structure.
-        It is important that the order of dimensions matches the order of data being
-        appended. For example, if the data is ordered as tpczyx:
-        dimensions = [
-            Dimension(label='t', size=5),
-            Dimension(label='p', size=10),
-            Dimension(label='c', size=3),
-            Dimension(label='z', size=1),
-            Dimension(label='y', size=512),
-            Dimension(label='x', size=512),
-        ]
-
+        The order of dimensions in this sequence determines the acquisition order
+        (i.e., the order in which frames will be appended to the stream).
     backend : Literal["acquire-zarr", "tensorstore", "tiff", "auto"], optional
         The backend to use for writing the data. Options are:
 

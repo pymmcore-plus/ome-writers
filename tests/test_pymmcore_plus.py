@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import os
+from contextlib import suppress
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -10,19 +10,12 @@ import pytest
 import ome_writers as omew
 
 try:
+    import useq
     from pymmcore_plus import CMMCorePlus
     from pymmcore_plus.metadata._ome import create_ome_metadata
 except ImportError:
     pytest.skip("pymmcore_plus is not installed", allow_module_level=True)
 
-
-pytest.importorskip("useq")
-pytest.importorskip("acquire_zarr")
-pytest.importorskip("yaozarrs")
-pytest.importorskip("zarr")
-
-import useq
-from yaozarrs import validate_ome_json
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -79,7 +72,11 @@ class PYMMCP:
     """
 
     def __init__(
-        self, sequence: useq.MDASequence, core: CMMCorePlus, dest: Path
+        self,
+        sequence: useq.MDASequence,
+        core: CMMCorePlus,
+        dest: Path,
+        backend: str,  # "acquire-zarr", "tensorstore" or "tiff"
     ) -> None:
         self._seq = sequence
         self._core = core
@@ -95,7 +92,7 @@ class PYMMCP:
             ),
             dtype=np.uint16,
             overwrite=True,
-            backend="tiff",
+            backend=backend,
         )
 
         @core.mda.events.sequenceStarted.connect
@@ -114,8 +111,9 @@ class PYMMCP:
         @core.mda.events.sequenceFinished.connect
         def _on_sequence_finished(sequence: useq.MDASequence) -> None:
             self._stream.flush()
-            ome = create_ome_metadata(self._summary_meta, self._frame_meta_list)
-            self._stream.update_ome_metadata(ome)
+            if hasattr(self._stream, "update_ome_metadata"):
+                ome = create_ome_metadata(self._summary_meta, self._frame_meta_list)
+                self._stream.update_ome_metadata(ome)
 
     def run(self) -> None:
         self._core.mda.run(self._seq)
@@ -124,12 +122,12 @@ class PYMMCP:
 def test_pymmcore_plus_mda_tiff_metadata_update(tmp_path: Path) -> None:
     """Test pymmcore_plus MDA with metadata update after acquisition."""
 
-    # skip if tifffile or ome-types is not installed
+    # skip if tifffile or ome-types are not installed
     try:
         import tifffile
         from ome_types import from_xml
     except ImportError:
-        pytest.skip("tifffile or ome-types is not installed")
+        pytest.skip("tifffile or ome-types are not installed")
 
     seq = useq.MDASequence(
         time_plan=useq.TIntervalLoops(interval=0.001, loops=2),  # type: ignore
@@ -147,7 +145,7 @@ def test_pymmcore_plus_mda_tiff_metadata_update(tmp_path: Path) -> None:
 
     dest = tmp_path / "test_mda_tiff_metadata_update.ome.tiff"
 
-    pymm = PYMMCP(seq, core, dest)
+    pymm = PYMMCP(seq, core, dest, backend="tiff")
     pymm.run()
 
     # reopen the file and validate ome metadata
@@ -163,19 +161,16 @@ def test_pymmcore_plus_mda_tiff_metadata_update(tmp_path: Path) -> None:
 
 def test_pymmcore_plus_plate_zarr(tmp_path: Path) -> None:
     """Test pymmcore_plus MDA with WellPlatePlan and acquire-zarr backend."""
-    pytest.importorskip("useq")
-    from useq import GridRowsColumns, MDASequence, WellPlatePlan
-
     output_path = tmp_path / "acq_z.zarr"
 
-    plate_plan = WellPlatePlan(
+    plate_plan = useq.WellPlatePlan(
         plate="96-well",
         a1_center_xy=(0.0, 0.0),
         selected_wells=([0, 0, 1], [0, 1, 0]),  # A1, A2, B1
-        well_points_plan=GridRowsColumns(rows=2, columns=2),  # 4 FOV per well
+        well_points_plan=useq.GridRowsColumns(rows=2, columns=2),  # 4 FOV per well
     )
 
-    seq = MDASequence(
+    seq = useq.MDASequence(
         axis_order="ptc",
         stage_positions=plate_plan,
         time_plan={"interval": 0.1, "loops": 3},
@@ -203,19 +198,22 @@ def test_pymmcore_plus_plate_zarr(tmp_path: Path) -> None:
         stream.flush()
 
         # validate OME-NGFF JSON at root
-        pytest.importorskip("zarr")
-        import zarr
+        with suppress(ImportError):
+            import json
 
-        zarr.open_group(output_path, mode="r")
-        # TODO: figure out what is the validation error
-        zarr_json_path = output_path / "zarr.json"
-        assert zarr_json_path.exists(), "zarr.json should exist at root"
-        with open(zarr_json_path) as f:
-            root_meta = json.load(f)
-            validate_ome_json(json.dumps(root_meta))
+            import zarr
+            from yaozarrs import validate_ome_json
+
+            zarr.open_group(output_path, mode="r")
+            # TODO: figure out what is the validation error
+            zarr_json_path = output_path / "zarr.json"
+            assert zarr_json_path.exists(), "zarr.json should exist at root"
+            with open(zarr_json_path) as f:
+                root_meta = json.load(f)
+                validate_ome_json(json.dumps(root_meta))
 
     core = CMMCorePlus()
-    core.loadSystemConfiguration("/Users/fdrgsp/Desktop/test_config.cfg")
+    core.loadSystemConfiguration()
     core.mda.events.frameReady.connect(_on_frame_ready)
     core.mda.events.sequenceFinished.connect(_on_sequence_finished)
 

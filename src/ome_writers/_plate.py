@@ -11,12 +11,14 @@ __all__ = [
 ]
 
 from typing import TYPE_CHECKING, NamedTuple
+import numpy as np
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     import ome_types.model as ome
     import yaozarrs.v05 as yao_v05
+    import acquire_zarr as aqz
 
 
 class PlateAcquisition(NamedTuple):
@@ -267,3 +269,87 @@ def plate_to_yaozarrs_v5(plate: Plate) -> yao_v05.Plate:
     )
 
     return v05.Plate(version="0.5", plate=plate_def)
+
+
+def plate_to_acquire_zarr_plate(
+        plate: Plate,
+        az_dims: list[aqz.Dimension],
+        dtype: np.dtype,
+    ) -> aqz.Plate:
+        """Convert ome_writers Plate to acquire-zarr Plate object.
+
+        This method creates an acquire-zarr Plate object with proper well and
+        field of view structure from an ome_writers Plate object.
+
+        Parameters
+        ----------
+        plate : Plate
+            The ome_writers plate object to convert.
+        az_dims : list[aqz.Dimension]
+            The acquire-zarr dimensions for the arrays.
+        dtype : np.dtype
+            The NumPy data type for the image data.
+
+        Returns
+        -------
+        aqz.Plate
+            The created acquire-zarr Plate object.
+        """
+        fields_per_well = plate.field_count or 1
+
+        # Create acquisition metadata if provided
+        acquisitions = []
+        if plate.acquisitions:
+            for acq in plate.acquisitions:
+                acquisitions.append(
+                    aqz.Acquisition(
+                        id=acq.id,
+                        name=acq.name or f"Acquisition {acq.id}",
+                        start_time=acq.start_time,
+                        end_time=acq.end_time,
+                    )
+                )
+
+        # Create wells with fields of view
+        wells = []
+        for well_pos in plate.wells:
+            row_name, col_name = well_pos.path.split("/")
+
+            # Create field of view entries for this well
+            fov_entries = []
+            for fov_idx in range(fields_per_well):
+                fov_key = f"fov{fov_idx}" if fields_per_well > 1 else "0"
+                # Create a new ArraySettings for each FOV to ensure proper configuration
+                fov_array = aqz.ArraySettings(
+                    output_key=fov_key,
+                    dimensions=az_dims,
+                    data_type=dtype,
+                )
+                fov_entries.append(
+                    aqz.FieldOfView(
+                        path=fov_key,
+                        acquisition_id=acquisitions[0].id if acquisitions else None,
+                        array_settings=fov_array,
+                    )
+                )
+
+            well = aqz.Well(
+                row_name=row_name,
+                column_name=col_name,
+                images=fov_entries,
+            )
+            wells.append(well)
+
+        # Create the HCS plate
+        # remove any spaces from the plate name for acquire-zarr
+        plate_path = (plate.name or "plate").replace(" ", "_")
+        plate_aqz = aqz.Plate(
+            path=plate_path,
+            name=plate.name,
+            row_names=list(plate.rows),
+            column_names=list(plate.columns),
+            wells=wells,
+            acquisitions=acquisitions if acquisitions else None,
+        )
+
+        return plate_aqz

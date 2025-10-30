@@ -2,19 +2,25 @@ from __future__ import annotations
 
 import abc
 from abc import abstractmethod
-from itertools import product
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from typing_extensions import Self
 
+from ome_writers._util import (
+    DimensionIndexIterator,
+    reorder_to_ome_ngff,
+)
+
+from ._dimensions import Dimension
+
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
     from types import TracebackType
 
     import numpy as np
 
-    from ._dimensions import Dimension
+    from ._dimensions import Dimension, DimensionLabel
     from ._plate import Plate
 
 
@@ -36,9 +42,9 @@ class OMEStream(abc.ABC):
         path: str,
         dtype: np.dtype,
         dimensions: Sequence[Dimension],
+        plate: Plate | None = None,
         *,
         overwrite: bool = False,
-        plate: Plate | None = None,
     ) -> Self:
         """Create a new stream for path, dtype, and dimensions.
 
@@ -50,13 +56,13 @@ class OMEStream(abc.ABC):
             NumPy data type for the image data.
         dimensions : Sequence[Dimension]
             Sequence of dimension information describing the data structure.
-        overwrite : bool, optional
-            Whether to overwrite existing files or directories. Default is False.
+            The order of dimensions in this sequence determines the acquisition order
+            (i.e., the order in which frames will be appended to the stream).
         plate : Plate | None, optional
             Optional plate metadata for organizing multi-well acquisitions.
             If provided, the store will be structured as a plate with wells.
-        **kwargs : Any
-            Additional backend-specific keyword arguments.
+        overwrite : bool, optional
+            Whether to overwrite existing files or directories. Default is False.
 
         Returns
         -------
@@ -112,157 +118,137 @@ class MultiPositionOMEStream(OMEStream):
     for their specific storage mechanisms. The class separates position
     dimensions from other dimensions (time, z, channel, y, x) and creates
     appropriate indexing schemes for efficient data organization.
-
-    Parameters
-    ----------
-    path : str
-        Path to the output file or directory.
-    dtype : np.dtype
-        NumPy data type for the image data.
-    dimensions : Sequence[Dimension]
-        Sequence of dimension information describing the data structure.
-        It is important that the order of dimensions matches the order of data being
-        appended. For example, if the data is ordered as tpczyx:
-        dimensions = [
-            Dimension(label='t', size=5),
-            Dimension(label='p', size=10),
-            Dimension(label='c', size=3),
-            Dimension(label='z', size=1),
-            Dimension(label='y', size=512),
-            Dimension(label='x', size=512),
-        ]
-    overwrite : bool, optional
-        Whether to overwrite existing files or directories. Default is False.
-    plate : Plate | None, optional
-        Optional plate metadata for organizing multi-well acquisitions.
-        If provided, the store will be structured as a plate with wells.
-    **kwargs : Any
-        Additional backend-specific keyword arguments.
     """
 
     def __init__(self) -> None:
-        # dimension info for position dimension, if any
-        self._position_dim: Dimension | None = None
-        # A mapping of indices to (array_key, non-position index)
-        self._indices: dict[int, tuple[str, tuple[int, ...]]] = {}
-        # number of times append() has been called
-        self._append_count = 0
-        # number of positions in the stream
+        # property to track number of positions
         self._num_positions = 0
-        # non-position dimensions
-        # (e.g. time, z, c, y, x) that are not
-        self._non_position_dims: Sequence[Dimension] = []
+        # property to track acquisition order dimensions
+        self._acquisition_order_dims: Sequence[Dimension] = []
+        # property to track non-position dimensions in storage order (as stored on disk)
+        self._storage_order_dims: Sequence[Dimension] = []
+        # iterator to yield (position_key, index) tuples in acquisition order
+        self._dim_iter: Iterator[tuple[int, tuple[int, ...]]] = iter(())
+        # plate metadata
+        self._plate: Plate | None = None
 
-    def _init_positions(
-        self, dimensions: Sequence[Dimension]
-    ) -> tuple[int, Sequence[Dimension]]:
-        """Initialize position tracking and return num_positions, non_position_dims.
+    def _init_dimensions(
+        self, dimensions: Sequence[Dimension], enforce_ome_order: bool = True
+    ) -> None:
+        """Initialize dimensions.
 
-        The order of dimensions determines the acquisition order. This method builds
-        an index mapping that translates sequential append() calls to the correct
-        position and storage indices.
+        This method performs two related tasks:
+
+        1) Define the shape and logical ordering that will be used to store the
+           multi-dimensional dataset on disk.
+
+           If `enforce_ome_order` is True (default), non-position axes are reordered to
+           match the OME-NGFF TCZYX storage order and the shape of the data to disk will
+           always be TCZXY, no matter the acquisition order.
+
+           If False, the acquisition order is preserved and the shape of the data
+           written to disk will follow the acquisition order (this is useful for
+           sequential writers such as OME-TIFF where enforcing TCZYX is not strictly
+           required).
+
+        2) Build an iterator that yields per-frame indices in acquisition order but
+           formatted for storage indexing. The iterator `self._dim_iter` yields tuples
+           `(position_key, index_tuple)` where `position_key` is an integer identifying
+           the position, and `index_tuple` contains the storage indices for the
+           non-spatial axes (e.g., `(t, c, z)`). This allows the stream to correctly
+           place each incoming frame in the correct location of the storage array even
+           when the storage ordering differs from the acquisition ordering.
+
+        Properties
+        ----------
+        num_positions : int
+            The number of positions in the stream.
+        storage_order_dims : Sequence[Dimension]
+            The non-position dimensions in storage order (as stored on disk - TCZYX if
+            `enforce_ome_order` is True).
+        dim_iter : Iterator[tuple[int, tuple[int, ...]]]
+            An iterator over (position_key, index_tuple) tuples in acquisition order,
+            where index_tuple is ordered according to storage_order_dims.
 
         Parameters
         ----------
         dimensions : Sequence[Dimension]
-            All dimensions including position. The order determines acquisition order.
-
-        Returns
-        -------
-        tuple[int, Sequence[Dimension]]
-            The number of positions and the non-position dimensions.
+            Dimensions in acquisition order.
+        enforce_ome_order : bool, optional
+            If True, reorder dimensions to OME storage order (TCZYX) so that the data
+            saved to disk will follow OME-NGFF order. This is required for OME-NGFF
+            (Zarr). If False, keep acquisition order. Default is True.
         """
-        # Separate position dimension from other dimensions
+        # Store the acquisition order dimensions
+        self._acquisition_order_dims = list(dimensions)
 
-        position_dims = [d for d in dimensions if d.label == "p"]
-        # e.g. [Dimension(label='p', size=2, unit=None, chunk_size=None)]
+        # Retrieve the number of positions from the dimensions if any, otherwise 1
+        position_dims = self._get_position_dim(dimensions)
+        self._num_positions = position_dims.size if position_dims else 1
 
+        # Filter out the position dimension to get only non-position dimensions (no 'p')
         non_position_dims = [d for d in dimensions if d.label != "p"]
-        # e.g. [
-        #   Dimension(label='t', size=10, unit=(1.0, 's'), chunk_size=None)
-        #   Dimension(label='c', size=2, unit=None, chunk_size=None)
-        #   Dimension(label='z', size=3, unit=(1.0, 'um'), chunk_size=None)
-        #   Dimension(label='y', size=32, unit=(1.0, 'um'), chunk_size=None)
-        #   Dimension(label='x', size=32, unit=(1.0, 'um'), chunk_size=None)
-        # ]
-        num_positions = position_dims[0].size if position_dims else 1
 
-        # Build dimension ranges (excluding x, y which are not iterated)
-        non_spatial_dims = [d for d in non_position_dims if d.label not in "yx"]
-        # e.g. [
-        #   Dimension(label='t', size=10, unit=(1.0, 's'), chunk_size=None)
-        #   Dimension(label='c', size=2, unit=None, chunk_size=None)
-        #   Dimension(label='z', size=3, unit=(1.0, 'um'), chunk_size=None)
-        # ]
+        # If enforcing OME order, reorder non-position dims (no 'p') to OME-NGFF TCZYX
+        if enforce_ome_order:
+            self._storage_order_dims = reorder_to_ome_ngff(list(non_position_dims))
+        # Otherwise, keep the acquisition order for non-position dimensions (no 'p')
+        else:
+            self._storage_order_dims = list(non_position_dims)
 
-        # -----Use the order of dimensions to determine acquisition order-----
+        # Extract labels of storage order dims, excluding spatial dims y and x
+        storage_order_labels: list[DimensionLabel] = [
+            d.label for d in self._storage_order_dims if d.label not in "yx"
+        ]
 
-        # Create a mapping from label to range
-        dim_ranges = {d.label: range(d.size) for d in non_spatial_dims}
-        # e.g. {'t': range(0, 10), 'c': range(0, 2), 'z': range(0, 3)}
+        # Create iterator yielding (position_key, index_tuple) in acquisition order
+        self._dim_iter = iter(DimensionIndexIterator(dimensions, storage_order_labels))
 
-        # Build ranges in the order dimensions appear
-        ordered_ranges = []
-        # e.g. [range(0, 10), range(0, 2), range(0, 2), range(0, 3)]
+    @property
+    def num_positions(self) -> int:
+        """Return the number of positions in the stream."""
+        return self._num_positions
 
-        ordered_labels = []
-        # e.g. ['t', 'p', 'c', 'z']
+    @property
+    def acquisition_order_dims(self) -> Sequence[Dimension]:
+        """Return the dimensions in acquisition order."""
+        return self._acquisition_order_dims
 
+    @property
+    def storage_order_dims(self) -> Sequence[Dimension]:
+        """Return the non-position dimensions in storage order (as stored on disk)."""
+        return self._storage_order_dims
+
+    @property
+    def dim_iter(self) -> Iterator[tuple[int, tuple[int, ...]]]:
+        """Return an iterator over (position_key, index) tuples."""
+        return self._dim_iter
+
+    @property
+    def plate(self) -> Plate | None:
+        """Return the plate metadata if available, else None."""
+        return self._plate
+
+    def _get_position_dim(self, dimensions: Sequence[Dimension]) -> Dimension | None:
+        """Return the position Dimension if it exists, else None."""
         for dim in dimensions:
             if dim.label == "p":
-                ordered_ranges.append(range(num_positions))
-                ordered_labels.append("p")
-            elif dim.label in dim_ranges and dim.label not in "yx":
-                ordered_ranges.append(dim_ranges[dim.label])
-                ordered_labels.append(dim.label)
-
-        # Create index mapping. Store a storage-tuple of ints in the order of
-        # non_spatial_dims so backends can directly use the tuple as an index.
-        self._indices = {}
-        # e.g. {acq_index: (array_key/pos, non-position axis tuple)}
-        # {
-        #   0: ('0', (0, 0, 0)),
-        #   1: ('0', (0, 0, 1)),
-        #   ...,
-        #   6: ('1', (0, 0, 0)),
-        #   7: ('1', (0, 0, 1)),
-        #   ...,
-        # }
-
-        for i, acq_indices in enumerate(product(*ordered_ranges)):
-            # Map acquisition indices to storage indices
-            acq_dict = dict(zip(ordered_labels, acq_indices, strict=False))
-            # e.g. {'t': 0, 'p': 0, 'c': 0, 'z': 0}
-
-            pos = acq_dict.get("p", 0)
-
-            # Build storage tuple for non-position, non-spatial dimensions
-            storage_tuple: tuple[int, ...] = tuple(
-                acq_dict[d.label] for d in non_spatial_dims
-            )
-            # e.g. (0, 0, 0) or (0, 0, 1) or (0, 0, 2), ...
-
-            self._indices[i] = (str(pos), storage_tuple)
-
-        self._position_dim = position_dims[0] if position_dims else None
-        self._append_count = 0
-        self._num_positions = num_positions
-        self._non_position_dims = non_position_dims
-
-        return num_positions, non_position_dims
+                return dim
+        return None
 
     @abstractmethod
     def _write_to_backend(
-        self, array_key: str, index: tuple[int, ...], frame: np.ndarray
+        self, position_key: str, index: tuple[int, ...], frame: np.ndarray
     ) -> None:
         """Backend-specific write implementation.
 
         Parameters
         ----------
-        array_key : str
+        position_key : str
             The key for the position in the backend (e.g., Zarr group).
         index : tuple[int, ...]
-            The index for the non-position dimensions.
+            A tuple of storage indices for the non-spatial dimensions (e.g., (t, c, z))
+            in storage order. Can be used directly for array indexing.
         frame : np.ndarray
             The frame data to write.
 
@@ -276,6 +262,5 @@ class MultiPositionOMEStream(OMEStream):
         if not self.is_active():
             msg = "Stream is closed or uninitialized. Call create() first."
             raise RuntimeError(msg)
-        array_key, index = self._indices[self._append_count]
-        self._write_to_backend(array_key, index, frame)
-        self._append_count += 1
+        position_key, index = next(self._dim_iter)
+        self._write_to_backend(str(position_key), index, frame)

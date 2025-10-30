@@ -23,14 +23,21 @@ output_path = Path("~/Desktop/").expanduser()
 backend = "tensorstore"
 # backend = "tiff"
 
+# Create a simple plate plan with 3 wells, 3 fov per well
+plate_plan = useq.WellPlatePlan(
+    plate="96-well",
+    a1_center_xy=(0.0, 0.0),
+    selected_wells=([0, 0, 1], [0, 1, 0]),  # A1, A2, B1
+    well_points_plan=useq.GridRowsColumns(rows=1, columns=2),  # 2 FOV per well
+)
+
 # Create a MDASequence. NOTE: the axis_order determines the order in which frames will
 # be appended to the stream.
 seq = useq.MDASequence(
-    axis_order="pzc",
-    stage_positions=[(0.0, 0.0), (10.0, 10.0)],
-    time_plan={"interval": 0.5, "loops": 10},
-    channels=["DAPI", "FITC"],
-    z_plan={"range": 2, "step": 1.0},
+    axis_order="ptc",
+    stage_positions=plate_plan,
+    time_plan={"interval": 0.1, "loops": 3},
+    channels=["FITC"],
 )
 # -------------------------------------------------------------------------#
 
@@ -46,6 +53,7 @@ stream = omew.create_stream(
     dimensions=dims,
     dtype=np.uint8,
     backend=backend,
+    plate=omew.plate_from_useq(seq),
     overwrite=True,
 )
 
