@@ -142,16 +142,13 @@ class MultiPositionOMEStream(OMEStream):
            sequential writers such as OME-TIFF where enforcing TCZYX is not strictly
            required).
 
-        2) Build a mapping from the acquisition frame sequence (the order in which the
-           frames will be appended via the `append()` method) to the per-frame storage
-           indices inside the on-disk array(s). This mapping allows the stream to
-           correctly place each incoming frame in the correct location of the
-           storage-shaped array even when the storage ordering differs from the
-           acquisition ordering. The mapping is stored in `self._indices` as
-           a dictionary mapping a frame sequence number -> (array_key, index), where
-           `array_key` identifies the position/group and `index` is a small named-tuple
-           (e.g. with attributes like `.t`, `.c`, `.z`) that can be used for array
-           indexing.
+        2) Build an iterator that yields per-frame indices in acquisition order but
+           formatted for storage indexing. The iterator `self._dim_iter` yields tuples
+           `(position_key, index_tuple)` where `position_key` is an integer identifying
+           the position, and `index_tuple` contains the storage indices for the
+           non-spatial axes (e.g., `(t, c, z)`). This allows the stream to correctly
+           place each incoming frame in the correct location of the storage array even
+           when the storage ordering differs from the acquisition ordering.
 
         Properties
         ----------
@@ -161,7 +158,8 @@ class MultiPositionOMEStream(OMEStream):
             The non-position dimensions in storage order (as stored on disk - TCZYX if
             `enforce_ome_order` is True).
         dim_iter : Iterator[tuple[int, tuple[int, ...]]]
-            An iterator over (position_key, index) tuples in acquisition order.
+            An iterator over (position_key, index_tuple) tuples in acquisition order,
+            where index_tuple is ordered according to storage_order_dims.
 
         Parameters
         ----------
@@ -172,21 +170,24 @@ class MultiPositionOMEStream(OMEStream):
             saved to disk will follow OME-NGFF order. This is required for OME-NGFF
             (Zarr). If False, keep acquisition order. Default is True.
         """
-        # Get positions dim size
+        # Retrieve the number of positions from the dimensions if any, otherwise 1
         position_dims = self._get_position_dim(dimensions)
         self._num_positions = position_dims.size if position_dims else 1
 
-        # Create iterator that yields indices in acquisition order but with fields
-        # matching storage order
+        # Filter out the position dimension to get only non-position dimensions (no 'p')
         non_position_dims = [d for d in dimensions if d.label != "p"]
+        # If enforcing OME order, reorder non-position dims (no 'p') to OME-NGFF TCZYX
         if enforce_ome_order:
             self._storage_order_dims = reorder_to_ome_ngff(list(non_position_dims))
+        # Otherwise, keep the acquisition order for non-position dimensions (no 'p')
         else:
             self._storage_order_dims = list(non_position_dims)
 
+        # Extract labels of storage order dims, excluding spatial dims y and x
         storage_order_labels: list[DimensionLabel] = [
             d.label for d in self._storage_order_dims if d.label not in "yx"
         ]
+        # Create iterator yielding (position_key, index_tuple) in acquisition order
         self._dim_iter = iter(DimensionIndexIterator(dimensions, storage_order_labels))
 
     @property

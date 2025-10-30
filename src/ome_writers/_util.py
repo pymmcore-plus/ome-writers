@@ -177,36 +177,58 @@ def reorder_to_ome_ngff(dims_order: list[Dimension]) -> list[Dimension]:
 
 
 class DimensionIndexIterator:
-    """Iterator yielding multidimensional indices in acquisition order.
+    """Yield indices for frames in acquisition order, formatted for storage.
 
-    Takes dimensions in acquisition order and yields named tuples with indices
-    reordered to match the desired output dimension order.
+    The iterator accepts dimensions in acquisition order (slowest- to
+    fastest-varying) and a sequence of labels describing the desired storage
+    order for the non-spatial axes (e.g. `["t", "c", "z"]`). It yields
+    tuples of the form (position_key, index_tuple) where `position_key` is
+    an integer identifying the position (`p`). When no position dimension is
+    present in the provided `acquisition_order_dimensions`, the iterator will
+    return `position_key` == 0 for every frame (single-position case).
+
+    Notes
+    -----
+    - `storage_order_dimensions` must not include the spatial labels
+      `"y"` or `"x"` nor the position label (default "p").
+    - The iterator returns indices in acquisition order (so frames are yielded
+      in the sequence they would be acquired), but each yielded index tuple
+      is ordered according to the provided storage order labels.
 
     Parameters
     ----------
-    acquisition_order : Sequence[Dimension]
-        Dimensions in acquisition order (slowest to fastest varying). It must not
-        include the positional label defined by `position_key`.
+    acquisition_order_dimensions : Sequence[Dimension]
+        Dimensions in acquisition order (slowest to fastest varying). This
+        sequence may include a position dimension labelled by `position_key`.
     storage_order_dimensions : Sequence[DimensionLabel]
-        Dimensions labels in storage order (as stored on disk - tcz if
-        `enforce_ome_order` is True). It must not include the x or y labels
+        Labels for the non-spatial dimensions in the desired storage order
+        (e.g. `["t", "c", "z"]`). Should not include `"y"`, `"x"`,
+        or the position label.
     position_key : DimensionLabel, optional
-        The label used for the position dimension. Default is "p".
+        Label used for the position dimension. Defaults to `"p"`.
 
-    Examples
-    --------
+    Example
+    -------
     >>> dims = [
-    ...     Dimension(label="t", size=10, unit=(1.0, "s"), chunk_size=1),
+    ...     Dimension(label="t", size=2, unit=(1.0, "s"), chunk_size=1),
     ...     Dimension(label="p", size=2, unit=None, chunk_size=1),
-    ...     Dimension(label="z", size=7, unit=(1.0, "um"), chunk_size=1),
+    ...     Dimension(label="z", size=3, unit=(1.0, "um"), chunk_size=1),
     ...     Dimension(label="c", size=2, unit=None, chunk_size=1),
-    ...     Dimension(label="y", size=512, unit=None, chunk_size=1),
-    ...     Dimension(label="x", size=512, unit=None, chunk_size=1),
+    ...     Dimension(label="y", size=32, unit=None, chunk_size=1),
+    ...     Dimension(label="x", size=32, unit=None, chunk_size=1),
     ... ]
-    >>> for idx in DimensionIndexIterator(dims, output_order="ptcz"):
-    ...     print(idx)
-    FrameIndex(p=0, t=0, c=0, z=0)
-    FrameIndex(p=0, t=0, c=1, z=0)
+    >>> it = DimensionIndexIterator(dims, storage_order_dimensions=["t", "c", "z"])
+    >>> for pos, idx in it:
+    ...     print(pos, idx)
+    0 (0, 0, 0)  # which means p=0, (t=0, c=0, z=0)
+    0 (0, 1, 0)  # which means p=0, (t=0, c=1, z=0)
+    ...
+    If the "c" and "z" dimensions were swapped in storage order:
+    >>> it = DimensionIndexIterator(dims, storage_order_dimensions=["t", "z", "c"])
+    >>> for pos, idx in it:
+    ...     print(pos, idx)
+    0 (0, 0, 0)  # which means p=0, (t=0, z=0, c=0)
+    0 (0, 0, 1)  # which means p=0, (t=0, z=0, c=1)
     ...
     """
 
@@ -216,51 +238,47 @@ class DimensionIndexIterator:
         storage_order_dimensions: Sequence[DimensionLabel],
         position_key: DimensionLabel = "p",
     ) -> None:
-        if (
-            "y" in storage_order_dimensions
-            or "x" in storage_order_dimensions
-            or position_key in storage_order_dimensions
-        ):
+        # Validate that storage_order_dimensions does not include forbidden labels
+        forbidden_labels = {"y", "x", position_key}
+        if forbidden_labels & set(storage_order_dimensions):
             raise ValueError(
-                "storage_order_dimensions should not include 'y', 'x', and "
+                "storage_order_dimensions should not include 'y', 'x', or "
                 f"{position_key}."
             )
 
+        # Build the desired output order: position first, then storage dims
         output_labels_order = [position_key, *list(storage_order_dimensions)]
 
-        # Filter to dimensions in output_order, preserving acquisition order
-        self.iter_dims = [
-            d for d in acquisition_order_dimensions if d.label in output_labels_order
-        ]
+        # Filter dimensions to those in output order, preserving acquisition order
+        acq_order_dims = acquisition_order_dimensions
+        self.iter_dims = [d for d in acq_order_dims if d.label in output_labels_order]
 
-        # Shape for iteration (in acquisition order)
+        # Compute shape tuple for iteration in acquisition order
         self.shape = tuple(d.size for d in self.iter_dims)
 
-        # Create named tuple with fields in output order
-        field_names = [
-            label
-            for label in output_labels_order
-            if any(d.label == label for d in self.iter_dims)
-        ]
-
-        # Pre-compute mapping from output positions to acquisition positions
+        # Get labels of filtered dimensions in acquisition order
         acq_labels = [d.label for d in self.iter_dims]
+        # Determine which output labels are present in acquisition dims
+        field_names = [label for label in output_labels_order if label in acq_labels]
+        # Map from output order indices to acquisition order indices
         self._output_to_acq = [acq_labels.index(f) for f in field_names]
 
     def __iter__(self) -> Iterator[tuple[int, tuple]]:
         """Yield indices in acquisition order, formatted in output order."""
+        # If no dimensions to iterate over, return empty iterator
         if not self.shape:
             return
 
+        # Iterate over all possible flat indices
         for i in range(int(np.prod(self.shape))):
             # Unravel flat index to multi-dim indices (acquisition order)
             acq_indices = np.unravel_index(i, self.shape)
             # Reorder to output order and convert to Python ints
-            pos_key, *output_indices = tuple(
-                int(acq_indices[j]) for j in self._output_to_acq
-            )
-            yield pos_key, tuple(output_indices)
+            pos_key, *out_idxs = tuple(int(acq_indices[j]) for j in self._output_to_acq)
+            # Yield position key and index tuple in storage order
+            yield pos_key, tuple(out_idxs)
 
     def __len__(self) -> int:
         """Return total number of frames."""
+        # Return product of dimension sizes, or 0 if no dimensions
         return int(np.prod(self.shape)) if self.shape else 0

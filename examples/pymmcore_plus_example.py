@@ -1,5 +1,6 @@
 """Example of using ome_writers with useq.MDASequence and pymmcore-plus."""
 
+from contextlib import suppress
 from pathlib import Path
 
 import numpy as np
@@ -28,8 +29,8 @@ except ImportError as e:
 output_path = Path("~/Desktop/").expanduser()
 
 # Choose backend: acquire-zarr, tensorstore, or tiff
-backend = "acquire-zarr"
-# backend = "tensorstore"
+# backend = "acquire-zarr"
+backend = "tensorstore"
 # backend = "tiff"
 
 # Create a MDASequence. NOTE: the axis_order determines the order in which frames will
@@ -37,7 +38,7 @@ backend = "acquire-zarr"
 seq = useq.MDASequence(
     axis_order="ptcz",
     stage_positions=[(0.0, 0.0), (10.0, 10.0)],
-    time_plan={"interval": 0.5, "loops": 10},
+    time_plan={"interval": 0.1, "loops": 3},
     channels=["DAPI", "FITC"],
     z_plan={"range": 2, "step": 1.0},
 )
@@ -77,6 +78,24 @@ def _on_frame_ready(
 def _on_sequence_finished(sequence: useq.MDASequence) -> None:
     stream.flush()
     print("Data written successfully to", path)
+
+    if backend == "tensorstore":
+        with suppress(ImportError):
+            from yaozarrs import validate_zarr_store
+
+            validate_zarr_store(path)
+            print("Zarr store validated successfully.")
+
+    elif backend == "tiff":
+        with suppress(ImportError):
+            import tifffile
+            from ome_types import validate_xml
+        for pos in range(len(seq.stage_positions)):
+            tiff_path = output_path / f"{ext}_example_p{pos:03d}.ome.{ext}"
+            with tifffile.TiffFile(tiff_path) as tif:
+                assert tif.ome_metadata is not None
+                validate_xml(tif.ome_metadata)
+                print(f"OME-TIFF file for position {pos} validated successfully.")
 
 
 # Start the acquisition

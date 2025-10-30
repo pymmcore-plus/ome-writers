@@ -27,14 +27,11 @@ backend = "tensorstore"
 # be appended to the stream.
 seq = useq.MDASequence(
     axis_order="pzc",
-    # stage_positions=[(0.0, 0.0), (10.0, 10.0)],
-    stage_positions=[(0.0, 0.0)],
-    # time_plan={"interval": 0.5, "loops": 10},
+    stage_positions=[(0.0, 0.0), (10.0, 10.0)],
+    time_plan={"interval": 0.5, "loops": 10},
     channels=["DAPI", "FITC"],
     z_plan={"range": 2, "step": 1.0},
 )
-print()
-print(f"ACQUISITION ORDER: {seq.axis_order}")
 # -------------------------------------------------------------------------#
 
 # Convert the MDASequence to ome_writers dimensions
@@ -52,10 +49,9 @@ stream = omew.create_stream(
     overwrite=True,
 )
 
-
 # Simulate acquisition and append frames to the stream iterating over the MDASequence
 for event in seq:
-    print(f"\nEvent Index: {event.index}")
+    print(f"Event Index: {event.index}")
     # create a dummy frame
     frame = np.random.randint(0, 255, size=(32, 32), dtype=np.uint8)
     stream.append(frame)
