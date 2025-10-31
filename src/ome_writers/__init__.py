@@ -22,6 +22,7 @@ from ._plate import (
     Plate,
     PlateAcquisition,
     WellPosition,
+    plate_to_acquire_zarr,
     plate_to_ome_types,
     plate_to_yaozarrs_v5,
 )
@@ -52,6 +53,7 @@ __all__ = [
     "fake_data_for_sizes",
     "ome_meta_v5",
     "plate_from_useq",
+    "plate_to_acquire_zarr",
     "plate_to_ome_types",
     "plate_to_yaozarrs_v5",
 ]

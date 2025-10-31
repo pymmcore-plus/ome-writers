@@ -1,11 +1,3 @@
-"""Test that axis_order is properly respected in multi-position acquisitions.
-
-These tests verify that frames are written to the correct array positions
-when using different axis_order values in MDASequence. Each test creates
-frames with unique statistical properties (mean, std) that encode the
-exact indices (p, t, c), making it easy to verify correctness.
-"""
-
 from __future__ import annotations
 
 from contextlib import suppress
@@ -18,7 +10,7 @@ import pytest
 import ome_writers as omew
 
 if TYPE_CHECKING:
-    from .conftest import AvailableBackend
+    from ..conftest import AvailableBackend  # noqa: TID252
 
 pytest.importorskip("useq")
 
@@ -71,17 +63,19 @@ def verify_frame_value(
         )
 
 
-@pytest.mark.parametrize("multi_position", [True, False])
 @pytest.mark.parametrize("axis_order", ["ptzc", "ptcz", "tpzc", "cztp", "tpcz"])
-def test_axis_order(
-    axis_order: str, multi_position: bool, backend: AvailableBackend, tmp_path: Path
+def test_axis_order_hcs(
+    axis_order: str, backend: AvailableBackend, tmp_path: Path
 ) -> None:
-    """Test that different axis_order values work correctly.
+    """Test that different axis_order values work correctly for HCS.
 
     This test ensures that frames are written to the correct positions
     regardless of the acquisition order specified by axis_order.
     """
-    from useq import MDASequence
+    from useq import GridRowsColumns, MDASequence, WellPlatePlan
+
+    if backend.name != "acquire-zarr":
+        pytest.skip("HCS tests currently not supported.")
 
     # Create output path - for TIFF backend, we need to explicitly add .ome.tiff
     # because the backend strips and re-adds extensions
@@ -90,11 +84,18 @@ def test_axis_order(
     else:
         output_path = tmp_path / f"test_{axis_order}.{backend.file_ext}"
 
-    # Create sequence with specified axis_order
-    # 2 positions, 3 timepoints, 2 channels, 4 z-slices = 48 frames
+    # Create sequence with plate and specified axis_order
+
+    plate_plan = WellPlatePlan(
+        plate="96-well",
+        a1_center_xy=(0.0, 0.0),
+        selected_wells=([0, 0, 1], [0, 1, 0]),  # A1, A2, B1
+        well_points_plan=GridRowsColumns(rows=1, columns=2),  # 2 FOV per well
+    )
+
     seq = MDASequence(
         axis_order=axis_order,
-        stage_positions=[(0.0, 0.0), (1.0, 1.0)] if multi_position else [],
+        stage_positions=plate_plan,
         time_plan={"interval": 0.1, "loops": 3},
         channels=["DAPI", "FITC"],
         z_plan={"range": 3.0, "step": 1.0},
@@ -121,7 +122,7 @@ def test_axis_order(
 
     stream.flush()
 
-    range_p = range(len(seq.stage_positions)) if multi_position else range(1)
+    range_p = range(len(seq.stage_positions))
     range_t = range(seq.time_plan.loops)
     range_c = range(len(seq.channels))
     range_z = range(seq.z_plan.num_positions())
@@ -180,10 +181,7 @@ def test_axis_order(
         non_pos_dims = [d.label for d in dims if d.label not in "pyx"]
 
         for p in range_p:
-            if multi_position:
-                tiff_path = tmp_path / f"{Path(base_name).name}_p{p:03d}{ext}"
-            else:
-                tiff_path = output_path
+            tiff_path = tmp_path / f"{Path(base_name).name}_p{p:03d}{ext}"
 
             with tifffile.TiffFile(tiff_path) as tif:
                 data = tif.asarray()

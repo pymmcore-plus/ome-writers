@@ -13,9 +13,9 @@ from ome_writers import Dimension, Plate, PlateAcquisition, WellPosition, create
 if TYPE_CHECKING:
     from pathlib import Path
 
-pytest.importorskip("acquire_zarr")
-pytest.importorskip("useq")
-pytest.importorskip("yaozarrs")
+pytest.importorskip("acquire_zarr", reason="acquire-zarr backend not available")
+pytest.importorskip("useq", reason="useq not available")
+pytest.importorskip("yaozarrs", reason="yaozarrs not available")
 
 
 def test_hcs_plate_with_acquire_zarr(tmp_path: Path) -> None:
@@ -37,11 +37,11 @@ def test_hcs_plate_with_acquire_zarr(tmp_path: Path) -> None:
     # Create dimensions for the data (position dimension for wells)
     dimensions = [
         Dimension(label="p", size=3),  # 3 wells × 1 field per well
-        Dimension(label="t", size=2),
+        Dimension(label="t", size=2, unit=(1.0, "s")),
         Dimension(label="c", size=2),
-        Dimension(label="z", size=3),
-        Dimension(label="y", size=64),
-        Dimension(label="x", size=64),
+        Dimension(label="z", size=3, unit=(1, "um")),
+        Dimension(label="y", size=64, unit=(0.1, "um")),
+        Dimension(label="x", size=64, unit=(0.1, "um")),
     ]
 
     output_path = tmp_path / "test_plate.zarr"
@@ -103,10 +103,10 @@ def test_hcs_plate_with_multiple_fields_per_well(tmp_path: Path) -> None:
     # Dimensions: position will be expanded to 2 wells × 2 fields = 4 positions
     dimensions = [
         Dimension(label="p", size=4),  # 2 wells × 2 fields
-        Dimension(label="t", size=2),
+        Dimension(label="t", size=2, unit=(1.0, "s")),
         Dimension(label="c", size=1),
-        Dimension(label="y", size=32),
-        Dimension(label="x", size=32),
+        Dimension(label="y", size=32, unit=(0.2, "um")),
+        Dimension(label="x", size=32, unit=(0.2, "um")),
     ]
 
     output_path = tmp_path / "multifield_plate.zarr"

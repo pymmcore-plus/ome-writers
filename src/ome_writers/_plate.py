@@ -6,6 +6,7 @@ __all__ = [
     "Plate",
     "PlateAcquisition",
     "WellPosition",
+    "plate_to_acquire_zarr",
     "plate_to_ome_types",
     "plate_to_yaozarrs_v5",
 ]
