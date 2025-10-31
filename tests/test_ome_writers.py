@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
-from yaozarrs import validate_zarr_store
 
 import ome_writers as omew
 
@@ -22,7 +21,12 @@ def validate_path(path: Path) -> None:
     if path.suffix == ".tiff":
         ...
     elif path.suffix in {".zarr", ".zarr/"}:
-        validate_zarr_store(path)
+        try:
+            from yaozarrs import validate_zarr_store
+
+            validate_zarr_store(path)
+        except ImportError:
+            print("yaozarrs not installed; skipping zarr validation.")
 
 
 def test_minimal_2d_dimensions(backend: AvailableBackend, tmp_path: Path) -> None:
