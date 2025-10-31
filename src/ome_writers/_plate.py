@@ -13,11 +13,10 @@ __all__ = [
 
 from typing import TYPE_CHECKING, NamedTuple
 
-import acquire_zarr as aqz
-
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    import acquire_zarr as aqz
     import numpy as np
     import ome_types.model as ome
     import yaozarrs.v05 as yao_v05
@@ -297,6 +296,14 @@ def plate_to_acquire_zarr(
     aqz.Plate
         The created acquire-zarr Plate object.
     """
+    try:
+        import acquire_zarr as aqz
+    except ImportError as e:
+        raise ImportError(
+            "The `acquire-zarr` package is required to use this function. "
+            "Install it with `pip install acquire-zarr`."
+        ) from e
+
     fields_per_well = plate.field_count or 1
 
     # Create acquisition metadata if provided
