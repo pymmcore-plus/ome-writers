@@ -54,6 +54,10 @@ class AcquireZarrStream(MultiPositionOMEStream):
         *,
         overwrite: bool = False,
     ) -> Self:
+        # to store plate information
+        self._plate = plate
+        self._plate_position_keys: dict[int, str] = {}
+
         # Initialize dimensions from MultiPositionOMEStream
         # NOTE: since acquire-zarr can save data in any order, we do not enforce
         # OME-NGFF order here. However, to always have valid OME-NGFF metadata, we will
@@ -79,7 +83,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
 
         if plate is not None:
             # Use HCS plate mode with acquire-zarr's hcs_plates parameter
-            self._create_with_hcs_plates(str(self._group_path), az_dims, dtype, plate)
+            self._create_with_hcs_plates(str(self._group_path), az_dims, dtype)
         else:
             # Create array settings for each position
             self._create(az_dims, dtype)
@@ -122,16 +126,18 @@ class AcquireZarrStream(MultiPositionOMEStream):
         store_path: str,
         az_dims: list[acquire_zarr.Dimension],
         dtype: np.dtype,
-        plate: Plate,
     ) -> None:
         """Create stream using acquire-zarr's HCS plates support.
 
         This method uses the hcs_plates parameter in StreamSettings to properly
         structure the data as an HCS plate with wells and fields of view.
         """
+        if self._plate is None:
+            raise ValueError("Plate must be provided for HCS plate mode.")
+
         # Create the acquire-zarr plate object
-        plate_aqz = plate_to_acquire_zarr(plate, az_dims, dtype)
-        fields_per_well = plate.field_count or 1
+        plate_aqz = plate_to_acquire_zarr(self._plate, az_dims, dtype)
+        fields_per_well = self._plate.field_count or 1
 
         # Create stream with HCS configuration
         settings = self._aqz.StreamSettings(
@@ -146,17 +152,16 @@ class AcquireZarrStream(MultiPositionOMEStream):
         self._stream = self._aqz.ZarrStream(settings)
 
         # Build mapping from position index to well/field key for HCS
-        plate_path = (plate.name or "plate").replace(" ", "_") if plate else "plate"
-        self._position_to_key: dict[int, str] = {}
+        plate_path = (self._plate.name or "plate").replace(" ", "_")
         pos_idx = 0
-        for well in plate.wells:
+        for well in self._plate.wells:
             for field_idx in range(fields_per_well):
                 if fields_per_well > 1:
                     fov_key = f"fov{field_idx}"
                 else:
                     fov_key = "0"
                 key = f"{plate_path}/{well.path}/{fov_key}"
-                self._position_to_key[pos_idx] = key
+                self._plate_position_keys[pos_idx] = key
                 pos_idx += 1
 
     def _patch_metadata_to_ngff_v05(self) -> None:
@@ -189,8 +194,8 @@ class AcquireZarrStream(MultiPositionOMEStream):
         else:
             transpose_order = None
 
-        if hasattr(self, "_position_to_key"):
-            position_paths = list(self._position_to_key.values())
+        if self._plate is not None and self._plate_position_keys:
+            position_paths = list(self._plate_position_keys.values())
         else:
             position_paths = [str(i) for i in range(self.num_positions)]
 
@@ -223,8 +228,8 @@ class AcquireZarrStream(MultiPositionOMEStream):
 
         (As suggested in https://github.com/acquire-project/acquire-zarr/issues/171#issuecomment-3458544335).
         """
-        if hasattr(self, "_position_to_key"):
-            position_paths = list(self._position_to_key.values())
+        if self._plate is not None and self._plate_position_keys:
+            position_paths = list(self._plate_position_keys.values())
         else:
             position_paths = [str(i) for i in range(self.num_positions)]
 
@@ -263,8 +268,8 @@ class AcquireZarrStream(MultiPositionOMEStream):
         NOTE: For AcquireZarr, frames are written sequentially, so index is not used.
         """
         if self._stream is not None:
-            if hasattr(self, "_position_to_key"):
-                key = self._position_to_key.get(int(position_key), position_key)
+            if self._plate is not None and self._plate_position_keys:
+                key = self._plate_position_keys.get(int(position_key), position_key)
             else:
                 key = position_key
             self._stream.append(frame, key=key)

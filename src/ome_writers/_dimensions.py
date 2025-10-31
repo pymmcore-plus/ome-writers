@@ -254,18 +254,28 @@ def dims_to_yaozarrs_v5(array_dims: Mapping[str, Sequence[Dimension]]) -> yao_v0
         for ax in axes:
             if ax["type"] == "time":
                 yao_axes.append(
-                    v05.TimeAxis(name=ax["name"], type="time", unit=ax.get("unit"))
+                    v05.TimeAxis(
+                        name=ax["name"], type="time", unit=ax.get("unit", "unknown")
+                    )
                 )
             elif ax["type"] == "space":
                 yao_axes.append(
-                    v05.SpaceAxis(name=ax["name"], type="space", unit=ax.get("unit"))
+                    v05.SpaceAxis(
+                        name=ax["name"], type="space", unit=ax.get("unit", "unknown")
+                    )
                 )
             elif ax["type"] == "channel":
-                yao_axes.append(v05.ChannelAxis(name=ax["name"], type="channel"))
+                yao_axes.append(
+                    v05.ChannelAxis(
+                        name=ax["name"], type="channel", unit=ax.get("unit", "unknown")
+                    )
+                )
             else:
                 yao_axes.append(
                     v05.CustomAxis(
-                        name=ax["name"], type=ax.get("type"), unit=ax.get("unit")
+                        name=ax["name"],
+                        type=ax.get("type", "custom"),
+                        unit=ax.get("unit", "unknown"),
                     )
                 )
 
