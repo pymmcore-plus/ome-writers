@@ -194,11 +194,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
         else:
             transpose_order = None
 
-        if self._plate is not None and self._plate_position_keys:
-            position_paths = list(self._plate_position_keys.values())
-        else:
-            position_paths = [str(i) for i in range(self.num_positions)]
-
+        position_paths = self._get_position_path()
         attrs = dims_to_yaozarrs_v5(dict.fromkeys(position_paths, reordered_dims))
         zarr_json = Path(self._group_path) / "zarr.json"
         current_meta: dict = {
@@ -217,6 +213,14 @@ class AcquireZarrStream(MultiPositionOMEStream):
         if transpose_order is not None:
             self._rearrange_positions_metadata(reordered_dims, transpose_order)
 
+    def _get_position_path(self) -> list[str]:
+        """Get the list of position paths in the Zarr group depending on hcs or not."""
+        if self._plate is not None and self._plate_position_keys:
+            position_paths = list(self._plate_position_keys.values())
+        else:
+            position_paths = [str(i) for i in range(self.num_positions)]
+        return position_paths
+
     def _rearrange_positions_metadata(
         self, reordered_dims: Sequence[Dimension], transpose_order: list[int] | None
     ) -> None:
@@ -228,11 +232,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
 
         (As suggested in https://github.com/acquire-project/acquire-zarr/issues/171#issuecomment-3458544335).
         """
-        if self._plate is not None and self._plate_position_keys:
-            position_paths = list(self._plate_position_keys.values())
-        else:
-            position_paths = [str(i) for i in range(self.num_positions)]
-
+        position_paths = self._get_position_path()
         for path in position_paths:
             array_zarr_json = Path(self._group_path) / path / "zarr.json"
             if array_zarr_json.exists():
