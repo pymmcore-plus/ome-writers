@@ -97,8 +97,6 @@ def test_axis_order(
     if backend.file_ext.endswith("tiff"):
         output_path = tmp_path / f"test_{axis_order}.ome.tiff"
     else:
-        # if tiff_mmmap:
-        #     pytest.skip("Memory-mapped option only applies to TIFF backend.")
         output_path = tmp_path / f"test_{axis_order}.{backend.file_ext}"
 
     # Create sequence with specified axis_order
