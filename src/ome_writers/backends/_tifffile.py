@@ -89,7 +89,6 @@ class TifffileStream(MultiPositionOMEStream):
                 "Plate support is not yet implemented for the tifffile backend. "
                 "Use acquire-zarr or tensorstore backends for HCS plate support."
             )
-        self._plate = plate
 
         # Initialize dimensions from MultiPositionOMEStream
         # NOTE: since OME-TIFF can store data in any order, we do not enforce

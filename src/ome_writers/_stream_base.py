@@ -124,13 +124,9 @@ class MultiPositionOMEStream(OMEStream):
         # property to track number of positions
         self._num_positions = 0
         # property to track acquisition order dimensions
-        self._acquisition_order_dims: Sequence[Dimension] = []
-        # property to track non-position dimensions in storage order (as stored on disk)
         self._storage_order_dims: Sequence[Dimension] = []
         # iterator to yield (position_key, index) tuples in acquisition order
         self._dim_iter: Iterator[tuple[int, tuple[int, ...]]] = iter(())
-        # plate metadata
-        self._plate: Plate | None = None
 
     def _init_dimensions(
         self, dimensions: Sequence[Dimension], enforce_ome_order: bool = True
@@ -210,11 +206,6 @@ class MultiPositionOMEStream(OMEStream):
         return self._num_positions
 
     @property
-    def acquisition_order_dims(self) -> Sequence[Dimension]:
-        """Return the dimensions in acquisition order."""
-        return self._acquisition_order_dims
-
-    @property
     def storage_order_dims(self) -> Sequence[Dimension]:
         """Return the non-position dimensions in storage order (as stored on disk)."""
         return self._storage_order_dims
@@ -223,11 +214,6 @@ class MultiPositionOMEStream(OMEStream):
     def dim_iter(self) -> Iterator[tuple[int, tuple[int, ...]]]:
         """Return an iterator over (position_key, index) tuples."""
         return self._dim_iter
-
-    @property
-    def plate(self) -> Plate | None:
-        """Return the plate metadata if available, else None."""
-        return self._plate
 
     def _get_position_dim(self, dimensions: Sequence[Dimension]) -> Dimension | None:
         """Return the position Dimension if it exists, else None."""

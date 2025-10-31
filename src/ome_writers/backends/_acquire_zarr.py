@@ -9,11 +9,10 @@ from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from tifffile import product
 from typing_extensions import Self
 
 from ome_writers._dimensions import dims_to_yaozarrs_v5
-from ome_writers._plate import plate_to_acquire_zarr_plate
+from ome_writers._plate import plate_to_acquire_zarr
 from ome_writers._stream_base import MultiPositionOMEStream
 from ome_writers._util import reorder_to_ome_ngff
 
@@ -61,8 +60,6 @@ class AcquireZarrStream(MultiPositionOMEStream):
         # patch the metadata at the end in _patch_group_metadata by adding a
         # transposition codec at the array level.
         self._init_dimensions(dimensions, enforce_ome_order=False)
-
-        self._plate = plate
 
         self._group_path = Path(self._normalize_path(path))
 
@@ -133,7 +130,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
         structure the data as an HCS plate with wells and fields of view.
         """
         # Create the acquire-zarr plate object
-        plate_aqz = plate_to_acquire_zarr_plate(plate, az_dims, dtype)
+        plate_aqz = plate_to_acquire_zarr(plate, az_dims, dtype)
         fields_per_well = plate.field_count or 1
 
         # Create stream with HCS configuration
@@ -148,51 +145,19 @@ class AcquireZarrStream(MultiPositionOMEStream):
 
         self._stream = self._aqz.ZarrStream(settings)
 
-        # Build indices mapping for writing
-        # We need to account for the dimension order when building indices.
-        # The dimensions may be in any order (e.g., [t, p, c] or [p, t, c]),
-        # so we need to find where the position dimension is and iterate
-        # in the correct order.
-
-        # Build ranges for all non-spatial dimensions in the order they appear
-        all_dims_ranges: list[range] = []
-        position_dim_index = -1
-        for d in self.acquisition_order_dims:
-            if d.label in "xy":
-                continue
-            if d.label == "p":
-                position_dim_index = len(all_dims_ranges)
-            all_dims_ranges.append(range(d.size))
-
-        self._indices = {}
-        # remove any spaces from the plate name for acquire-zarr
-        plate_path = (plate.name or "plate").replace(" ", "_")
-        for idx, combo in enumerate(product(*all_dims_ranges)):
-            # Extract position index and non-position indices
-            # Example:
-            # idx, combo = 0, (0, 0, 0)
-            # idx, combo = 1, (0, 0, 1)
-            # idx, combo = 2, (0, 1, 0)
-            # ...
-            if position_dim_index >= 0:
-                pos_idx = combo[position_dim_index]
-                non_p_idx = tuple(
-                    v for i, v in enumerate(combo) if i != position_dim_index
-                )
-            else:
-                pos_idx = 0
-                non_p_idx = combo
-
-            # Map position index to well/FOV path
-            well_idx = pos_idx // fields_per_well
-            fov_idx_in_well = pos_idx % fields_per_well
-
-            well_pos = plate.wells[well_idx]
-            row_name, col_name = well_pos.path.split("/")
-            fov_key = f"fov{fov_idx_in_well}" if fields_per_well > 1 else "0"
-            array_key = f"{plate_path}/{row_name}/{col_name}/{fov_key}"
-
-            self._indices[idx] = (array_key, non_p_idx)
+        # Build mapping from position index to well/field key for HCS
+        plate_path = (plate.name or "plate").replace(" ", "_") if plate else "plate"
+        self._position_to_key: dict[int, str] = {}
+        pos_idx = 0
+        for well in plate.wells:
+            for field_idx in range(fields_per_well):
+                if fields_per_well > 1:
+                    fov_key = f"fov{field_idx}"
+                else:
+                    fov_key = "0"
+                key = f"{plate_path}/{well.path}/{fov_key}"
+                self._position_to_key[pos_idx] = key
+                pos_idx += 1
 
     def _patch_metadata_to_ngff_v05(self) -> None:
         """Patch the Zarr group metadata to ensure OME-NGFF v0.5 compliance.
@@ -224,9 +189,12 @@ class AcquireZarrStream(MultiPositionOMEStream):
         else:
             transpose_order = None
 
-        attrs = dims_to_yaozarrs_v5(
-            {str(i): reordered_dims for i in range(self.num_positions)}
-        )
+        if hasattr(self, "_position_to_key"):
+            position_paths = list(self._position_to_key.values())
+        else:
+            position_paths = [str(i) for i in range(self.num_positions)]
+
+        attrs = dims_to_yaozarrs_v5(dict.fromkeys(position_paths, reordered_dims))
         zarr_json = Path(self._group_path) / "zarr.json"
         current_meta: dict = {
             "consolidated_metadata": None,
@@ -255,8 +223,13 @@ class AcquireZarrStream(MultiPositionOMEStream):
 
         (As suggested in https://github.com/acquire-project/acquire-zarr/issues/171#issuecomment-3458544335).
         """
-        for pos in range(self.num_positions):
-            array_zarr_json = Path(self._group_path) / str(pos) / "zarr.json"
+        if hasattr(self, "_position_to_key"):
+            position_paths = list(self._position_to_key.values())
+        else:
+            position_paths = [str(i) for i in range(self.num_positions)]
+
+        for path in position_paths:
+            array_zarr_json = Path(self._group_path) / path / "zarr.json"
             if array_zarr_json.exists():
                 with open(array_zarr_json) as f:
                     array_meta = json.load(f)
@@ -290,7 +263,11 @@ class AcquireZarrStream(MultiPositionOMEStream):
         NOTE: For AcquireZarr, frames are written sequentially, so index is not used.
         """
         if self._stream is not None:
-            self._stream.append(frame, key=position_key)
+            if hasattr(self, "_position_to_key"):
+                key = self._position_to_key.get(int(position_key), position_key)
+            else:
+                key = position_key
+            self._stream.append(frame, key=key)
 
     def flush(self) -> None:
         if not self._stream:  # pragma: no cover

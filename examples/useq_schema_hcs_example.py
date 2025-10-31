@@ -36,10 +36,11 @@ plate_plan = useq.WellPlatePlan(
 # Create a MDASequence. NOTE: the axis_order determines the order in which frames will
 # be appended to the stream.
 seq = useq.MDASequence(
-    axis_order="ptc",
+    axis_order="ptcz",
     stage_positions=plate_plan,
     time_plan={"interval": 0.1, "loops": 3},
     channels=["FITC"],
+    z_plan={"range": 2, "step": 1.0},
 )
 # -------------------------------------------------------------------------#
 

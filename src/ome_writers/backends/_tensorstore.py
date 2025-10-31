@@ -56,7 +56,6 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
                 "Plate support is not yet implemented for the tensorstore backend. "
                 "Use acquire-zarr backend for HCS plate support."
             )
-        self._plate = plate
 
         # Initialize dimensions from MultiPositionOMEStream
         self._init_dimensions(dimensions)

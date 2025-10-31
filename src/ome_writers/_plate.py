@@ -272,7 +272,7 @@ def plate_to_yaozarrs_v5(plate: Plate) -> yao_v05.Plate:
     return v05.Plate(version="0.5", plate=plate_def)
 
 
-def plate_to_acquire_zarr_plate(
+def plate_to_acquire_zarr(
     plate: Plate,
     az_dims: list[aqz.Dimension],
     dtype: np.dtype,
