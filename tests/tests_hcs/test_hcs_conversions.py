@@ -10,7 +10,7 @@ import ome_writers as omew
 
 def test_plate_to_ome_types() -> None:
     """Test plate_to_ome_types() conversion."""
-    pytest.importorskip("ome_types")
+    pytest.importorskip("ome_types", reason="ome-types not installed")
     from ome_types import model as ome
 
     # Create a 2x2 plate
@@ -68,10 +68,14 @@ def test_plate_to_ome_types() -> None:
     # The plate object structure is valid if we can access all fields
     assert ome_plate.id is not None
 
+    from ome_types import validate_xml
+
+    validate_xml(ome_plate.to_xml())
+
 
 def test_plate_to_yaozarrs_v5() -> None:
     """Test plate_to_yaozarrs_v5() conversion."""
-    pytest.importorskip("yaozarrs")
+    pytest.importorskip("yaozarrs", reason="yaozarrs not installed")
     from yaozarrs import v05
 
     # Create a 2x3 plate
@@ -134,18 +138,15 @@ def test_plate_to_yaozarrs_v5() -> None:
     assert acq.maximumfieldcount == 2
 
     # Validate using yaozarrs validation
-    # The yaozarrs Plate object has a model_validate method
-    # We can also convert to dict and validate that way
-    plate_dict = yao_plate.model_dump(exclude_unset=True, by_alias=True)
-    assert "version" in plate_dict
-    assert plate_dict["version"] == "0.5"
-    assert "plate" in plate_dict
+    from yaozarrs import validate_ome_object
+
+    validate_ome_object(yao_plate)
 
 
 def test_plate_minimal() -> None:
     """Test Plate with minimal parameters."""
-    pytest.importorskip("ome_types")
-    pytest.importorskip("yaozarrs")
+    pytest.importorskip("ome_types", reason="ome-types not installed")
+    pytest.importorskip("yaozarrs", reason="yaozarrs not installed")
 
     # Create a minimal plate (no acquisitions, no name, no field_count)
     plate = omew.Plate(
@@ -178,7 +179,7 @@ def test_plate_minimal() -> None:
 
 def test_plate_to_acquire_zarr() -> None:
     """Test plate_to_acquire_zarr() conversion."""
-    pytest.importorskip("acquire_zarr")
+    pytest.importorskip("acquire_zarr", reason="acquire-zarr not installed")
     import acquire_zarr as aqz
 
     # Create a 2x2 plate
@@ -275,7 +276,7 @@ def test_plate_to_acquire_zarr() -> None:
 
 def test_plate_from_useq_basic() -> None:
     """Test basic plate creation from useq.MDASequence."""
-    pytest.importorskip("useq")
+    pytest.importorskip("useq", reason="useq not installed")
     from useq import MDASequence, WellPlatePlan
 
     # Create a simple plate plan with 3 wells
@@ -303,7 +304,7 @@ def test_plate_from_useq_basic() -> None:
 
 def test_plate_from_useq_multiple_fov_per_well() -> None:
     """Test plate with multiple fields of view per well."""
-    pytest.importorskip("useq")
+    pytest.importorskip("useq", reason="useq not installed")
     from useq import GridRowsColumns, MDASequence, WellPlatePlan
 
     # Create a plate plan with 2x2 grid per well
@@ -332,7 +333,7 @@ def test_plate_from_useq_multiple_fov_per_well() -> None:
 
 def test_plate_from_useq_with_time_plan() -> None:
     """Test plate with time acquisition."""
-    pytest.importorskip("useq")
+    pytest.importorskip("useq", reason="useq not installed")
     from useq import MDASequence, TIntervalLoops, WellPlatePlan
 
     plate_plan = WellPlatePlan(
@@ -354,7 +355,7 @@ def test_plate_from_useq_with_time_plan() -> None:
 
 def test_plate_from_useq_different_plate_types() -> None:
     """Test different plate types."""
-    pytest.importorskip("useq")
+    pytest.importorskip("useq", reason="useq not installed")
     from useq import MDASequence, WellPlatePlan
 
     for plate_type in ["6-well", "12-well", "24-well", "48-well", "96-well"]:
@@ -373,7 +374,7 @@ def test_plate_from_useq_different_plate_types() -> None:
 
 def test_plate_from_useq_non_plate_sequence() -> None:
     """Test that non-plate sequences return None."""
-    pytest.importorskip("useq")
+    pytest.importorskip("useq", reason="useq not installed")
     from useq import MDASequence, Position
 
     # Sequence with simple positions (not a plate)
@@ -390,7 +391,7 @@ def test_plate_from_useq_non_plate_sequence() -> None:
 
 def test_plate_from_useq_complex_well_selection() -> None:
     """Test complex well selection patterns."""
-    pytest.importorskip("useq")
+    pytest.importorskip("useq", reason="useq not installed")
     from useq import MDASequence, WellPlatePlan
 
     # Select every other well in first two rows
@@ -420,8 +421,8 @@ def test_plate_from_useq_complex_well_selection() -> None:
 
 def test_plate_from_useq_integration_with_plate_to_yaozarrs() -> None:
     """Test integration with plate_to_yaozarrs_v5."""
-    pytest.importorskip("useq")
-    pytest.importorskip("yaozarrs")
+    pytest.importorskip("useq", reason="useq not installed")
+    pytest.importorskip("yaozarrs", reason="yaozarrs not installed")
     from useq import GridRowsColumns, MDASequence, WellPlatePlan
     from yaozarrs import v05
 
@@ -452,7 +453,7 @@ def test_plate_from_useq_integration_with_plate_to_yaozarrs() -> None:
 
 def test_plate_from_useq_large_plate_with_multi_letter_rows() -> None:
     """Test 1536-well plate with multi-letter row names (A-Z, AA-AF)."""
-    pytest.importorskip("useq")
+    pytest.importorskip("useq", reason="useq not installed")
     from useq import (
         MDASequence,
         WellPlatePlan,
