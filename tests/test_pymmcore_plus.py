@@ -21,6 +21,8 @@ if TYPE_CHECKING:
 
     from pymmcore_plus.metadata import FrameMetaV1, SummaryMetaV1
 
+    from ome_writers._auto import BackendName
+
     from .conftest import AvailableBackend
 
 
@@ -75,7 +77,7 @@ class PYMMCP:
         sequence: useq.MDASequence,
         core: CMMCorePlus,
         dest: Path,
-        backend: str,  # "acquire-zarr", "tensorstore" or "tiff"
+        backend: BackendName,  # "acquire-zarr", "tensorstore" or "tiff"
     ) -> None:
         self._seq = sequence
         self._core = core
