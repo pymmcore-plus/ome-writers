@@ -41,6 +41,8 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         self._futures: list = []
         self._stores: dict[str, tensorstore.TensorStore] = {}  # array_key -> store
         self._delete_existing = True
+        self._plate: Plate | None = None
+        self._plate_position_keys: dict[int, str] = {}
 
     def create(
         self,
@@ -51,16 +53,29 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         *,
         overwrite: bool = False,
     ) -> Self:
-        if plate is not None:
-            raise NotImplementedError(
-                "Plate support is not yet implemented for the tensorstore backend. "
-                "Use acquire-zarr backend for HCS plate support."
-            )
+        # Store plate information
+        self._plate = plate
+        self._plate_position_keys = {}
 
         # Initialize dimensions from MultiPositionOMEStream
         self._init_dimensions(dimensions)
 
         self._delete_existing = overwrite
+
+        # Build position keys for HCS if plate is provided
+        if plate is not None:
+            plate_path = (plate.name or "plate").replace(" ", "_")
+            fields_per_well = plate.field_count or 1
+            pos_idx = 0
+            for well in plate.wells:
+                for field_idx in range(fields_per_well):
+                    if fields_per_well > 1:
+                        fov_key = f"fov{field_idx}"
+                    else:
+                        fov_key = "0"
+                    key = f"{plate_path}/{well.path}/{fov_key}"
+                    self._plate_position_keys[pos_idx] = key
+                    pos_idx += 1
 
         # Pass self._non_position_dims (storage order) to _create_group so metadata
         # matches the actual array dimension order (TCZYX)
@@ -68,7 +83,10 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
 
         # Create stores for each array
         for pos_idx in range(self.num_positions):
-            array_key = str(pos_idx)
+            if self._plate is not None:
+                array_key = self._plate_position_keys[pos_idx]
+            else:
+                array_key = str(pos_idx)
             spec = self._create_spec(dtype, self.storage_order_dims, array_key)
             try:
                 self._stores[array_key] = self._ts.open(spec).result()
@@ -105,7 +123,11 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         self, position_key: str, index: tuple[int, ...], frame: np.ndarray
     ) -> None:
         """TensorStore-specific write implementation."""
-        store = self._stores[position_key]
+        if self._plate is not None and self._plate_position_keys:
+            actual_key = self._plate_position_keys.get(int(position_key), position_key)
+        else:
+            actual_key = position_key
+        store = self._stores[actual_key]
         # Named tuples work directly as indices
         future = store[index].write(frame)  # type: ignore[index]
         self._futures.append(future)
@@ -125,11 +147,21 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         self._group_path.mkdir(parents=True, exist_ok=True)
 
         array_dims: dict[str, Sequence[Dimension]] = {}
-        for pos_idx in range(self.num_positions):
-            array_key = str(pos_idx)
-            self._array_paths[array_key] = self._group_path / array_key
-            # Use dims (non-position dimensions in storage order)
-            array_dims[array_key] = dims
+        if self._plate is not None:
+            # For HCS plates, use the position keys as array keys
+            for array_key in self._plate_position_keys.values():
+                self._array_paths[array_key] = self._group_path / array_key
+                # Ensure parent directories exist
+                self._array_paths[array_key].parent.mkdir(parents=True, exist_ok=True)
+                # Use dims (non-position dimensions in storage order)
+                array_dims[array_key] = dims
+        else:
+            # Standard multi-position mode
+            for pos_idx in range(self.num_positions):
+                array_key = str(pos_idx)
+                self._array_paths[array_key] = self._group_path / array_key
+                # Use dims (non-position dimensions in storage order)
+                array_dims[array_key] = dims
 
         group_zarr = self._group_path / "zarr.json"
         group_meta = {
@@ -140,4 +172,19 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
             },
         }
         group_zarr.write_text(json.dumps(group_meta, indent=2))
+
+        # For HCS plates, create plate-level metadata
+        if self._plate is not None:
+            from ome_writers._plate import plate_to_yaozarrs_v5
+
+            plate_name_sanitized = (self._plate.name or "plate").replace(" ", "_")
+            plate_path = self._group_path / plate_name_sanitized
+            plate_zarr = plate_path / "zarr.json"
+            plate_meta = {
+                "zarr_format": 3,
+                "node_type": "group",
+                "attributes": {"ome": plate_to_yaozarrs_v5(self._plate).model_dump()},
+            }
+            plate_zarr.write_text(json.dumps(plate_meta, indent=2))
+
         return self._group_path

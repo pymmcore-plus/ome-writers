@@ -74,9 +74,6 @@ def test_axis_order_hcs(
     """
     from useq import GridRowsColumns, MDASequence, WellPlatePlan
 
-    if backend.name != "acquire-zarr":
-        pytest.skip("HCS tests currently not supported.")
-
     # Create output path - for TIFF backend, we need to explicitly add .ome.tiff
     # because the backend strips and re-adds extensions
     if backend.file_ext.endswith("tiff"):
