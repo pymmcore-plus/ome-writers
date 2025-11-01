@@ -156,10 +156,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
         pos_idx = 0
         for well in self._plate.wells:
             for field_idx in range(fields_per_well):
-                if fields_per_well > 1:
-                    fov_key = f"fov{field_idx}"
-                else:
-                    fov_key = "0"
+                fov_key = f"fov{field_idx}"
                 key = f"{plate_path}/{well.path}/{fov_key}"
                 self._plate_position_keys[pos_idx] = key
                 pos_idx += 1

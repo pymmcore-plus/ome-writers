@@ -77,9 +77,9 @@ def test_hcs_plate_with_tensorstore(tmp_path: Path) -> None:
     assert well_b01.exists(), "Well B/01 should exist"
 
     # Check field of view exists (single field per well)
-    assert (well_a01 / "0").exists(), "Field 0 in well A/01 should exist"
-    assert (well_a02 / "0").exists(), "Field 0 in well A/02 should exist"
-    assert (well_b01 / "0").exists(), "Field 0 in well B/01 should exist"
+    assert (well_a01 / "fov0").exists(), "Field fov0 in well A/01 should exist"
+    assert (well_a02 / "fov0").exists(), "Field fov0 in well A/02 should exist"
+    assert (well_b01 / "fov0").exists(), "Field fov0 in well B/01 should exist"
 
     # Cleanup
     shutil.rmtree(output_path)
@@ -379,9 +379,9 @@ def test_hcs_metadata_validation_tensorstore(tmp_path: Path) -> None:
     # Verify wells exist for basic structure check
     for well_pos in plate.wells:
         row, col = well_pos.path.split("/")
-        well_dir = plate_dir / row / col / "0"  # Single FOV
+        well_dir = plate_dir / row / col / "fov0"  # Single FOV
 
-        assert well_dir.exists(), f"Well {well_pos.path}/0 should exist"
+        assert well_dir.exists(), f"Well {well_pos.path}/fov0 should exist"
 
     # Cleanup
     shutil.rmtree(output_path)

@@ -29,7 +29,7 @@ output_path = Path("~/Desktop/").expanduser()
 
 # Choose backend: acquire-zarr, tensorstore, or tiff
 backend = "acquire-zarr"
-# backend = "tensorstore". # currently no plate support
+# backend = "tensorstore"
 # backend = "tiff"  # currently no plate support
 
 # Create a simple plate plan with 3 wells, 3 fov per well
@@ -64,13 +64,6 @@ dims = omew.dims_from_useq(
 ext = "tiff" if backend == "tiff" else "zarr"
 path = output_path / f"hcs_{ext}_example.ome.{ext}"
 
-# for now skip tiff and tensorstore backends since plate support is not yet implemented
-if backend in ("tiff", "tensorstore"):
-    raise NotImplementedError(
-        f"Plate support is not yet implemented for the {backend} backend. "
-        "Use acquire-zarr backend for HCS plate support."
-    )
-
 stream = omew.create_stream(
     path=str(path),
     dimensions=dims,
@@ -95,12 +88,6 @@ def _on_sequence_finished(sequence: useq.MDASequence) -> None:
     stream.flush()
     print("Data written successfully to", path)
 
-    # --------------------------------------------------------------------------------
-    # skip tiff and tensorstore for now since plate support is not yet implemented
-    if backend not in ("acquire-zarr"):
-        return
-    # --------------------------------------------------------------------------------
-
     if backend in {"acquire-zarr", "tensorstore"}:
         try:
             from yaozarrs import validate_zarr_store
@@ -109,12 +96,6 @@ def _on_sequence_finished(sequence: useq.MDASequence) -> None:
         else:
             validate_zarr_store(path)
             print("Zarr store validated successfully.")
-
-            # zarr_json_path = path / "96-well" / "zarr.json"
-            # assert zarr_json_path.exists(), "zarr.json should exist at root"
-            # with open(zarr_json_path) as f:
-            #     root_meta = json.load(f)
-            #     validate_ome_json(json.dumps(root_meta))
 
     elif backend == "tiff":
         try:

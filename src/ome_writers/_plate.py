@@ -327,7 +327,7 @@ def plate_to_acquire_zarr(
         # Create field of view entries for this well
         fov_entries = []
         for fov_idx in range(fields_per_well):
-            fov_key = f"fov{fov_idx}" if fields_per_well > 1 else "0"
+            fov_key = f"fov{fov_idx}"
             # Create a new ArraySettings for each FOV to ensure proper configuration
             fov_array = aqz.ArraySettings(
                 output_key=fov_key,
