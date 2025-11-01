@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from contextlib import suppress
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -80,7 +79,8 @@ class PYMMCP:
         self._core.mda.run(self._seq)
 
 
-def test_pymmcore_plus_plate_zarr(tmp_path: Path) -> None:
+@pytest.mark.parametrize("backend", ["acquire-zarr", "tensorstore"])
+def test_pymmcore_plus_plate_zarr(tmp_path: Path, backend: BackendName) -> None:
     """Test pymmcore_plus MDA with WellPlatePlan and acquire-zarr backend."""
     output_path = tmp_path / "acq_z.zarr"
 
@@ -105,7 +105,7 @@ def test_pymmcore_plus_plate_zarr(tmp_path: Path) -> None:
         path=output_path,
         dimensions=dims,
         dtype=np.uint16,
-        backend="acquire-zarr",
+        backend=backend,
         plate=plate,
         overwrite=True,
     )
@@ -119,7 +119,7 @@ def test_pymmcore_plus_plate_zarr(tmp_path: Path) -> None:
         stream.flush()
 
         # validate OME-NGFF JSON at root
-        with suppress(ImportError):
+        try:
             import json
 
             import zarr
@@ -132,6 +132,8 @@ def test_pymmcore_plus_plate_zarr(tmp_path: Path) -> None:
             with open(zarr_json_path) as f:
                 root_meta = json.load(f)
                 validate_ome_json(json.dumps(root_meta))
+        except ImportError:
+            pytest.skip("yaozarrs not installed, skipping OME-NGFF validation.")
 
     core = CMMCorePlus()
     core.loadSystemConfiguration()

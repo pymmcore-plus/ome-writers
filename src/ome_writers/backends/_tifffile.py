@@ -86,8 +86,7 @@ class TifffileStream(MultiPositionOMEStream):
     ) -> Self:
         if plate is not None:
             raise NotImplementedError(
-                "Plate support is not yet implemented for the tifffile backend. "
-                "Use acquire-zarr or tensorstore backends for HCS plate support."
+                "Plate support is not yet implemented for the tifffile backend."
             )
 
         # Initialize dimensions from MultiPositionOMEStream

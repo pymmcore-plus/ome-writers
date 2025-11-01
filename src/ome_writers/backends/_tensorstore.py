@@ -55,7 +55,7 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
     ) -> Self:
         # Store plate information
         self._plate = plate
-        self._plate_position_keys = {}
+        self._plate_position_keys.clear()
 
         # Initialize dimensions from MultiPositionOMEStream
         self._init_dimensions(dimensions)
