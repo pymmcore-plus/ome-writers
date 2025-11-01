@@ -195,29 +195,69 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
 
         In Zarr v3, every directory in the hierarchy must be a recognized zarr node.
         This method creates minimal group metadata for row-level (e.g., 'A/', 'B/')
-        and well-level (e.g., '01/', '02/') directories.
+        and proper well metadata for well-level (e.g., '01/', '02/') directories.
         """
         if self._plate is None or self._group_path is None:
             return
 
         # Get all unique parent directories from array paths
-        intermediate_dirs: set[Path] = set()
-        for array_path in self._array_paths.values():
-            # Get all parents between the group path and the array
-            current = array_path.parent
-            while current != self._group_path and current.is_relative_to(
-                self._group_path
-            ):
-                intermediate_dirs.add(current)
-                current = current.parent
+        # and organize them by well path
+        well_to_fovs: dict[Path, list[str]] = {}
+        row_dirs: set[Path] = set()
 
-        # Create minimal group metadata for each intermediate directory
+        plate_name_sanitized = (self._plate.name or "plate").replace(" ", "_")
+        plate_path = self._group_path / plate_name_sanitized
+
+        for _pos_idx, array_key in self._plate_position_keys.items():
+            array_path = self._array_paths[array_key]
+            # array_key looks like: "96-well/A/01/fov0"
+            # array_path looks like: /path/to/96-well/A/01/fov0
+
+            # Get the well directory (parent of FOV)
+            well_dir = array_path.parent
+            # Get the FOV name
+            fov_name = array_path.name
+
+            if well_dir not in well_to_fovs:
+                well_to_fovs[well_dir] = []
+            well_to_fovs[well_dir].append(fov_name)
+
+            # Track row directories (parent of well)
+            row_dir = well_dir.parent
+            if row_dir != plate_path:
+                row_dirs.add(row_dir)
+
+        # Create minimal group metadata for row directories
         minimal_group_meta = {
             "zarr_format": 3,
             "node_type": "group",
         }
 
-        for dir_path in intermediate_dirs:
-            zarr_json = dir_path / "zarr.json"
+        for row_dir in row_dirs:
+            zarr_json = row_dir / "zarr.json"
             if not zarr_json.exists():
                 zarr_json.write_text(json.dumps(minimal_group_meta, indent=2))
+
+        # Create well metadata for well directories
+        for well_dir, fov_names in well_to_fovs.items():
+            zarr_json = well_dir / "zarr.json"
+            if not zarr_json.exists():
+                # Sort FOV names for consistent ordering
+                fov_names_sorted = sorted(fov_names)
+                well_meta = {
+                    "zarr_format": 3,
+                    "node_type": "group",
+                    "attributes": {
+                        "ome": {
+                            "version": "0.5",
+                            "well": {
+                                "images": [
+                                    {"acquisition": 0, "path": fov_name}
+                                    for fov_name in fov_names_sorted
+                                ],
+                                "version": "0.5",
+                            },
+                        }
+                    },
+                }
+                zarr_json.write_text(json.dumps(well_meta, indent=2))
