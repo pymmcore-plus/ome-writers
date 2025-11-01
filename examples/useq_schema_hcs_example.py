@@ -4,7 +4,6 @@ from contextlib import suppress
 from pathlib import Path
 
 import numpy as np
-from pytest import skip
 
 import ome_writers as omew
 
@@ -70,13 +69,6 @@ for event in seq:
 stream.flush()
 
 print("Data written successfully to", output_path / f"{ext}_example.ome.{ext}")
-
-
-# --------------------------------------------------------------------------------
-# skip tiff and tensorstore for now since plate support is not yet implemented
-if backend not in ("acquire-zarr"):
-    skip("Plate support is not yet implemented for this backend.")
-# --------------------------------------------------------------------------------
 
 if backend in {"acquire-zarr", "tensorstore"}:
     with suppress(ImportError):
