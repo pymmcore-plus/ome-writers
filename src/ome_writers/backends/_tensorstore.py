@@ -184,4 +184,40 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
             }
             plate_zarr.write_text(json.dumps(plate_meta, indent=2))
 
+            # Create intermediate group metadata for row and well directories
+            # This is required for Zarr v3 - every group in the hierarchy needs metadata
+            self._create_intermediate_groups()
+
         return self._group_path
+
+    def _create_intermediate_groups(self) -> None:
+        """Create zarr.json metadata for intermediate HCS groups (rows and wells).
+
+        In Zarr v3, every directory in the hierarchy must be a recognized zarr node.
+        This method creates minimal group metadata for row-level (e.g., 'A/', 'B/')
+        and well-level (e.g., '01/', '02/') directories.
+        """
+        if self._plate is None or self._group_path is None:
+            return
+
+        # Get all unique parent directories from array paths
+        intermediate_dirs: set[Path] = set()
+        for array_path in self._array_paths.values():
+            # Get all parents between the group path and the array
+            current = array_path.parent
+            while current != self._group_path and current.is_relative_to(
+                self._group_path
+            ):
+                intermediate_dirs.add(current)
+                current = current.parent
+
+        # Create minimal group metadata for each intermediate directory
+        minimal_group_meta = {
+            "zarr_format": 3,
+            "node_type": "group",
+        }
+
+        for dir_path in intermediate_dirs:
+            zarr_json = dir_path / "zarr.json"
+            if not zarr_json.exists():
+                zarr_json.write_text(json.dumps(minimal_group_meta, indent=2))

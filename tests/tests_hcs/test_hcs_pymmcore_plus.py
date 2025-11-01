@@ -125,8 +125,9 @@ def test_pymmcore_plus_plate_zarr(tmp_path: Path, backend: BackendName) -> None:
             import zarr
             from yaozarrs import validate_ome_json
 
-            zarr.open_group(output_path, mode="r")
-            # TODO: figure out what is the validation error
+            z = zarr.open_group(output_path, mode="r")
+            print(z.tree())
+
             zarr_json_path = output_path / "zarr.json"
             assert zarr_json_path.exists(), "zarr.json should exist at root"
             with open(zarr_json_path) as f:
