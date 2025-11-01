@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import threading
+import uuid
 import warnings
 from contextlib import suppress
 from itertools import count
@@ -13,6 +14,7 @@ from typing import TYPE_CHECKING
 from typing_extensions import Self
 
 from ome_writers._dimensions import dims_to_ome
+from ome_writers._plate import plate_to_ome_types
 from ome_writers._stream_base import MultiPositionOMEStream
 
 if TYPE_CHECKING:
@@ -71,6 +73,7 @@ class TifffileStream(MultiPositionOMEStream):
         # Using dictionaries to handle multi-position ('p') acquisitions
         self._threads: dict[int, WriterThread] = {}
         self._queues: dict[int, Queue[np.ndarray | None]] = {}
+        self._plate: Plate | None = None
         self._is_active = False
 
     # ------------------------PUBLIC METHODS------------------------ #
@@ -84,11 +87,8 @@ class TifffileStream(MultiPositionOMEStream):
         *,
         overwrite: bool = False,
     ) -> Self:
-        if plate is not None:
-            raise NotImplementedError(
-                "Plate support is not yet implemented for the tifffile backend. "
-                "Use acquire-zarr or tensorstore backends for HCS plate support."
-            )
+        # Store plate information
+        self._plate = plate
 
         # Initialize dimensions from MultiPositionOMEStream
         # NOTE: since OME-TIFF can store data in any order, we do not enforce
@@ -101,12 +101,44 @@ class TifffileStream(MultiPositionOMEStream):
 
         fnames = self._prepare_files(self._path, self.num_positions, overwrite)
 
+        # Create the base OME metadata
+        base_ome = dims_to_ome(dimensions, dtype=dtype, tiff_file_name=None)
+
+        # Add plate metadata if provided
+        if plate is not None:
+            ome_plate = plate_to_ome_types(plate)
+            base_ome.plates = [ome_plate]
+
         # Create a memmap for each position
         for p_idx, fname in enumerate(fnames):
-            ome = dims_to_ome(
-                self.storage_order_dims, dtype=dtype, tiff_file_name=fname
-            )
-            # TODO: add plate logic here...
+            # Create position-specific OME metadata
+            ome = _create_position_specific_ome(p_idx, base_ome)
+
+            # Add TiffData for this file
+            image = ome.images[0]
+            if not image.pixels.tiff_data_blocks:
+                image.pixels.tiff_data_blocks = []
+
+            # Create TiffData for each plane
+            ifd = 0
+            for plane in image.pixels.planes:
+                tiff_data = self._ome.TiffData(
+                    ifd=ifd,
+                    uuid=self._ome.TiffData.UUID(
+                        value=f"urn:uuid:{uuid.uuid4()}", file_name=fname
+                    ),
+                    first_c=plane.the_c,
+                    first_z=plane.the_z,
+                    first_t=plane.the_t,
+                    plane_count=1,
+                )
+                image.pixels.tiff_data_blocks.append(tiff_data)
+                ifd += 1
+
+            # Remove metadata_only if present
+            if hasattr(image.pixels, "metadata_only") and image.pixels.metadata_only:
+                image.pixels.metadata_only = None
+
             self._queues[p_idx] = q = Queue()  # type: ignore
             self._threads[p_idx] = thread = WriterThread(
                 fname,

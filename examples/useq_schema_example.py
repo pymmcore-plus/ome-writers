@@ -20,8 +20,8 @@ output_path = Path("~/Desktop/").expanduser()
 
 # Choose backend: acquire-zarr, tensorstore, or tiff
 # backend = "acquire-zarr"
-# backend = "tensorstore"
-backend = "tiff"
+backend = "tensorstore"
+# backend = "tiff"
 
 # Create a MDASequence. NOTE: the axis_order determines the order in which frames will
 # be appended to the stream.
