@@ -62,10 +62,14 @@ print("Data written successfully to", output_path / f"{ext}_example.ome.{ext}")
 
 if backend in {"acquire-zarr", "tensorstore"}:
     try:
+        import zarr
         from yaozarrs import validate_zarr_store
     except ImportError:
-        print("yaozarrs is not installed; skipping Zarr validation.")
+        print("yaozarrs or zarr is not installed; skipping Zarr validation.")
     else:
+        z = zarr.open_group(path, mode="r")
+        print(z.tree())
+
         validate_zarr_store(path)
         print("Zarr store validated successfully.")
 
