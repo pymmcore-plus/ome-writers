@@ -25,7 +25,7 @@ except ImportError as e:
 
 # --------------------------CONFIGURATION SECTION--------------------------#
 # Define output path
-output_path = Path("~/Desktop/").expanduser()
+output_path = Path("example_pymmp_hcs.zarr")
 
 # Choose backend: acquire-zarr, tensorstore, or tiff
 backend = "acquire-zarr"
