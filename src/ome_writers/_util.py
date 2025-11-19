@@ -1,19 +1,21 @@
 from __future__ import annotations
 
+import re
 from itertools import product
 from typing import TYPE_CHECKING, cast, get_args
 
 import numpy as np
 import numpy.typing as npt
 
-from ome_writers import Dimension, DimensionLabel
+from ._dimensions import Dimension, DimensionLabel
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Iterator, Mapping, Sequence
 
     import useq
 
-    from ome_writers import UnitTuple
+    from ._dimensions import UnitTuple
+    from ._plate import Plate
 
 
 VALID_LABELS = get_args(DimensionLabel)
@@ -25,6 +27,7 @@ DEFAULT_UNITS: Mapping[DimensionLabel, UnitTuple | None] = {
     "c": None,
     "p": None,
 }
+OME_NGFF_ORDER = {"t": 0, "c": 1, "z": 2, "y": 3, "x": 4}
 
 
 def fake_data_for_sizes(
@@ -167,3 +170,217 @@ def dims_from_useq(
         Dimension(label="y", size=image_height, unit=_units["y"]),
         Dimension(label="x", size=image_width, unit=_units["x"]),
     ]
+
+
+def plate_from_useq(seq: useq.MDASequence) -> Plate | None:
+    """Convert a useq.MDASequence useq.WellPlatePlan to an ome-writers Plate.
+
+    Parameters
+    ----------
+    seq : useq.MDASequence
+        The `useq.MDASequence` to extract plate metadata from.
+
+    Returns
+    -------
+    Plate | None
+        A Plate object if the sequence uses a WellPlatePlan for stage positions,
+        otherwise None.
+
+    Examples
+    --------
+    ```python
+    from useq import MDASequence, WellPlatePlan
+    from ome_writers import plate_from_useq
+
+    plate_plan = WellPlatePlan(
+        plate="96-well",
+        a1_center_xy=(0.0, 0.0),
+        selected_wells=([0, 0, 1], [0, 1, 0]),  # A1, A2, B1
+    )
+    seq = MDASequence(stage_positions=plate_plan)
+    plate = plate_from_useq(seq)
+    # plate will contain the well layout information
+    ```
+    """
+    try:
+        from useq import MDASequence, WellPlatePlan
+    except ImportError:
+        raise ValueError("seq must be a useq.MDASequence") from None
+    else:
+        if not isinstance(seq, MDASequence):
+            raise ValueError("seq must be a useq.MDASequence")
+
+    from ome_writers import Plate, PlateAcquisition, WellPosition
+
+    # check if stage_positions is a WellPlatePlan
+    if not isinstance(seq.stage_positions, WellPlatePlan):
+        return None
+
+    plate_plan: WellPlatePlan = seq.stage_positions
+
+    # get selected well names and corresponding indices from the plan
+    wells: list[WellPosition] = []
+    well_set = set()
+    names = plate_plan.selected_well_names
+    indices = plate_plan.selected_well_indices
+
+    for name, idx in zip(names, indices, strict=True):
+        row_index, col_index = int(idx[0]), int(idx[1])  # e.g. 30, 32
+        row_letter, col_name = split_well_id(name)  # name e.g. AE33
+        if row_letter is None or col_name is None:
+            raise ValueError(f"Invalid well name: {name}")
+        well_key = (row_index, col_index)
+        if well_key not in well_set:
+            well_set.add(well_key)
+            path = f"{row_letter}/{col_name}"
+            wells.append(
+                WellPosition(path=path, row_index=row_index, column_index=col_index)
+            )
+
+    # Extract unique row labels from the first column of well names
+    # all_well_names is 2D: [[A1, A2, ...], [B1, B2, ...], ...]
+    # Extract just the row letter(s) from each first element
+    rows = []
+    for name in plate_plan.plate.all_well_names[:, 0]:
+        row_label, _ = split_well_id(name)
+        if row_label is None:
+            raise ValueError(f"Invalid well name in plate definition: {name}")
+        rows.append(row_label)
+    num_cols = plate_plan.plate.columns
+    # Create column labels (01, 02, 03, ...)
+    columns = [str(i + 1).zfill(2) for i in range(num_cols)]
+
+    field_count = plate_plan.num_points_per_well
+
+    acquisitions = [
+        PlateAcquisition(
+            id=0,
+            name="Acquisition 1",
+            maximum_field_count=field_count,
+        )
+    ]
+
+    return Plate(
+        rows=rows,
+        columns=columns,
+        wells=wells,
+        name=plate_plan.plate.name,
+        field_count=field_count if field_count > 1 else None,
+        acquisitions=acquisitions,
+    )
+
+
+def split_well_id(well: str) -> tuple[str | None, str | None]:
+    """Split a well ID into its row letter(s) and column name."""
+    match = re.match(r"([A-Z]+)(\d+)$", well, re.I)
+    if match is None:
+        return None, None
+    if match.groups():
+        row_letter, col_name = match.groups()
+        if len(col_name) == 1:
+            col_name = col_name.zfill(2)
+        return row_letter, col_name
+    return None, None
+
+
+def reorder_to_ome_ngff(dims_order: list[Dimension]) -> list[Dimension]:
+    """Reorder dimensions to OME-NGFF TCZYX order."""
+    dims_order.sort(key=lambda d: OME_NGFF_ORDER.get(d.label, 5))
+    return dims_order
+
+
+class DimensionIndexIterator:
+    """Iterator that yields frame indices in acquisition order, formatted for storage.
+
+    Takes dimensions in acquisition order and yields (position_key, index_tuple)
+    where index_tuple contains non-spatial dimension indices in storage order (i.e. as
+    saved on disk).
+
+    Frames are yielded in acquisition sequence, but index_tuples are formatted according
+    to storage_order_dimensions. For example, if storage_order_dimensions is
+    ["t", "c", "z"], then index_tuple will be (t_index, c_index, z_index).
+
+    When no position dimension exists, position_key is 0 for all frames.
+
+    Notes
+    -----
+    - storage_order_dimensions must not include "y", "x", or position label (the
+    `position_key` argument)
+    - index_tuple is ordered by storage_order_dimensions, not acquisition order
+
+    Parameters
+    ----------
+    acquisition_order_dimensions : Sequence[Dimension]
+        Dimensions in acquisition order (slowest to fastest varying).
+        May include position dimension.
+    storage_order_dimensions : Sequence[DimensionLabel]
+        Labels for non-spatial dims in desired storage order (e.g. ["t", "c", "z"]).
+        Must not include "y", "x", or position label (the `position_key` argument).
+    position_key : DimensionLabel, optional
+        Label for position dimension. Defaults to "p".
+
+    Examples
+    --------
+    >>> dims = [
+    ...     Dimension(label="t", size=2, unit=(1.0, "s"), chunk_size=1),
+    ...     Dimension(label="p", size=2, unit=None, chunk_size=1),
+    ...     Dimension(label="z", size=3, unit=(1.0, "um"), chunk_size=1),
+    ...     Dimension(label="c", size=2, unit=None, chunk_size=1),
+    ...     Dimension(label="y", size=32, unit=None, chunk_size=1),
+    ...     Dimension(label="x", size=32, unit=None, chunk_size=1),
+    ... ]
+    >>> it = DimensionIndexIterator(dims, storage_order_dimensions=["t", "c", "z"])
+    >>> list(it)[:3]
+    [(0, (0, 0, 0)), (0, (0, 1, 0)), (0, (0, 0, 1))]
+    """
+
+    def __init__(
+        self,
+        acquisition_order_dimensions: Sequence[Dimension],
+        storage_order_dimensions: Sequence[DimensionLabel],
+        position_key: DimensionLabel = "p",
+    ) -> None:
+        # 1) Validate storage labels
+        forbidden = {"y", "x", position_key}  # forbidden: spatial + position dims
+        if forbidden & set(storage_order_dimensions):
+            raise ValueError(
+                "storage_order_dimensions should not include 'y', 'x', or "
+                f"{position_key}."
+            )
+
+        # Build the desired output order: position first, then storage dims
+        needed_labels = {position_key, *storage_order_dimensions}
+
+        # Filter dimensions to those in output order, preserving acquisition order
+        acq_order_dims = acquisition_order_dimensions
+        self._iter_dims = [d for d in acq_order_dims if d.label in needed_labels]
+
+        # Compute shape tuple for iteration in acquisition order
+        self._shape = tuple(d.size for d in self._iter_dims)
+
+        # Precompute label→index mapping
+        acq_labels = [d.label for d in self._iter_dims]
+
+        # Get position index from acquisition dims if present
+        p_key = position_key
+        self._pos_idx = acq_labels.index(p_key) if p_key in acq_labels else None
+
+        # Get storage indices from acquisition dims
+        sod = storage_order_dimensions
+        self._stor_idx = [acq_labels.index(lbl) for lbl in sod if lbl in acq_labels]
+
+    def __iter__(self) -> Iterator[tuple[int, tuple]]:
+        """Yield indices in acquisition order, formatted in output order."""
+        if not self._shape:
+            return
+
+        # Iterate over all acquisition indices
+        for acq_idx in np.ndindex(*self._shape):
+            # Extract position index
+            pos = int(acq_idx[self._pos_idx]) if self._pos_idx is not None else 0
+            # Build storage-ordered tuple from acquisition indices
+            out = tuple(int(acq_idx[i]) for i in self._stor_idx)
+            yield pos, out
+
+    def __len__(self) -> int:
+        return int(np.prod(self._shape)) if self._shape else 0

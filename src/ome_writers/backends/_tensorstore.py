@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from typing_extensions import Self
 
-from ome_writers._ngff_metadata import ome_meta_v5
+from ome_writers._dimensions import dims_to_yaozarrs_v5
 from ome_writers._stream_base import MultiPositionOMEStream
 
 if TYPE_CHECKING:
@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     import numpy as np
 
     from ome_writers._dimensions import Dimension
+    from ome_writers._plate import Plate
 
 
 class TensorStoreZarrStream(MultiPositionOMEStream):
@@ -40,25 +41,50 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         self._futures: list = []
         self._stores: dict[str, tensorstore.TensorStore] = {}  # array_key -> store
         self._delete_existing = True
+        self._plate: Plate | None = None
+        self._plate_position_keys: dict[int, str] = {}
 
     def create(
         self,
         path: str,
         dtype: np.dtype,
         dimensions: Sequence[Dimension],
+        plate: Plate | None = None,
         *,
         overwrite: bool = False,
     ) -> Self:
-        # Use MultiPositionOMEStream to handle position logic
-        num_positions, non_position_dims = self._init_positions(dimensions)
+        # Store plate information
+        self._plate = plate
+        self._plate_position_keys.clear()
+
+        # Initialize dimensions from MultiPositionOMEStream
+        self._init_dimensions(dimensions)
+
         self._delete_existing = overwrite
 
-        self._create_group(self._normalize_path(path), dimensions)
+        # Build position keys for HCS if plate is provided
+        if plate is not None:
+            plate_path = (plate.name or "plate").replace(" ", "_")
+            fields_per_well = plate.field_count or 1
+            pos_idx = 0
+            for well in plate.wells:
+                for field_idx in range(fields_per_well):
+                    fov_key = f"fov{field_idx}"
+                    key = f"{plate_path}/{well.path}/{fov_key}"
+                    self._plate_position_keys[pos_idx] = key
+                    pos_idx += 1
+
+        # Pass self._non_position_dims (storage order) to _create_group so metadata
+        # matches the actual array dimension order (TCZYX)
+        self._create_group(self._normalize_path(path), self.storage_order_dims)
 
         # Create stores for each array
-        for pos_idx in range(num_positions):
-            array_key = str(pos_idx)
-            spec = self._create_spec(dtype, non_position_dims, array_key)
+        for pos_idx in range(self.num_positions):
+            if self._plate is not None:
+                array_key = self._plate_position_keys[pos_idx]
+            else:
+                array_key = str(pos_idx)
+            spec = self._create_spec(dtype, self.storage_order_dims, array_key)
             try:
                 self._stores[array_key] = self._ts.open(spec).result()
             except ValueError as e:
@@ -70,7 +96,6 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
                     ) from e
                 else:
                     raise
-
         return self
 
     def _create_spec(
@@ -92,10 +117,15 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         }
 
     def _write_to_backend(
-        self, array_key: str, index: tuple[int, ...], frame: np.ndarray
+        self, position_key: str, index: tuple[int, ...], frame: np.ndarray
     ) -> None:
         """TensorStore-specific write implementation."""
-        store = self._stores[array_key]
+        if self._plate is not None and self._plate_position_keys:
+            actual_key = self._plate_position_keys.get(int(position_key), position_key)
+        else:
+            actual_key = position_key
+        store = self._stores[actual_key]
+        # Named tuples work directly as indices
         future = store[index].write(frame)  # type: ignore[index]
         self._futures.append(future)
 
@@ -113,25 +143,121 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         self._group_path = Path(path)
         self._group_path.mkdir(parents=True, exist_ok=True)
 
-        # Determine array keys and dimensions based on position dimension
-        position_dims = [d for d in dims if d.label == "p"]
-        non_position_dims = [d for d in dims if d.label != "p"]
-
-        # Determine number of positions (1 if no position dimension)
-        num_positions = position_dims[0].size if position_dims else 1
-
         array_dims: dict[str, Sequence[Dimension]] = {}
-        for pos_idx in range(num_positions):
-            array_key = str(pos_idx)
-            self._array_paths[array_key] = self._group_path / array_key
-            # Use non_position_dims for multi-pos, full dims for single pos
-            array_dims[array_key] = non_position_dims if self._position_dim else dims
+        if self._plate is not None:
+            # For HCS plates, use the position keys as array keys
+            for array_key in self._plate_position_keys.values():
+                self._array_paths[array_key] = self._group_path / array_key
+                # Ensure parent directories exist
+                self._array_paths[array_key].parent.mkdir(parents=True, exist_ok=True)
+                # Use dims (non-position dimensions in storage order)
+                array_dims[array_key] = dims
+        else:
+            # Standard multi-position mode
+            for pos_idx in range(self.num_positions):
+                array_key = str(pos_idx)
+                self._array_paths[array_key] = self._group_path / array_key
+                # Use dims (non-position dimensions in storage order)
+                array_dims[array_key] = dims
 
         group_zarr = self._group_path / "zarr.json"
         group_meta = {
             "zarr_format": 3,
             "node_type": "group",
-            "attributes": ome_meta_v5(array_dims=array_dims),
+            "attributes": {
+                "ome": dims_to_yaozarrs_v5(array_dims=array_dims).model_dump()
+            },
         }
         group_zarr.write_text(json.dumps(group_meta, indent=2))
+
+        # For HCS plates, create plate-level metadata
+        if self._plate is not None:
+            from ome_writers._plate import plate_to_yaozarrs_v5
+
+            plate_name_sanitized = (self._plate.name or "plate").replace(" ", "_")
+            plate_path = self._group_path / plate_name_sanitized
+            plate_zarr = plate_path / "zarr.json"
+            plate_meta = {
+                "zarr_format": 3,
+                "node_type": "group",
+                "attributes": {"ome": plate_to_yaozarrs_v5(self._plate).model_dump()},
+            }
+            plate_zarr.write_text(json.dumps(plate_meta, indent=2))
+
+            # Create intermediate group metadata for row and well directories
+            # This is required for Zarr v3 - every group in the hierarchy needs metadata
+            self._create_intermediate_groups()
+
         return self._group_path
+
+    def _create_intermediate_groups(self) -> None:
+        """Create zarr.json metadata for intermediate HCS groups (rows and wells).
+
+        In Zarr v3, every directory in the hierarchy must be a recognized zarr node.
+        This method creates minimal group metadata for row-level (e.g., 'A/', 'B/')
+        and proper well metadata for well-level (e.g., '01/', '02/') directories.
+        """
+        if self._plate is None or self._group_path is None:
+            return
+
+        # Get all unique parent directories from array paths
+        # and organize them by well path
+        well_to_fovs: dict[Path, list[str]] = {}
+        row_dirs: set[Path] = set()
+
+        plate_name_sanitized = (self._plate.name or "plate").replace(" ", "_")
+        plate_path = self._group_path / plate_name_sanitized
+
+        for _pos_idx, array_key in self._plate_position_keys.items():
+            array_path = self._array_paths[array_key]
+            # array_key looks like: "96-well/A/01/fov0"
+            # array_path looks like: /path/to/96-well/A/01/fov0
+
+            # Get the well directory (parent of FOV)
+            well_dir = array_path.parent
+            # Get the FOV name
+            fov_name = array_path.name
+
+            if well_dir not in well_to_fovs:
+                well_to_fovs[well_dir] = []
+            well_to_fovs[well_dir].append(fov_name)
+
+            # Track row directories (parent of well)
+            row_dir = well_dir.parent
+            if row_dir != plate_path:
+                row_dirs.add(row_dir)
+
+        # Create minimal group metadata for row directories
+        minimal_group_meta = {
+            "zarr_format": 3,
+            "node_type": "group",
+        }
+
+        for row_dir in row_dirs:
+            zarr_json = row_dir / "zarr.json"
+            if not zarr_json.exists():
+                zarr_json.write_text(json.dumps(minimal_group_meta, indent=2))
+
+        # Create well metadata for well directories
+        for well_dir, fov_names in well_to_fovs.items():
+            zarr_json = well_dir / "zarr.json"
+            if not zarr_json.exists():
+                # Sort FOV names for consistent ordering
+                fov_names_sorted = sorted(fov_names)
+                well_meta = {
+                    "zarr_format": 3,
+                    "node_type": "group",
+                    "attributes": {
+                        "ome": {
+                            "version": "0.5",
+                            "well": {
+                                "images": [
+                                    {"acquisition": 0, "path": fov_name}
+                                    for fov_name in fov_names_sorted
+                                ],
+                                "version": "0.5",
+                            },
+                        }
+                    },
+                }
+                zarr_json.write_text(json.dumps(well_meta, indent=2))
