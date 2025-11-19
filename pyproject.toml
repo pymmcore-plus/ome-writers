@@ -61,6 +61,7 @@ dev = [
     "ruff>=0.13.0",
     "tensorstore-stubs>=0.1.2",
     "yaozarrs[io]>=0.0.1rc2",
+    "zarr>=2.18.3",
 ]
 
 [project.urls]
