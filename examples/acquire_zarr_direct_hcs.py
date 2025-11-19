@@ -6,8 +6,6 @@ import acquire_zarr as aqz
 import numpy as np
 import zarr
 
-output = Path("~/Desktop/acq_z_hcs_direct.zarr").expanduser()
-
 
 # Configure field of view arrays (matching ngff_zarr_hcs_pymmc_example.py specs)
 # Specs:
@@ -55,6 +53,7 @@ def create_fov_array(fov_name: str) -> aqz.ArraySettings:
     )
 
 
+output = Path("example_az_hcs.zarr").expanduser()
 # Create acquisition metadata
 acquisition = aqz.Acquisition(id=0, name="Measurement_01")
 
