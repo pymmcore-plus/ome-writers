@@ -110,3 +110,5 @@ ENV/
 .vscode/
 .idea/
 uv.lock
+
+example*.zarr

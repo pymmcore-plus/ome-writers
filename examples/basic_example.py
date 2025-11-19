@@ -13,7 +13,7 @@ plane_iter, dims, dtype = fake_data_for_sizes(
     chunk_sizes={"y": 64, "x": 64},
 )
 
-OUT = Path("~/Desktop/some_path_ts.zarr").expanduser()
+OUT = Path("example.zarr").expanduser()
 stream = create_stream(
     OUT,
     dtype,
