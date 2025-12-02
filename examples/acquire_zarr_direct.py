@@ -14,7 +14,7 @@ from acquire_zarr import (
     ZarrVersion,
 )
 
-output = Path("~/Desktop/some_path_ts.zarr").expanduser()
+output = Path("acquire_zarr_direct.zarr").expanduser()
 
 # TCZYX
 dtype = np.dtype("uint16")

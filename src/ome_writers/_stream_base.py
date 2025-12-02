@@ -126,31 +126,26 @@ class MultiPositionOMEStream(OMEStream):
         This method performs two related tasks:
 
         1) Define the shape and logical ordering that will be used to store the
-           multi-dimensional dataset on disk.
+           multi-dimensional dataset on disk. The acquisition order is preserved and the
+           shape of the data written to disk will follow the acquisition order.
 
-           The acquisition order is preserved and the shape of the data written to disk
-           will follow the acquisition order. This is useful for sequential writers
-           such as OME-TIFF where enforcing TCZYX is not strictly required, and for
-           Zarr backends that can use transpose codecs to indicate the transformation
-           needed to read data in OME-NGFF TCZYX order.
+        2) Build an iterator that yields per-frame indices in acquisition order.
+           The iterator `self._dim_iter` yields tuples `(position_key, index_tuple)`
+           where `position_key` is an integer identifying the position, and
+           `index_tuple` contains the indices for the non-spatial axes in acquisition
+           order (e.g., `(t, c, z)` or `(c, t, z)` depending on the acquisition).
+           This allows the stream to correctly place each incoming frame in the
+           correct location of the storage array.
 
-        2) Build an iterator that yields per-frame indices in acquisition order but
-           formatted for storage indexing. The iterator `self._dim_iter` yields tuples
-           `(position_key, index_tuple)` where `position_key` is an integer identifying
-           the position, and `index_tuple` contains the storage indices for the
-           non-spatial axes (e.g., `(t, c, z)`). This allows the stream to correctly
-           place each incoming frame in the correct location of the storage array.
-
-        Properties
-        ----------
+        Properties Set
+        --------------
         num_positions : int
             The number of positions in the stream.
         storage_order_dims : Sequence[Dimension]
-            The non-position dimensions in storage order (as stored on disk - follows
-            acquisition order).
+            The non-position dimensions in acquisition/storage order (data is stored
+            exactly as acquired).
         dim_iter : Iterator[tuple[int, tuple[int, ...]]]
-            An iterator over (position_key, index_tuple) tuples in acquisition order,
-            where index_tuple is ordered according to storage_order_dims.
+            An iterator over (position_key, index_tuple) tuples in acquisition order.
 
         Parameters
         ----------
@@ -182,7 +177,11 @@ class MultiPositionOMEStream(OMEStream):
 
     @property
     def storage_order_dims(self) -> Sequence[Dimension]:
-        """Return the non-position dimensions in storage order (as stored on disk)."""
+        """Return the non-position dimensions in acquisition/storage order.
+
+        Since data is stored in acquisition order, this returns the dimensions
+        exactly as they were provided (excluding position 'p' dimension).
+        """
         return self._storage_order_dims
 
     @property
@@ -208,8 +207,9 @@ class MultiPositionOMEStream(OMEStream):
         position_key : str
             The key for the position in the backend (e.g., Zarr group).
         index : tuple[int, ...]
-            A tuple of storage indices for the non-spatial dimensions (e.g., (t, c, z))
-            in storage order. Can be used directly for array indexing.
+            A tuple of indices for the non-spatial dimensions in acquisition order
+            (e.g., (t, c, z) or (c, t, z) depending on how dimensions were defined).
+            Can be used directly for array indexing.
         frame : np.ndarray
             The frame data to write.
 
