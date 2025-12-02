@@ -170,22 +170,16 @@ def dims_from_useq(
     ]
 
 
-def reorder_to_ome_ngff(dims_order: list[Dimension]) -> list[Dimension]:
-    """Reorder dimensions to OME-NGFF TCZYX order."""
-    dims_order.sort(key=lambda d: OME_NGFF_ORDER.get(d.label, 5))
-    return dims_order
-
-
 class DimensionIndexIterator:
-    """Iterator that yields frame indices in acquisition order, formatted for storage.
+    """Iterator that yields frame indices in acquisition order.
 
     Takes dimensions in acquisition order and yields (position_key, index_tuple)
-    where index_tuple contains non-spatial dimension indices in storage order (i.e. as
-    saved on disk).
+    where index_tuple contains non-spatial dimension indices in acquisition order
+    (excluding position and spatial dimensions).
 
-    Frames are yielded in acquisition sequence, but index_tuples are formatted according
-    to storage_order_dimensions. For example, if storage_order_dimensions is
-    ["t", "c", "z"], then index_tuple will be (t_index, c_index, z_index).
+    Frames are yielded in acquisition sequence, with index_tuples preserving that
+    order. For example, if acquisition order is ["t", "p", "z", "c"], then
+    index_tuple will be (t_index, z_index, c_index) for each frame.
 
     When no position dimension exists, position_key is 0 for all frames.
 
@@ -193,7 +187,9 @@ class DimensionIndexIterator:
     -----
     - storage_order_dimensions must not include "y", "x", or position label (the
     `position_key` argument)
-    - index_tuple is ordered by storage_order_dimensions, not acquisition order
+    - Since data is stored in acquisition order, storage_order_dimensions should
+    match the non-spatial acquisition dimensions (excluding position)
+    - index_tuple preserves acquisition order of the dimensions
 
     Parameters
     ----------
@@ -201,8 +197,9 @@ class DimensionIndexIterator:
         Dimensions in acquisition order (slowest to fastest varying).
         May include position dimension.
     storage_order_dimensions : Sequence[DimensionLabel]
-        Labels for non-spatial dims in desired storage order (e.g. ["t", "c", "z"]).
-        Must not include "y", "x", or position label (the `position_key` argument).
+        Labels for non-spatial dims in acquisition order (excluding position),
+        e.g. ["t", "z", "c"]. Must not include "y", "x", or position label.
+        These determine which dimensions appear in the index_tuple output.
     position_key : DimensionLabel, optional
         Label for position dimension. Defaults to "p".
 

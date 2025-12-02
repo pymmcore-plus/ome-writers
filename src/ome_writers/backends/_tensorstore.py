@@ -55,8 +55,7 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
 
         self._delete_existing = overwrite
 
-        # Pass self._non_position_dims (storage order) to _create_group so metadata
-        # matches the actual array dimension order (TCZYX)
+        # Create group and array paths
         self._create_group(self._normalize_path(path), self.storage_order_dims)
 
         # Create stores for each array
