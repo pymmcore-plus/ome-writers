@@ -83,9 +83,8 @@ class TifffileStream(MultiPositionOMEStream):
         overwrite: bool = False,
     ) -> Self:
         # Initialize dimensions from MultiPositionOMEStream
-        # NOTE: since OME-TIFF can store data in any order, we do not enforce
-        # OME-NGFF order here.
-        self._init_dimensions(dimensions, enforce_ome_order=False)
+        # NOTE: Data will be stored in acquisition order.
+        self._init_dimensions(dimensions)
 
         self._delete_existing = overwrite
         self._path = Path(self._normalize_path(path))

@@ -50,6 +50,7 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         overwrite: bool = False,
     ) -> Self:
         # Initialize dimensions from MultiPositionOMEStream
+        # NOTE: Data will be stored in acquisition order.
         self._init_dimensions(dimensions)
 
         self._delete_existing = overwrite
@@ -108,6 +109,8 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
             future.result()
         self._futures.clear()
         self._stores.clear()
+        # Patch metadata to ensure OME-NGFF v0.5 compliance
+        self._patch_metadata_to_ngff_v05()
 
     def is_active(self) -> bool:
         return bool(self._stores)
@@ -116,18 +119,45 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         self._group_path = Path(path)
         self._group_path.mkdir(parents=True, exist_ok=True)
 
-        array_dims: dict[str, Sequence[Dimension]] = {}
+        # Create array paths for each position
         for pos_idx in range(self.num_positions):
             array_key = str(pos_idx)
             self._array_paths[array_key] = self._group_path / array_key
-            # Use dims (non-position dimensions in storage order)
-            array_dims[array_key] = dims
 
+        # Note: We'll create proper OME-NGFF metadata in _patch_metadata_to_ngff_v05
+        # after data writing is complete
         group_zarr = self._group_path / "zarr.json"
         group_meta = {
             "zarr_format": 3,
             "node_type": "group",
-            "attributes": ome_meta_v5(array_dims=array_dims),
+            "attributes": {},
         }
         group_zarr.write_text(json.dumps(group_meta, indent=2))
         return self._group_path
+
+    def _patch_metadata_to_ngff_v05(self) -> None:
+        """Patch the Zarr group metadata to ensure OME-NGFF v0.5 compliance.
+
+        This method writes OME-NGFF v0.5-compliant metadata for the group,
+        preserving the acquisition order (storage order) for the dimensions.
+        Data is stored and read back in the same order it was acquired.
+        """
+        if self._group_path is None:
+            return
+
+        # Use storage order dims as-is (acquisition order)
+        attrs = ome_meta_v5(
+            {str(i): self.storage_order_dims for i in range(self.num_positions)}
+        )
+        zarr_json = self._group_path / "zarr.json"
+        current_meta: dict = {
+            "consolidated_metadata": None,
+            "node_type": "group",
+            "zarr_format": 3,
+        }
+        if zarr_json.exists():
+            with open(zarr_json) as f:
+                current_meta = json.load(f)
+
+        current_meta.setdefault("attributes", {}).update(attrs)
+        zarr_json.write_text(json.dumps(current_meta, indent=2))

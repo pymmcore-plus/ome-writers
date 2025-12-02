@@ -144,23 +144,23 @@ def test_axis_order(
 
         zg = zarr.open_group(output_path, mode="r")
 
-        # we are only validating tensorstore because acquire-zarr allows to save
-        # data in acquisition order and thus the validation will fail in some cases
-        if backend.name == "tensorstore":
-            with suppress(ImportError):
-                from yaozarrs import validate_zarr_store
+        # Validate the zarr store structure
+        with suppress(ImportError):
+            from yaozarrs import validate_zarr_store
 
-                validate_zarr_store(output_path)
+            validate_zarr_store(output_path)
 
-        # Check all positions, timepoints, channels, and z-slices
-        # Get the dimension order from dims (which reflects storage order)
+        # For Zarr backends, data is now stored in acquisition order
+        # Get the dimension order from dims (which reflects acquisition/storage order)
         non_pos_dims = [d.label for d in dims if d.label not in "pyx"]
         for p in range_p:
             pos_array = zg[str(p)]
             for t in range_t:
                 for c in range_c:
                     for z in range_z:
-                        idx_tuple = (t, c, z)
+                        # Build index based on acquisition/storage order
+                        indices = {"t": t, "c": c, "z": z}
+                        idx_tuple = tuple(indices[d] for d in non_pos_dims)
 
                         frame_data = pos_array[(*idx_tuple, slice(None), slice(None))]
 
