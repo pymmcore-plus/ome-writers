@@ -234,7 +234,7 @@ def test_multiposition_acquisition(backend: AvailableBackend, tmp_path: Path) ->
         # Verify that each TIFF file has the correct metadata and shape
         for pos_idx in range(3):
             pos_file = base_path.with_name(f"{base_path.name}_p{pos_idx:03d}{ext}")
-            validate_path(pos_file, dimensions)
+            validate_path(pos_file)
 
             # Read the file to verify it has correct shape
             data = backend.read_data(pos_file)
