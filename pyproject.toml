@@ -35,7 +35,7 @@ tifffile = ["tifffile>=2024.8.30", "ome-types>=0.6.1", "pydantic>=2.8"]
 
 [dependency-groups]
 # used for all tests
-test = ["pytest>=8.4.2", "pytest-cov>=7.0.0", "yaozarrs[io]>=0.0.1"]
+test = ["pytest>=8.4.2", "pytest-cov>=7.0.0", "yaozarrs[io]>=0.0.1", "zarr>=3; python_version >= '3.11'"]
 # these mirror the extras above
 # but with additional dependencies for testing
 # these are the groups used on CI
