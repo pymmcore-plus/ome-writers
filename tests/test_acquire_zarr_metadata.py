@@ -24,9 +24,7 @@ if TYPE_CHECKING:
         {"c": 3, "t": 2, "z": 4, "y": 32, "x": 32},  # CTZYX - non-canonical
     ],
 )
-def test_acquire_zarr_metadata(
-    sizes: dict[str, int], tmp_path: Path
-) -> None:
+def test_acquire_zarr_metadata(sizes: dict[str, int], tmp_path: Path) -> None:
     """Test that acquire-zarr metadata preserves acquisition order."""
     pytest.importorskip("acquire_zarr")
 
