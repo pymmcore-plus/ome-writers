@@ -16,7 +16,7 @@ except ImportError as e:
 
 # --------------------------CONFIGURATION SECTION--------------------------#
 # Define output path
-output = Path("useq_schema_example").expanduser()
+output = Path("example_useq_schema").expanduser()
 
 # Choose backend: acquire-zarr, tensorstore, or tiff
 backend = "tensorstore"

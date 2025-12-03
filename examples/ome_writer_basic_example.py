@@ -15,7 +15,7 @@ plane_iter, dims, dtype = fake_data_for_sizes(
 )
 
 # setup output path and create stream
-output = Path("basic_example.zarr").expanduser()
+output = Path("example_basic.zarr").expanduser()
 stream = create_stream(
     output,
     dtype,

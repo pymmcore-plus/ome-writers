@@ -25,7 +25,7 @@ except ImportError as e:
 
 # --------------------------CONFIGURATION SECTION--------------------------#
 # Define output path
-output = Path("pymmcore_plus_example").expanduser()
+output = Path("example_pymmcore_plus").expanduser()
 
 # Choose backend: acquire-zarr, tensorstore, or tiff
 backend = "tensorstore"
