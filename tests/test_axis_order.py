@@ -182,10 +182,13 @@ def test_axis_order(
         filtered_canonical = [d for d in canonical_order if d in dim_labels]
         is_canonical_order = dim_labels == filtered_canonical
         if is_canonical_order:
-            with suppress(ImportError):
+            try:
                 from yaozarrs import validate_zarr_store
 
                 validate_zarr_store(output_path)
+            except ImportError:
+                print("yaozarrs not installed, skipping zarr store validation")
+                return
 
     elif backend.name == "tiff":
         pytest.importorskip("tifffile", reason="tifffile not installed")

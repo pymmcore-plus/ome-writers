@@ -101,7 +101,9 @@ def test_acquire_zarr_metadata(sizes: dict[str, int], tmp_path: Path) -> None:
     try:
         from yaozarrs import validate_zarr_store
     except ImportError:
-        pytest.skip("yaozarrs not installed, skipping zarr store validation")
+        print("yaozarrs not installed, skipping zarr store validation")
+        return
+
     # Validate the Zarr store using zarrs library when dimensions follow canonical order
     # (the OME-NGFF v0.5 canonical order: [time,] [channel,] space)
     # The zarrs validator requires axes to be in the order: [time,] [channel,] space

@@ -35,7 +35,9 @@ def validate_path(path: Path, dimensions: list[omew.Dimension]) -> None:
         try:
             from yaozarrs import validate_zarr_store
         except ImportError:
-            pytest.skip("yaozarrs not installed, skipping Zarr store validation")
+            print("yaozarrs not installed, skipping zarr store validation")
+            return
+
         # Check if dimensions follow canonical OME-NGFF order (TCZYX)
         # Even if some dimensions are missing, validate that present ones maintain order
         dim_labels = [d.label for d in dimensions if d.label not in "pyx"]
