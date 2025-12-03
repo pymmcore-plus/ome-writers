@@ -58,7 +58,7 @@ dimensions = [
     ),
 ]
 
-output = Path("~/Desktop/some_path_ts.zarr").expanduser()
+output = Path(f"example_az_nt{nt}_nc{nc}_nz{nz}.zarr").expanduser()
 settings = StreamSettings(
     arrays=[
         ArraySettings(
