@@ -17,11 +17,20 @@ import ome_writers as omew
 if TYPE_CHECKING:
     import ome_types.model as ome
 
-# Import the memmap-based stream
+# Check if dependencies are available before importing
 try:
-    from ome_writers.backends._tifffile_memmap import TifffileStream as MemmapStream
+    import ome_types.model  # noqa: F401
+    import tifffile  # noqa: F401
+
+    DEPS_AVAILABLE = True
 except ImportError:
+    DEPS_AVAILABLE = False
+
+if not DEPS_AVAILABLE:
     pytest.skip("tifffile or ome-types not available", allow_module_level=True)
+
+# Import the memmap-based stream
+from ome_writers.backends._tifffile_memmap import TifffileStream as MemmapStream
 
 
 def _read_tiff(output_path: Path) -> np.ndarray:

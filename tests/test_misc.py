@@ -86,8 +86,9 @@ def test_init_stream_backends() -> None:
     stream = init_stream("test.zarr", backend="acquire-zarr")
     assert isinstance(stream, AcquireZarrStream)
 
-    stream = init_stream("test.tiff", backend="tiff")
-    assert isinstance(stream, TifffileStream)
+    if TifffileStream.is_available():
+        stream = init_stream("test.tiff", backend="tiff")
+        assert isinstance(stream, TifffileStream)
 
 
 def test_autobackend_zarr(tmp_path: Path) -> None:
@@ -98,6 +99,7 @@ def test_autobackend_zarr(tmp_path: Path) -> None:
     assert isinstance(stream, (AcquireZarrStream, TensorStoreZarrStream))
 
 
+@pytest.mark.skipif(not TifffileStream.is_available(), reason="tifffile not available")
 def test_autobackend_tiff(tmp_path: Path) -> None:
     """Test automatic backend selection for .tiff files."""
     tiff_path = tmp_path / "test.tiff"
