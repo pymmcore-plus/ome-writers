@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
-from yaozarrs import validate_zarr_store
 
 import ome_writers as omew
 
@@ -16,13 +15,35 @@ if TYPE_CHECKING:
     from .conftest import AvailableBackend
 
 
-def validate_path(path: Path) -> None:
+def validate_path(path: Path, dimensions: list[omew.Dimension]) -> None:
     """Helper function to validate that a file exists and is non-empty."""
     assert path.exists(), f"File {path} does not exist."
     if path.suffix == ".tiff":
-        ...
+        try:
+            import tifffile
+            from ome_types import from_xml
+        except ImportError:
+            pytest.skip(
+                "ome-types or tifffile not installed, skipping OME-XML validation"
+            )
+        with tifffile.TiffFile(path) as tif:
+            ome_xml = tif.ome_metadata
+            if ome_xml is not None:
+                # validate by attempting to parse
+                from_xml(ome_xml)
     elif path.suffix in {".zarr", ".zarr/"}:
-        validate_zarr_store(path)
+        try:
+            from yaozarrs import validate_zarr_store
+        except ImportError:
+            pytest.skip("yaozarrs not installed, skipping Zarr store validation")
+        # Check if dimensions follow canonical OME-NGFF order (TCZYX)
+        # Even if some dimensions are missing, validate that present ones maintain order
+        dim_labels = [d.label for d in dimensions if d.label not in "pyx"]
+        canonical_order = ["t", "c", "z"]
+        filtered_canonical = [d for d in canonical_order if d in dim_labels]
+        is_canonical_order = dim_labels == filtered_canonical
+        if is_canonical_order:
+            validate_zarr_store(path)
 
 
 def test_minimal_2d_dimensions(backend: AvailableBackend, tmp_path: Path) -> None:
@@ -48,7 +69,7 @@ def test_minimal_2d_dimensions(backend: AvailableBackend, tmp_path: Path) -> Non
     stream.flush()
 
     assert not stream.is_active()
-    validate_path(output_path)
+    validate_path(output_path, dimensions)
 
 
 def test_stream_error_handling(backend: AvailableBackend) -> None:
@@ -109,26 +130,40 @@ def test_create_stream_factory_function(
 
     stream.flush()
     assert not stream.is_active()
-    validate_path(output_path)
+    validate_path(output_path, dimensions)
 
 
 @pytest.mark.parametrize(
     "dtype", [np.dtype(np.uint8), np.dtype(np.uint16)], ids=["uint8", "uint16"]
 )
+@pytest.mark.parametrize(
+    "sizes",
+    [
+        {"t": 3, "c": 2, "z": 2, "y": 64, "x": 64},  # TCZYX - canonical order
+        {"c": 2, "t": 3, "z": 2, "y": 64, "x": 64},  # CTZYX - non-canonical
+        {"t": 3, "z": 2, "c": 2, "y": 64, "x": 64},  # TZCYX - non-canonical
+        {"z": 2, "y": 64, "x": 64},  # ZYX - only spatial (canonical)
+        {"t": 2, "y": 64, "x": 64},  # TYX - time only (canonical)
+    ],
+    ids=["tczyx", "ctzyx", "tzcyx", "zyx", "tyx"],
+)
 def test_data_integrity_roundtrip(
     backend: AvailableBackend,
     tmp_path: Path,
     dtype: np.dtype,
+    sizes: dict[str, int],
 ) -> None:
-    """Test data integrity roundtrip with different data types."""
+    """Test data integrity roundtrip with different data types and dimension orders."""
     data_gen, dimensions, dtype = omew.fake_data_for_sizes(
-        sizes={"t": 3, "c": 2, "z": 2, "y": 64, "x": 64},
+        sizes=sizes,
         chunk_sizes={"y": 32, "x": 32},
     )
 
     # Convert generator to list to use data multiple times
     original_frames = list(data_gen)
-    output_path = tmp_path / f"{backend.name.lower()}_{dtype.name}{backend.file_ext}"
+    dim_order = "".join([d.label for d in dimensions if d.label not in "yx"])
+    filename = f"{backend.name.lower()}_{dtype.name}_{dim_order}{backend.file_ext}"
+    output_path = tmp_path / filename
 
     # Write data using our stream
     stream = backend.cls()
@@ -141,7 +176,7 @@ def test_data_integrity_roundtrip(
     assert not stream.is_active()
 
     # Read data back and verify it matches
-    validate_path(output_path)
+    validate_path(output_path, dimensions)
     disk_data = backend.read_data(output_path)
 
     # Reconstruct original data array from frames
@@ -170,7 +205,7 @@ def test_data_integrity_roundtrip(
         stream.append(frame)
     stream.flush()
     assert not stream.is_active()
-    validate_path(output_path)
+    validate_path(output_path, dimensions)
 
 
 def test_multiposition_acquisition(backend: AvailableBackend, tmp_path: Path) -> None:
@@ -199,7 +234,7 @@ def test_multiposition_acquisition(backend: AvailableBackend, tmp_path: Path) ->
     assert not stream.is_active()
 
     if backend.file_ext.endswith("zarr"):
-        validate_path(output_path)
+        validate_path(output_path, dimensions)
 
         # Verify zarr structure (duplicate of above, but ensures positions are separate)
         assert (output_path / "0").exists()
@@ -228,7 +263,7 @@ def test_multiposition_acquisition(backend: AvailableBackend, tmp_path: Path) ->
         # Verify that each TIFF file has the correct metadata and shape
         for pos_idx in range(3):
             pos_file = base_path.with_name(f"{base_path.name}_p{pos_idx:03d}{ext}")
-            validate_path(pos_file)
+            validate_path(pos_file, dimensions)
 
             # Read the file to verify it has correct shape
             data = backend.read_data(pos_file)

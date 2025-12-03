@@ -17,9 +17,9 @@ if TYPE_CHECKING:
 @pytest.mark.parametrize(
     "sizes",
     [
-        {"t": 2, "c": 3, "z": 4, "y": 32, "x": 32},
-        {"t": 2, "z": 4, "c": 3, "y": 32, "x": 32},
-        {"c": 3, "t": 2, "z": 4, "y": 32, "x": 32},
+        {"t": 2, "c": 3, "z": 4, "y": 32, "x": 32},  # TCZYX - OME-NGFF canonical order
+        {"t": 2, "z": 4, "c": 3, "y": 32, "x": 32},  # TZCYX - non-canonical
+        {"c": 3, "t": 2, "z": 4, "y": 32, "x": 32},  # CTZYX - non-canonical
     ],
 )
 def test_acquire_zarr_metadata(sizes: dict[str, int], tmp_path: Path) -> None:
@@ -56,7 +56,7 @@ def test_acquire_zarr_metadata(sizes: dict[str, int], tmp_path: Path) -> None:
     # Check OME metadata axes are in acquisition order (not TCZYX)
     ome_meta = group_meta["attributes"]["ome"]
     axes = ome_meta["multiscales"][0]["axes"]
-    
+
     # Build expected axes based on actual dimension order from dims
     expected_axes = []
     axis_info = {
@@ -68,11 +68,8 @@ def test_acquire_zarr_metadata(sizes: dict[str, int], tmp_path: Path) -> None:
     }
     for dim in dims:
         if dim.label in axis_info:
-            expected_axes.append({
-                "name": dim.label,
-                **axis_info[dim.label]
-            })
-    
+            expected_axes.append({"name": dim.label, **axis_info[dim.label]})
+
     assert axes == expected_axes
 
     # Check array metadata for position 0
@@ -100,3 +97,18 @@ def test_acquire_zarr_metadata(sizes: dict[str, int], tmp_path: Path) -> None:
     # Check codecs chunk_shape
     codecs_chunk_shape = array_meta["codecs"][0]["configuration"]["chunk_shape"]
     assert codecs_chunk_shape == expected_chunk_shape
+
+    try:
+        from yaozarrs import validate_zarr_store
+    except ImportError:
+        pytest.skip("yaozarrs not installed, skipping zarr store validation")
+    # Validate the Zarr store using zarrs library when dimensions follow canonical order
+    # (the OME-NGFF v0.5 canonical order: [time,] [channel,] space)
+    # The zarrs validator requires axes to be in the order: [time,] [channel,] space
+    # Even if some dimensions are missing, validate that present ones maintain order
+    dim_labels = [d.label for d in dims if d.label not in "pyx"]
+    canonical_order = ["t", "c", "z"]
+    filtered_canonical = [d for d in canonical_order if d in dim_labels]
+    is_canonical_order = dim_labels == filtered_canonical
+    if is_canonical_order:
+        validate_zarr_store(output_path)

@@ -21,6 +21,8 @@ if TYPE_CHECKING:
 
     from pymmcore_plus.metadata import FrameMetaV1, SummaryMetaV1
 
+    from ome_writers._auto import BackendName
+
     from .conftest import AvailableBackend
 
 
@@ -75,7 +77,7 @@ class PYMMCP:
         sequence: useq.MDASequence,
         core: CMMCorePlus,
         dest: Path,
-        backend: str,  # "acquire-zarr", "tensorstore" or "tiff"
+        backend: BackendName,  # "acquire-zarr", "tensorstore" or "tiff"
     ) -> None:
         self._seq = sequence
         self._core = core
@@ -110,7 +112,7 @@ class PYMMCP:
         @core.mda.events.sequenceFinished.connect
         def _on_sequence_finished(sequence: useq.MDASequence) -> None:
             self._stream.flush()
-            if hasattr(self._stream, "update_ome_metadata"):
+            if hasattr(self._stream, "update_ome_metadata"):  # tiff backend
                 ome = create_ome_metadata(self._summary_meta, self._frame_meta_list)
                 self._stream.update_ome_metadata(ome)
 
@@ -120,13 +122,6 @@ class PYMMCP:
 
 def test_pymmcore_plus_mda_tiff_metadata_update(tmp_path: Path) -> None:
     """Test pymmcore_plus MDA with metadata update after acquisition."""
-
-    # skip if tifffile or ome-types is not installed
-    try:
-        import tifffile
-        from ome_types import from_xml
-    except ImportError:
-        pytest.skip("tifffile or ome-types is not installed")
 
     seq = useq.MDASequence(
         time_plan=useq.TIntervalLoops(interval=0.001, loops=2),  # type: ignore
@@ -146,6 +141,13 @@ def test_pymmcore_plus_mda_tiff_metadata_update(tmp_path: Path) -> None:
 
     pymm = PYMMCP(seq, core, dest, backend="tiff")
     pymm.run()
+
+    # skip if tifffile or ome-types is not installed
+    try:
+        import tifffile
+        from ome_types import from_xml
+    except ImportError:
+        pytest.skip("tifffile or ome-types is not installed")
 
     # reopen the file and validate ome metadata
     for f in list(tmp_path.glob("*.ome.tiff")):

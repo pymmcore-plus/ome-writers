@@ -108,5 +108,3 @@ def test_autobackend_tiff(tmp_path: Path) -> None:
     ome_tiff_path = tmp_path / "test.ome.tiff"
     stream = init_stream(str(ome_tiff_path), backend="auto")
     assert isinstance(stream, TifffileStream)
-
-
