@@ -241,3 +241,52 @@ def test_multiposition_acquisition(backend: AvailableBackend, tmp_path: Path) ->
             # Shape should be (t, z, c, y, x) = (3, 2, 2, 32, 32)
             expected_shape = (3, 2, 2, 32, 32)
             assert data.shape == expected_shape
+
+
+@pytest.mark.parametrize(
+    "sizes",
+    [
+        {"t": 2, "c": 3, "z": 4, "y": 32, "x": 32},  # TCZYX - canonical
+        {"t": 2, "z": 4, "c": 3, "y": 32, "x": 32},  # TZCYX - non-canonical
+        {"c": 3, "t": 2, "z": 4, "y": 32, "x": 32},  # CTZYX - non-canonical
+    ],
+)
+def test_zarr_metadata_correctness(
+    zarr_backend: AvailableBackend, sizes: dict[str, int], tmp_path: Path
+) -> None:
+    """Test that zarr metadata preserves acquisition order."""
+    output_path = tmp_path / "test_metadata.zarr"
+    data_gen, dims, dtype = omew.fake_data_for_sizes(sizes)
+
+    stream = omew.create_stream(
+        path=str(output_path),
+        dimensions=dims,
+        dtype=dtype,
+        backend=zarr_backend.name,
+        overwrite=True,
+    )
+    for frame in data_gen:
+        stream.append(frame)
+    stream.flush()
+
+    # Check group metadata
+    group_meta = json.loads((output_path / "zarr.json").read_text())
+    axes = group_meta["attributes"]["ome"]["multiscales"][0]["axes"]
+
+    # Verify axes are in acquisition order
+    axis_info = {
+        "t": {"type": "time", "unit": "second"},
+        "c": {"type": "channel", "unit": "unknown"},
+        "z": {"type": "space", "unit": "micrometer"},
+        "y": {"type": "space", "unit": "micrometer"},
+        "x": {"type": "space", "unit": "micrometer"},
+    }
+    expected_axes = [{"name": d.label, **axis_info[d.label]} for d in dims]
+    assert axes == expected_axes
+
+    # Check array metadata
+    array_meta = json.loads((output_path / "0" / "zarr.json").read_text())
+    assert array_meta["dimension_names"] == [d.label for d in dims]
+    assert array_meta["shape"] == [d.size for d in dims]
+
+    validate_path(output_path)
