@@ -21,16 +21,21 @@ except ImportError:
     pytest.skip("useq not installed", allow_module_level=True)
 
 
+def _encode_ptcz(p: int, t: int, c: int, z: int) -> int:
+    """Encode p, t, c, z indices into a unique integer value."""
+    return p * 10000 + t * 1000 + c * 100 + z * 10
+
+
 def create_unique_frame(
     p: int, t: int, c: int, z: int, shape: tuple[int, int] = (32, 32)
 ) -> np.ndarray:
     """Create frame with unique value: p*10000 + t*1000 + c*100 + z*10."""
-    return np.full(shape, p * 10000 + t * 1000 + c * 100 + z * 10, dtype=np.uint16)
+    return np.full(shape, _encode_ptcz(p, t, c, z), dtype=np.uint16)
 
 
 def assert_frame_value(frame: np.ndarray, p: int, t: int, c: int, z: int) -> None:
     """Assert frame has expected value based on indices."""
-    expected = p * 10000 + t * 1000 + c * 100 + z * 10
+    expected = _encode_ptcz(p, t, c, z)
     actual = float(np.mean(frame))
     assert abs(actual - expected) < 0.1, (
         f"Value mismatch at (p={p}, t={t}, c={c}, z={z}): "
