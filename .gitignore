@@ -112,3 +112,5 @@ ENV/
 uv.lock
 
 example*.zarr
+example*.tiff
+example_*

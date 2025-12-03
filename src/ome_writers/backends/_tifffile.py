@@ -82,17 +82,21 @@ class TifffileStream(MultiPositionOMEStream):
         *,
         overwrite: bool = False,
     ) -> Self:
-        # Use MultiPositionOMEStream to handle position logic
-        num_positions, tczyx_dims = self._init_positions(dimensions)
+        # Initialize dimensions from MultiPositionOMEStream
+        # NOTE: Data will be stored in acquisition order.
+        self._init_dimensions(dimensions)
+
         self._delete_existing = overwrite
         self._path = Path(self._normalize_path(path))
-        shape_5d = tuple(d.size for d in tczyx_dims)
+        shape_5d = tuple(d.size for d in self.storage_order_dims)
 
-        fnames = self._prepare_files(self._path, num_positions, overwrite)
+        fnames = self._prepare_files(self._path, self.num_positions, overwrite)
 
         # Create a memmap for each position
         for p_idx, fname in enumerate(fnames):
-            ome = dims_to_ome(tczyx_dims, dtype=dtype, tiff_file_name=fname)
+            ome = dims_to_ome(
+                self.storage_order_dims, dtype=dtype, tiff_file_name=fname
+            )
             self._queues[p_idx] = q = Queue()  # type: ignore
             self._threads[p_idx] = thread = WriterThread(
                 fname,
@@ -180,10 +184,13 @@ class TifffileStream(MultiPositionOMEStream):
         return fnames
 
     def _write_to_backend(
-        self, array_key: str, index: tuple[int, ...], frame: np.ndarray
+        self, position_key: str, index: tuple[int, ...], frame: np.ndarray
     ) -> None:
-        """TIFF-specific write implementation."""
-        self._queues[int(array_key)].put(frame)
+        """TIFF-specific write implementation.
+
+        For TIFF, frames are written sequentially, so the index is not used.
+        """
+        self._queues[int(position_key)].put(frame)
 
     def _update_position_metadata(self, position_idx: int, metadata: ome.OME) -> None:
         """Add OME metadata to TIFF file efficiently without rewriting image data."""
