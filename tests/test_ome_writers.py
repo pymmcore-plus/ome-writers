@@ -11,41 +11,10 @@ import pytest
 
 import ome_writers as omew
 
+from .conftest import validate_path
+
 if TYPE_CHECKING:
     from .conftest import AvailableBackend
-
-
-def validate_path(path: Path, dimensions: list[omew.Dimension]) -> None:
-    """Helper function to validate that a file exists and is non-empty."""
-    assert path.exists(), f"File {path} does not exist."
-    if path.suffix == ".tiff":
-        try:
-            import tifffile
-            from ome_types import from_xml
-        except ImportError:
-            pytest.skip(
-                "ome-types or tifffile not installed, skipping OME-XML validation"
-            )
-        with tifffile.TiffFile(path) as tif:
-            ome_xml = tif.ome_metadata
-            if ome_xml is not None:
-                # validate by attempting to parse
-                from_xml(ome_xml)
-    elif path.suffix in {".zarr", ".zarr/"}:
-        try:
-            from yaozarrs import validate_zarr_store
-        except ImportError:
-            print("yaozarrs not installed, skipping zarr store validation")
-            return
-
-        # Check if dimensions follow canonical OME-NGFF order (TCZYX)
-        # Even if some dimensions are missing, validate that present ones maintain order
-        dim_labels = [d.label for d in dimensions if d.label not in "pyx"]
-        canonical_order = ["t", "c", "z"]
-        filtered_canonical = [d for d in canonical_order if d in dim_labels]
-        is_canonical_order = dim_labels == filtered_canonical
-        if is_canonical_order:
-            validate_zarr_store(path)
 
 
 def test_minimal_2d_dimensions(backend: AvailableBackend, tmp_path: Path) -> None:
@@ -71,7 +40,7 @@ def test_minimal_2d_dimensions(backend: AvailableBackend, tmp_path: Path) -> Non
     stream.flush()
 
     assert not stream.is_active()
-    validate_path(output_path, dimensions)
+    validate_path(output_path)
 
 
 def test_stream_error_handling(backend: AvailableBackend) -> None:
@@ -132,7 +101,7 @@ def test_create_stream_factory_function(
 
     stream.flush()
     assert not stream.is_active()
-    validate_path(output_path, dimensions)
+    validate_path(output_path)
 
 
 @pytest.mark.parametrize(
@@ -178,7 +147,7 @@ def test_data_integrity_roundtrip(
     assert not stream.is_active()
 
     # Read data back and verify it matches
-    validate_path(output_path, dimensions)
+    validate_path(output_path)
     disk_data = backend.read_data(output_path)
 
     # Reconstruct original data array from frames
@@ -207,7 +176,7 @@ def test_data_integrity_roundtrip(
         stream.append(frame)
     stream.flush()
     assert not stream.is_active()
-    validate_path(output_path, dimensions)
+    validate_path(output_path)
 
 
 def test_multiposition_acquisition(backend: AvailableBackend, tmp_path: Path) -> None:
@@ -236,7 +205,7 @@ def test_multiposition_acquisition(backend: AvailableBackend, tmp_path: Path) ->
     assert not stream.is_active()
 
     if backend.file_ext.endswith("zarr"):
-        validate_path(output_path, dimensions)
+        validate_path(output_path)
 
         # Verify zarr structure (duplicate of above, but ensures positions are separate)
         assert (output_path / "0").exists()

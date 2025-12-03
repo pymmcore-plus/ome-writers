@@ -9,6 +9,8 @@ import pytest
 import ome_writers as omew
 from ome_writers._util import fake_data_for_sizes
 
+from .conftest import validate_path
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -48,20 +50,4 @@ def test_tensorstore_zarr_validation(sizes: dict[str, int], tmp_path: Path) -> N
         stream.append(frame)
 
     stream.flush()
-
-    try:
-        from yaozarrs import validate_zarr_store
-    except ImportError:
-        print("yaozarrs not installed, skipping zarr store validation")
-        return
-
-    # Validate the Zarr store using zarrs library when dimensions follow canonical order
-    # (the OME-NGFF v0.5 canonical order: [time,] [channel,] space)
-    # The zarrs validator requires axes to be in the order: [time,] [channel,] space
-    # Even if some dimensions are missing, validate that present ones maintain order
-    dim_labels = [d.label for d in dims if d.label not in "pyx"]
-    canonical_order = ["t", "c", "z"]
-    filtered_canonical = [d for d in canonical_order if d in dim_labels]
-    is_canonical_order = dim_labels == filtered_canonical
-    if is_canonical_order:
-        validate_zarr_store(output_path)
+    validate_path(output_path)

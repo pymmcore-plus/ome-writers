@@ -17,6 +17,8 @@ import pytest
 
 import ome_writers as omew
 
+from .conftest import validate_path
+
 if TYPE_CHECKING:
     from .conftest import AvailableBackend
 
@@ -173,22 +175,7 @@ def test_axis_order(
                             f"Position {p}, Time {t}, Channel {c}, Z {z}: {msg}"
                         )
 
-        # Validate the Zarr store using zarrs library when dimensions follow canonical
-        # order (the OME-NGFF v0.5 canonical order: [time,] [channel,] space)
-        # The zarrs validator requires axes to be in the order: [time,] [channel,] space
-        # Even if some dimensions are missing, validate that present ones maintain order
-        dim_labels = [d.label for d in dims if d.label not in "pyx"]
-        canonical_order = ["t", "c", "z"]
-        filtered_canonical = [d for d in canonical_order if d in dim_labels]
-        is_canonical_order = dim_labels == filtered_canonical
-        if is_canonical_order:
-            try:
-                from yaozarrs import validate_zarr_store
-
-                validate_zarr_store(output_path)
-            except ImportError:
-                print("yaozarrs not installed, skipping zarr store validation")
-                return
+        validate_path(output_path)
 
     elif backend.name == "tiff":
         pytest.importorskip("tifffile", reason="tifffile not installed")
