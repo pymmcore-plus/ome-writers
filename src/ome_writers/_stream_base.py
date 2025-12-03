@@ -177,11 +177,7 @@ class MultiPositionOMEStream(OMEStream):
 
     @property
     def storage_order_dims(self) -> Sequence[Dimension]:
-        """Return the non-position dimensions in acquisition/storage order.
-
-        Since data is stored in acquisition order, this returns the dimensions
-        exactly as they were provided (excluding position 'p' dimension).
-        """
+        """Return the storage order dimensions."""
         return self._storage_order_dims
 
     @property
