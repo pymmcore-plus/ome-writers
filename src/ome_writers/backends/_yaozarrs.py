@@ -47,8 +47,8 @@ class YaozarrsStream(MultiPositionOMEStream):
         except ImportError as e:
             msg = (
                 "YaozarrsStream requires yaozarrs with write support: "
-                "`pip install yaozarrs[write-zarr]` or "
-                "`pip install yaozarrs[write-tensorstore]`."
+                "`pip install yaozarrs[write-tensorstore]` or"
+                "`pip install yaozarrs[write-zarr]`."
             )
             raise ImportError(msg) from e
 

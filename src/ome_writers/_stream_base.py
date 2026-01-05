@@ -176,19 +176,16 @@ class MultiPositionOMEStream(OMEStream):
             self._storage_order_dims, self._index_mapping = (
                 self._reorder_to_ngff_storage(non_position_dims)
             )
-            # Iterator should use acquisition order labels, not storage order
-            acquisition_order_labels: list[DimensionLabel] = [
-                d.label for d in non_position_dims if d.label not in "yx"
-            ]
         else:
             # Keep the acquisition order for non-position dimensions (no 'p')
             self._storage_order_dims = list(non_position_dims)
             self._index_mapping = None
 
-            # Extract labels of acquisition/storage order dims, excluding spatial dims y and x
-            acquisition_order_labels: list[DimensionLabel] = [
-                d.label for d in self._storage_order_dims if d.label not in "yx"
-            ]
+        # Extract labels of non-spatial acquisition order dims
+        # Iterator should use acquisition order labels, not storage order
+        acquisition_order_labels: list[DimensionLabel] = [
+            d.label for d in non_position_dims if d.label not in "yx"
+        ]
 
         # Create iterator yielding (position_key, index_tuple) in acquisition order
         self._dim_iter = iter(

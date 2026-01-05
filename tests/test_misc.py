@@ -60,6 +60,22 @@ def test_dimension_index_iterator_empty() -> None:
     assert list(it) == []
 
 
+def test_dimension_index_iterator_2d_only() -> None:
+    """Test DimensionIndexIterator with only spatial dimensions (2D)."""
+    # Only spatial dimensions, no time/channel/etc
+    dims = [
+        Dimension(label="y", size=32, unit=None, chunk_size=1),
+        Dimension(label="x", size=32, unit=None, chunk_size=1),
+    ]
+    it = DimensionIndexIterator(dims, storage_order_dimensions=[])
+
+    # Should yield one frame with empty index tuple
+    assert len(it) == 0  # No non-spatial dimensions
+    result = list(it)
+    assert len(result) == 1
+    assert result[0] == (0, ())
+
+
 def test_dimension_index_iterator_validation() -> None:
     """Test DimensionIndexIterator parameter validation."""
     dims = [

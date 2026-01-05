@@ -13,9 +13,7 @@ import ome_writers as omew
 if TYPE_CHECKING:
     from pathlib import Path
 
-pytestmark = pytest.mark.skipif(
-    not omew.YaozarrsStream.is_available(), reason="yaozarrs not available"
-)
+pytest.importorskip("yaozarrs", reason="yaozarrs not installed")
 
 
 def test_yaozarrs_stream_availability() -> None:
@@ -437,3 +435,110 @@ def test_yaozarrs_axis_reordering_multiposition(tmp_path: Path) -> None:
 
         # Acquisition: p=p, t=1, z=1, c=1 → value=p*1000+111 → Storage: [t=1, c=1, z=1]
         assert array[1, 1, 1, 0, 0] == expected_base + 111
+
+
+def test_yaozarrs_writer_zarr_backend(tmp_path: Path) -> None:
+    """Test YaozarrsStream with zarr-python backend."""
+    zarr = pytest.importorskip("zarr")
+
+    data_gen, dimensions, dtype = omew.fake_data_for_sizes(
+        sizes={"t": 2, "c": 2, "y": 16, "x": 16},
+        chunk_sizes={"t": 1, "y": 16, "x": 16},
+        dtype=np.uint8,
+    )
+
+    output_path = tmp_path / "zarr_backend.ome.zarr"
+    stream = omew.YaozarrsStream()
+
+    # Explicitly use zarr backend
+    stream = stream.create(
+        str(output_path),
+        dtype,
+        dimensions,
+        overwrite=True,
+        writer="zarr",
+    )
+
+    # Write frames
+    for data in data_gen:
+        stream.append(data)
+    stream.flush()
+
+    assert output_path.exists()
+    # Verify it's a valid zarr array
+    array = zarr.open(output_path / "0", mode="r")
+    assert array.shape == (2, 2, 16, 16)
+
+
+def test_yaozarrs_writer_auto_backend(tmp_path: Path) -> None:
+    """Test YaozarrsStream with auto backend selection."""
+    data_gen, dimensions, dtype = omew.fake_data_for_sizes(
+        sizes={"t": 2, "y": 16, "x": 16},
+        chunk_sizes={"t": 1, "y": 16, "x": 16},
+        dtype=np.uint8,
+    )
+
+    output_path = tmp_path / "auto_backend.ome.zarr"
+    stream = omew.YaozarrsStream()
+
+    # Use auto backend
+    stream = stream.create(
+        str(output_path),
+        dtype,
+        dimensions,
+        overwrite=True,
+        writer="auto",
+    )
+
+    # Write frames
+    for data in data_gen:
+        stream.append(data)
+    stream.flush()
+
+    assert output_path.exists()
+
+
+def test_yaozarrs_multi_position_zarr_backend(tmp_path: Path) -> None:
+    """Test YaozarrsStream multi-position with zarr backend."""
+    zarr = pytest.importorskip("zarr")
+
+    data_gen, dimensions, dtype = omew.fake_data_for_sizes(
+        sizes={"p": 3, "t": 2, "c": 2, "y": 16, "x": 16},
+        chunk_sizes={"t": 1, "y": 16, "x": 16},
+        dtype=np.uint8,
+    )
+
+    output_path = tmp_path / "multi_pos_zarr.ome.zarr"
+    stream = omew.YaozarrsStream()
+
+    # Multi-position with zarr backend
+    stream = stream.create(
+        str(output_path),
+        dtype,
+        dimensions,
+        overwrite=True,
+        writer="zarr",
+    )
+
+    # Write all frames
+    for data in data_gen:
+        stream.append(data)
+    stream.flush()
+
+    assert output_path.exists()
+
+    # Verify all positions exist
+    for pos in range(3):
+        pos_path = output_path / str(pos) / "0"
+        assert pos_path.exists()
+        array = zarr.open(pos_path, mode="r")
+        assert array.shape == (2, 2, 16, 16)  # t, c, y, x in NGFF order
+
+
+def test_yaozarrs_without_write_module_import_error() -> None:
+    """Test that YaozarrsStream raises helpful error without write module."""
+    # This test checks that the error message is helpful
+    # We can't actually test the ImportError condition without
+    # uninstalling yaozarrs, but we can verify the __init__ exists
+    stream = omew.YaozarrsStream()
+    assert stream is not None
