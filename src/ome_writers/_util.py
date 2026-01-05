@@ -238,7 +238,7 @@ class DimensionIndexIterator:
         # Filter dimensions to those in output order, preserving acquisition order
         acq_order_dims = acquisition_order_dimensions
         self._iter_dims = [d for d in acq_order_dims if d.label in needed_labels]
-        
+
         # Check if there are any spatial dimensions in the input
         self._has_spatial = any(d.label in ("y", "x") for d in acq_order_dims)
 
