@@ -34,7 +34,7 @@ def test_yaozarrs_single_position(tmp_path: Path) -> None:
 
     output_path = tmp_path / "single_position.ome.zarr"
     stream = omew.YaozarrsStream()
-    stream = stream.create(str(output_path), dtype, dimensions)
+    stream = stream.create(str(output_path), dtype, dimensions, writer="auto")
     assert stream.is_active()
 
     # Write all frames
@@ -311,13 +311,16 @@ def test_yaozarrs_minimal_2d(tmp_path: Path) -> None:
     assert array_path.exists()
 
 
-def test_yaozarrs_axis_reordering(tmp_path: Path) -> None:
+@pytest.mark.parametrize("writer", ["tensorstore", "zarr"])
+def test_yaozarrs_axis_reordering(tmp_path: Path, writer: str) -> None:
     """Test that dimensions are reordered to NGFF v0.5 order.
 
     NGFF v0.5 requires axes in order: time → channel → space (z,y,x).
     This test uses acquisition order t,z,c,y,x (non-compliant) and verifies
     that data is correctly transposed to storage order t,c,z,y,x.
     """
+    pytest.importorskip(writer)
+
     # Acquisition order: t, z, c, y, x (z and c swapped from NGFF order)
     dimensions = [
         omew.Dimension(label="t", size=2, chunk_size=1),
@@ -327,10 +330,10 @@ def test_yaozarrs_axis_reordering(tmp_path: Path) -> None:
         omew.Dimension(label="x", size=32, chunk_size=16),
     ]
     dtype = np.dtype(np.uint16)
-    output_path = tmp_path / "reordered.ome.zarr"
+    output_path = tmp_path / f"reordered_{writer}.ome.zarr"
 
     stream = omew.YaozarrsStream()
-    stream.create(str(output_path), dtype, dimensions)
+    stream.create(str(output_path), dtype, dimensions, writer=writer)
 
     # Write test data in acquisition order: iterate t, then z, then c
     # Each frame value encodes its acquisition position: t*100 + z*10 + c
@@ -372,12 +375,15 @@ def test_yaozarrs_axis_reordering(tmp_path: Path) -> None:
     assert array.shape == (2, 2, 3, 32, 32)
 
 
-def test_yaozarrs_axis_reordering_multiposition(tmp_path: Path) -> None:
+@pytest.mark.parametrize("writer", ["tensorstore", "zarr"])
+def test_yaozarrs_axis_reordering_multiposition(tmp_path: Path, writer: str) -> None:
     """Test axis reordering with multi-position data.
 
     Verifies that NGFF v0.5 axis ordering works correctly with bioformats2raw
     layout (multi-position). Each position should have data stored in NGFF order.
     """
+    pytest.importorskip(writer)
+
     # Acquisition order: p, t, z, c, y, x (z and c swapped from NGFF order)
     dimensions = [
         omew.Dimension(label="p", size=2, chunk_size=1),
@@ -388,10 +394,10 @@ def test_yaozarrs_axis_reordering_multiposition(tmp_path: Path) -> None:
         omew.Dimension(label="x", size=16, chunk_size=16),
     ]
     dtype = np.dtype(np.uint16)
-    output_path = tmp_path / "reordered_multipos.ome.zarr"
+    output_path = tmp_path / f"reordered_multipos_{writer}.ome.zarr"
 
     stream = omew.YaozarrsStream()
-    stream.create(str(output_path), dtype, dimensions)
+    stream.create(str(output_path), dtype, dimensions, writer=writer)
 
     # Write test data in acquisition order: iterate p, t, z, c
     # Each frame value encodes its position: p*1000 + t*100 + z*10 + c

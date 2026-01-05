@@ -39,10 +39,15 @@ jobs:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
         platform: [ubuntu-latest, macos-latest, windows-latest]
         resolution: [highest, lowest-direct]
-        group: [tifffile, tensorstore, acquire-zarr, pymmcore]
+        group: [tifffile, tensorstore, acquire-zarr, yaozarrs-tensorstore, yaozarrs-zarr, pymmcore]
         exclude:
           - group: pymmcore
             resolution: lowest-direct
+          # zarr>=3 requires Python 3.11+
+          - group: yaozarrs-zarr
+            python-version: "3.10"
+          - group: acquire-zarr
+            python-version: "3.10"
 
     steps:
       - uses: actions/checkout@v6
