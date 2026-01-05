@@ -212,14 +212,35 @@ def test_multiposition_acquisition(backend: AvailableBackend, tmp_path: Path) ->
             group_meta = json.load(f)
 
         ome_attrs = group_meta["attributes"]["ome"]
-        multiscales = ome_attrs["multiscales"]
         assert ome_attrs["version"] == "0.5"
-        assert isinstance(multiscales, list)
-        assert len(multiscales) == 1
-        assert len(multiscales[0]["datasets"]) == 3
 
-        axes_names = {ax["name"] for ax in multiscales[0]["axes"]}
-        assert all(x in axes_names for x in ["t", "c", "y", "x"])
+        # Two valid structures for multi-position:
+        # 1. bioformats2raw layout (yaozarrs): has "bioformats2raw.layout" key
+        #    Each position is an independent Image in subdirectories
+        # 2. multiscales with positions as datasets (acquire-zarr): has
+        #    "multiscales" key. Positions are listed as datasets in a multiscale
+        if "bioformats2raw.layout" in ome_attrs:
+            # yaozarrs uses bioformats2raw layout for multi-position
+            assert ome_attrs["bioformats2raw.layout"] == 3
+            # Each position should have its own Image metadata
+            for pos_idx in range(3):
+                pos_zarr = output_path / str(pos_idx) / "zarr.json"
+                assert pos_zarr.exists()
+                with open(pos_zarr) as f:
+                    pos_meta = json.load(f)
+                pos_ome = pos_meta["attributes"]["ome"]
+                assert "multiscales" in pos_ome
+                axes_names = {ax["name"] for ax in pos_ome["multiscales"][0]["axes"]}
+                assert all(x in axes_names for x in ["t", "c", "y", "x"])
+        else:
+            # acquire-zarr uses multiscales with positions as datasets
+            multiscales = ome_attrs["multiscales"]
+            assert isinstance(multiscales, list)
+            assert len(multiscales) == 1
+            assert len(multiscales[0]["datasets"]) == 3
+
+            axes_names = {ax["name"] for ax in multiscales[0]["axes"]}
+            assert all(x in axes_names for x in ["t", "c", "y", "x"])
 
     elif (ext := backend.file_ext).endswith("tiff"):
         # For TIFF, separate files are created for each position

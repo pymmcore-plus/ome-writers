@@ -9,6 +9,7 @@ import numpy as np
 from .backends._acquire_zarr import AcquireZarrStream
 from .backends._tensorstore import TensorStoreZarrStream
 from .backends._tifffile import TifffileStream
+from .backends._yaozarrs import YaozarrsStream
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -21,10 +22,11 @@ if TYPE_CHECKING:
 
 __all__ = ["create_stream", "init_stream"]
 
-BackendName: TypeAlias = Literal["acquire-zarr", "tensorstore", "tiff"]
+BackendName: TypeAlias = Literal["acquire-zarr", "tensorstore", "yaozarrs", "tiff"]
 BACKENDS: dict[BackendName, type[OMEStream]] = {
     "acquire-zarr": AcquireZarrStream,
     "tensorstore": TensorStoreZarrStream,
+    "yaozarrs": YaozarrsStream,
     "tiff": TifffileStream,
 }
 
@@ -40,11 +42,12 @@ def init_stream(
     ----------
     path : str
         Path to the output file or directory.
-    backend : Literal["acquire-zarr", "tensorstore", "tiff", "auto"], optional
+    backend : Literal["acquire-zarr", "tensorstore", "yaozarrs", "tiff", "auto"]
         The backend to use for writing the data. Options are:
 
         - "acquire-zarr": Use acquire-zarr backend.
-        - "tensorstore": Use tensorstore backend.
+        - "tensorstore": Use tensorstore backend (direct tensorstore API).
+        - "yaozarrs": Use yaozarrs backend (recommended for OME-Zarr).
         - "tiff": Use tifffile backend.
         - "auto": Automatically determine the backend based on the file extension.
 
@@ -57,10 +60,10 @@ def init_stream(
     """
     if backend == "auto":
         backend = _autobackend(path)
-    elif backend not in {"acquire-zarr", "tensorstore", "tiff"}:
+    elif backend not in {"acquire-zarr", "tensorstore", "yaozarrs", "tiff"}:
         raise ValueError(  # pragma: no cover
             f"Invalid backend '{backend}'. "
-            "Choose from 'acquire-zarr', 'tensorstore', or 'tiff'."
+            "Choose from 'acquire-zarr', 'yaozarrs', 'tensorstore', or 'tiff'."
         )
 
     return BACKENDS[backend]()
@@ -85,11 +88,12 @@ def create_stream(
     dimensions : Sequence[DimensionInfo]
         Sequence of dimension information describing the data structure.
 
-    backend : Literal["acquire-zarr", "tensorstore", "tiff", "auto"], optional
+    backend : Literal["acquire-zarr", "tensorstore", "yaozarrs", "tiff", "auto"]
         The backend to use for writing the data. Options are:
 
         - "acquire-zarr": Use acquire-zarr backend.
-        - "tensorstore": Use tensorstore backend.
+        - "tensorstore": Use tensorstore backend (direct tensorstore API).
+        - "yaozarrs": Use yaozarrs backend (recommended for OME-Zarr).
         - "tiff": Use tifffile backend.
         - "auto": Automatically determine the backend based on the file extension.
 
@@ -106,16 +110,20 @@ def create_stream(
     return stream.create(str(path), np.dtype(dtype), dimensions, overwrite=overwrite)
 
 
-def _autobackend(path: str | Path) -> Literal["acquire-zarr", "tensorstore", "tiff"]:
+def _autobackend(
+    path: str | Path,
+) -> Literal["acquire-zarr", "tensorstore", "yaozarrs", "tiff"]:
     path = str(path)
     if path.endswith(".zarr"):
         if AcquireZarrStream.is_available():
             return "acquire-zarr"
         elif TensorStoreZarrStream.is_available():  # pragma: no cover
             return "tensorstore"
+        elif YaozarrsStream.is_available():  # pragma: no cover
+            return "yaozarrs"
         raise ValueError(  # pragma: no cover
             "Cannot determine backend automatically for .zarr file. "
-            "Neither acquire-zarr nor tensorstore is available. "
+            "Neither acquire-zarr, tensorstore, nor yaozarrs is installed. "
             "Please install one of these packages."
         )
     elif path.endswith(".tiff") or path.endswith(".ome.tiff"):
@@ -127,5 +135,5 @@ def _autobackend(path: str | Path) -> Literal["acquire-zarr", "tensorstore", "ti
         )
     raise ValueError(  # pragma: no cover
         "Cannot determine backend automatically. "
-        "Please specify 'acquire-zarr', 'tensorstore', or 'tiff'."
+        "Please specify 'acquire-zarr', 'tensorstore', 'yaozarrs', or 'tiff'."
     )

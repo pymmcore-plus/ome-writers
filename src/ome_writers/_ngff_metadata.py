@@ -7,6 +7,16 @@ if TYPE_CHECKING:
 
     from ome_writers._dimensions import Dimension
 
+    try:
+        from yaozarrs import v05
+    except ImportError as e:
+        raise ImportError(
+            "The `yaozarrs` package is required to use this function. "
+            "Please install it via `pip install yaozarrs`."
+        ) from e
+
+    AxisType = v05.TimeAxis | v05.SpaceAxis | v05.ChannelAxis | v05.CustomAxis
+
 
 def ome_meta_v5(array_dims: Mapping[str, Sequence[Dimension]]) -> dict:
     """Create OME NGFF v0.5 metadata.
@@ -76,3 +86,37 @@ def _ome_axes_scales(dims: Sequence[Dimension]) -> tuple[list[dict], list[float]
         )
         scales.append(dim.ome_scale)
     return axes, scales
+
+
+def dim_to_yaozarrs_axis_v05(dim: Dimension) -> AxisType:
+    """Convert a Dimension to a yaozarrs v05 Axis object.
+
+    Parameters
+    ----------
+    dim : Dimension
+        The dimension to convert.
+
+    Returns
+    -------
+    AxisType: TimeAxis | SpaceAxis | ChannelAxis | CustomAxis
+        A yaozarrs v05 Axis object.
+    """
+    try:
+        from yaozarrs import v05
+    except ImportError as e:
+        raise ImportError(
+            "The `yaozarrs` package is required to use this function. "
+            "Please install it via `pip install yaozarrs`."
+        ) from e
+
+    label = dim.label
+    unit = dim.ome_unit if dim.ome_unit != "unknown" else None
+
+    if label == "t":
+        return v05.TimeAxis(name=label, unit=unit)
+    elif label == "c":
+        return v05.ChannelAxis(name=label)
+    elif label in ("x", "y", "z"):
+        return v05.SpaceAxis(name=label, unit=unit)
+    else:
+        return v05.CustomAxis(name=label)
