@@ -50,8 +50,10 @@ class AcquireZarrStream(MultiPositionOMEStream):
         *,
         overwrite: bool = False,
     ) -> Self:
-        # Use MultiPositionOMEStream to handle position logic
-        num_positions, non_position_dims = self._init_positions(dimensions)
+        # Initialize dimensions from MultiPositionOMEStream
+        # NOTE: Data will be stored in acquisition order.
+        self._init_dimensions(dimensions)
+
         self._group_path = Path(self._normalize_path(path))
 
         # Check if directory exists and handle overwrite parameter
@@ -64,14 +66,14 @@ class AcquireZarrStream(MultiPositionOMEStream):
             shutil.rmtree(self._group_path)
 
         # Dimensions will be the same across all positions, so we can create them once
-        az_dims = [self._dim_toaqz_dim(dim) for dim in non_position_dims]
+        az_dims = [self._dim_toaqz_dim(dim) for dim in self.storage_order_dims]
         # keep a strong reference (avoid segfaults)
         self._az_dims_keepalive = az_dims
 
         # Create AcquireZarr array settings for each position
         az_array_settings = [
             self._aqz_pos_array(pos_idx, az_dims, dtype)
-            for pos_idx in range(num_positions)
+            for pos_idx in range(self.num_positions)
         ]
 
         for arr in az_array_settings:
@@ -90,19 +92,19 @@ class AcquireZarrStream(MultiPositionOMEStream):
         self._az_settings_keepalive = settings
         self._stream = self._aqz.ZarrStream(settings)
 
-        self._patch_group_metadata()
         return self
 
-    def _patch_group_metadata(self) -> None:
-        """Patch the group metadata with OME NGFF 0.5 metadata.
+    def _patch_metadata_to_ngff_v05(self) -> None:
+        """Patch the Zarr group metadata to ensure OME-NGFF v0.5 compliance.
 
-        This method exists because there are cases in which the standard acquire-zarr
-        API is not flexible enough to handle all the cases we need (such as multiple
-        positions).  This method manually writes the OME NGFF v0.5 metadata with our
-        manually constructed metadata.
+        This method writes OME-NGFF v0.5-compliant metadata for the group,
+        preserving the acquisition order (storage order) for the dimensions.
+        Data is stored and read back in the same order it was acquired.
         """
-        dims = self._non_position_dims
-        attrs = ome_meta_v5({str(i): dims for i in range(self._num_positions)})
+        # Use storage order dims as-is (acquisition order)
+        attrs = ome_meta_v5(
+            {str(i): self.storage_order_dims for i in range(self.num_positions)}
+        )
         zarr_json = Path(self._group_path) / "zarr.json"
         current_meta: dict = {
             "consolidated_metadata": None,
@@ -118,11 +120,14 @@ class AcquireZarrStream(MultiPositionOMEStream):
         zarr_json.write_text(json.dumps(current_meta, indent=2))
 
     def _write_to_backend(
-        self, array_key: str, index: tuple[int, ...], frame: np.ndarray
+        self, position_key: str, index: tuple[int, ...], frame: np.ndarray
     ) -> None:
-        """AcquireZarr-specific write implementation."""
+        """AcquireZarr-specific write implementation.
+
+        NOTE: For AcquireZarr, frames are written sequentially, so index is not used.
+        """
         if self._stream is not None:
-            self._stream.append(frame, key=array_key)
+            self._stream.append(frame, key=position_key)
 
     def flush(self) -> None:
         if not self._stream:  # pragma: no cover
@@ -131,7 +136,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
         self._stream.close()
         self._stream = None
         gc.collect()
-        self._patch_group_metadata()
+        self._patch_metadata_to_ngff_v05()
 
     def is_active(self) -> bool:
         if self._stream is None:

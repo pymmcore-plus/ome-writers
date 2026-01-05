@@ -2,19 +2,22 @@ from __future__ import annotations
 
 import abc
 from abc import abstractmethod
-from itertools import product
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from typing_extensions import Self
 
+from ome_writers._util import DimensionIndexIterator
+
+from ._dimensions import Dimension
+
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
     from types import TracebackType
 
     import numpy as np
 
-    from ._dimensions import Dimension
+    from ._dimensions import Dimension, DimensionLabel
 
 
 class OMEStream(abc.ABC):
@@ -48,6 +51,8 @@ class OMEStream(abc.ABC):
             NumPy data type for the image data.
         dimensions : Sequence[Dimension]
             Sequence of dimension information describing the data structure.
+            The order of dimensions in this sequence determines the acquisition order
+            (i.e., the order in which frames will be appended to the stream).
         overwrite : bool, optional
             Whether to overwrite existing files or directories. Default is False.
 
@@ -108,55 +113,99 @@ class MultiPositionOMEStream(OMEStream):
     """
 
     def __init__(self) -> None:
-        # dimension info for position dimension, if any
-        self._position_dim: Dimension | None = None
-        # A mapping of indices to (array_key, non-position index)
-        self._indices: dict[int, tuple[str, tuple[int, ...]]] = {}
-        # number of times append() has been called
-        self._append_count = 0
-        # number of positions in the stream
+        # property to track number of positions
         self._num_positions = 0
-        # non-position dimensions
-        # (e.g. time, z, c, y, x) that are not
-        self._non_position_dims: Sequence[Dimension] = []
+        # property to track non-position dimensions in storage order (as stored on disk)
+        self._storage_order_dims: Sequence[Dimension] = []
+        # iterator to yield (position_key, index) tuples in acquisition order
+        self._dim_iter: Iterator[tuple[int, tuple[int, ...]]] = iter(())
 
-    def _init_positions(
-        self, dimensions: Sequence[Dimension]
-    ) -> tuple[int, Sequence[Dimension]]:
-        """Initialize position tracking and return num_positions, non_position_dims.
+    def _init_dimensions(self, dimensions: Sequence[Dimension]) -> None:
+        """Initialize dimensions.
 
-        Returns
-        -------
-        tuple[int, Sequence[Dimension]]
-            The number of positions and the non-position dimensions.
+        This method performs two related tasks:
+
+        1) Define the shape and logical ordering that will be used to store the
+           multi-dimensional dataset on disk. The acquisition order is preserved and the
+           shape of the data written to disk will follow the acquisition order.
+
+        2) Build an iterator that yields per-frame indices in acquisition order.
+           The iterator `self._dim_iter` yields tuples `(position_key, index_tuple)`
+           where `position_key` is an integer identifying the position, and
+           `index_tuple` contains the indices for the non-spatial axes in acquisition
+           order (e.g., `(t, c, z)` or `(c, t, z)` depending on the acquisition).
+           This allows the stream to correctly place each incoming frame in the
+           correct location of the storage array.
+
+        Properties Set
+        --------------
+        num_positions : int
+            The number of positions in the stream.
+        storage_order_dims : Sequence[Dimension]
+            The non-position dimensions in acquisition/storage order (data is stored
+            exactly as acquired).
+        dim_iter : Iterator[tuple[int, tuple[int, ...]]]
+            An iterator over (position_key, index_tuple) tuples in acquisition order.
+
+        Parameters
+        ----------
+        dimensions : Sequence[Dimension]
+            Dimensions in acquisition order.
         """
-        # Separate position dimension from other dimensions
-        position_dims = [d for d in dimensions if d.label == "p"]
+        # Retrieve the number of positions from the dimensions if any, otherwise 1
+        position_dims = self._get_position_dim(dimensions)
+        self._num_positions = position_dims.size if position_dims else 1
+
+        # Filter out the position dimension to get only non-position dimensions (no 'p')
         non_position_dims = [d for d in dimensions if d.label != "p"]
-        num_positions = position_dims[0].size if position_dims else 1
-        non_p_ranges = [range(d.size) for d in non_position_dims if d.label not in "yx"]
-        range_iter = enumerate(product(range(num_positions), *non_p_ranges))
 
-        self._position_dim = position_dims[0] if position_dims else None
-        self._indices = {i: (str(pos), tuple(idx)) for i, (pos, *idx) in range_iter}
-        self._append_count = 0
-        self._num_positions = num_positions
-        self._non_position_dims = non_position_dims
+        # Keep the acquisition order for non-position dimensions (no 'p')
+        self._storage_order_dims = list(non_position_dims)
 
-        return num_positions, non_position_dims
+        # Extract labels of storage order dims, excluding spatial dims y and x
+        storage_order_labels: list[DimensionLabel] = [
+            d.label for d in self._storage_order_dims if d.label not in "yx"
+        ]
+
+        # Create iterator yielding (position_key, index_tuple) in acquisition order
+        self._dim_iter = iter(DimensionIndexIterator(dimensions, storage_order_labels))
+
+    @property
+    def num_positions(self) -> int:
+        """Return the number of positions in the stream."""
+        return self._num_positions
+
+    @property
+    def storage_order_dims(self) -> Sequence[Dimension]:
+        """Return the storage order dimensions."""
+        return self._storage_order_dims
+
+    @property
+    def dim_iter(self) -> Iterator[tuple[int, tuple[int, ...]]]:
+        """Return an iterator over (position_key, index) tuples."""
+        return self._dim_iter
+
+    def _get_position_dim(self, dimensions: Sequence[Dimension]) -> Dimension | None:
+        """Return the position Dimension if it exists, else None."""
+        for dim in dimensions:
+            if dim.label == "p":
+                return dim
+        return None
 
     @abstractmethod
     def _write_to_backend(
-        self, array_key: str, index: tuple[int, ...], frame: np.ndarray
+        self, position_key: str, index: tuple[int, ...], frame: np.ndarray
     ) -> None:
         """Backend-specific write implementation.
 
         Parameters
         ----------
-        array_key : str
+        position_key : str
             The key for the position in the backend (e.g., Zarr group).
         index : tuple[int, ...]
-            The index for the non-position dimensions.
+            A tuple of indices for the non-spatial dimensions in acquisition order
+            (e.g., (t, c, z) or (c, t, z) depending on how dimensions were defined).
+            Can be used directly for array indexing.
         frame : np.ndarray
             The frame data to write.
 
@@ -170,6 +219,5 @@ class MultiPositionOMEStream(OMEStream):
         if not self.is_active():
             msg = "Stream is closed or uninitialized. Call create() first."
             raise RuntimeError(msg)
-        array_key, index = self._indices[self._append_count]
-        self._write_to_backend(array_key, index, frame)
-        self._append_count += 1
+        position_key, index = next(self._dim_iter)
+        self._write_to_backend(str(position_key), index, frame)
