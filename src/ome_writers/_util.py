@@ -238,6 +238,9 @@ class DimensionIndexIterator:
         # Filter dimensions to those in output order, preserving acquisition order
         acq_order_dims = acquisition_order_dimensions
         self._iter_dims = [d for d in acq_order_dims if d.label in needed_labels]
+        
+        # Check if there are any spatial dimensions in the input
+        self._has_spatial = any(d.label in ("y", "x") for d in acq_order_dims)
 
         # Compute shape tuple for iteration in acquisition order
         self._shape = tuple(d.size for d in self._iter_dims)
@@ -256,6 +259,11 @@ class DimensionIndexIterator:
     def __iter__(self) -> Iterator[tuple[int, tuple]]:
         """Yield indices in acquisition order, formatted in output order."""
         if not self._shape:
+            # Special case: no non-spatial dimensions
+            # If there are spatial dimensions (2D-only), yield one frame
+            # If no dimensions at all, don't yield anything
+            if self._has_spatial:
+                yield 0, ()
             return
 
         # Iterate over all acquisition indices

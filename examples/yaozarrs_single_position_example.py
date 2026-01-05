@@ -15,8 +15,7 @@ data_gen, dimensions, dtype = omew.fake_data_for_sizes(
     dtype=np.uint16,
 )
 
-output_path = Path("output/single_position.ome.zarr")
-output_path.parent.mkdir(exist_ok=True)
+output_path = Path("single_position.ome.zarr").expanduser()
 
 # Create stream and write data
 stream = omew.YaozarrsStream()

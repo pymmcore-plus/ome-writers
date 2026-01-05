@@ -21,8 +21,7 @@ dimensions = [
     omew.Dimension(label="x", size=32, chunk_size=16),
 ]
 
-output_path = Path("output/multipos_reordered.ome.zarr")
-output_path.parent.mkdir(exist_ok=True)
+output_path = Path("multipos_reordered.ome.zarr").expanduser()
 
 stream = omew.YaozarrsStream()
 stream.create(str(output_path), np.dtype("uint16"), dimensions, overwrite=True)

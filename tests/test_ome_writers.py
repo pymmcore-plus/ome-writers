@@ -125,6 +125,18 @@ def test_data_integrity_roundtrip(
     sizes: dict[str, int],
 ) -> None:
     """Test data integrity roundtrip with different data types and dimension orders."""
+    # yaozarrs stores in NGFF order (time, channel, space), not acquisition order
+    # Skip non-canonical orders for yaozarrs since data will be reordered
+    dim_labels = list(sizes.keys())
+    non_spatial_labels = [d for d in dim_labels if d not in ("y", "x")]
+    is_canonical = non_spatial_labels == sorted(
+        non_spatial_labels, key=lambda x: {"t": 0, "c": 1, "z": 2}.get(x, 3)
+    )
+    if backend.name == "yaozarrs" and not is_canonical:
+        pytest.skip(
+            "yaozarrs reorders to NGFF order; skipping non-canonical order test"
+        )
+
     data_gen, dimensions, dtype = omew.fake_data_for_sizes(
         sizes=sizes,
         chunk_sizes={"y": 32, "x": 32},
@@ -276,6 +288,12 @@ def test_zarr_metadata_correctness(
     zarr_backend: AvailableBackend, sizes: dict[str, int], tmp_path: Path
 ) -> None:
     """Test that zarr metadata preserves acquisition order."""
+    # yaozarrs stores in NGFF order, not acquisition order
+    if zarr_backend.name == "yaozarrs":
+        pytest.skip(
+            "yaozarrs stores metadata in NGFF v0.5 order, not acquisition order"
+        )
+
     output_path = tmp_path / "test_metadata.zarr"
     data_gen, dims, dtype = omew.fake_data_for_sizes(sizes)
 

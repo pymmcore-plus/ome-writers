@@ -15,7 +15,7 @@ data_gen, dimensions, dtype = omew.fake_data_for_sizes(
     dtype=np.uint8,
 )
 
-output_path = Path("output/multiposition.ome.zarr")
+output_path = Path("multiposition.ome.zarr").expanduser()
 
 stream = omew.YaozarrsStream()
 stream.create(str(output_path), dtype, dimensions, overwrite=True)

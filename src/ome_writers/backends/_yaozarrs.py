@@ -52,8 +52,8 @@ class YaozarrsStream(MultiPositionOMEStream):
             )
             raise ImportError(msg) from e
 
-        self._yaozarrs_prepare_image = prepare_image
-        self._yaozarrs_Bf2RawBuilder = Bf2RawBuilder
+        self._prepare_image = prepare_image
+        self._Bf2RawBuilder = Bf2RawBuilder
 
         super().__init__()
 
@@ -62,8 +62,6 @@ class YaozarrsStream(MultiPositionOMEStream):
         self._futures: list[Any] = []
         self._builder: Bf2RawBuilder | None = None
         self._writer: Literal["auto", "tensorstore", "zarr"] = "tensorstore"
-        # Mapping from acquisition order to storage order indices
-        self._index_mapping: tuple[int, ...] | None = None
 
     def create(
         self,
@@ -98,22 +96,21 @@ class YaozarrsStream(MultiPositionOMEStream):
             The configured stream instance.
         """
         self._writer = writer
-        # Use MultiPositionOMEStream to handle position logic
-        num_positions, non_position_dims = self._init_positions(dimensions)
+        # Use MultiPositionOMEStream with NGFF ordering
+        self._init_dimensions(dimensions, ngff_order=True)
+        num_positions = self._num_positions
+        storage_dims = self._storage_order_dims
         self._group_path = Path(self._normalize_path(path))
 
-        # Reorder dimensions to NGFF order and get index mapping
-        ngff_dims, self._index_mapping = self._reorder_to_ngff(non_position_dims)
-
         # Get shape from NGFF-ordered dimensions
-        shape = tuple(d.size for d in ngff_dims)
+        shape = tuple(d.size for d in storage_dims)
 
-        # Build the Image metadata template with NGFF-ordered dimensions
-        image = build_yaozarrs_image_metadata_v05(ngff_dims)
+        # Build the Image metadata with NGFF-ordered dimensions
+        image = build_yaozarrs_image_metadata_v05(storage_dims)
 
-        if num_positions == 1 and self._position_dim is None:
+        if num_positions == 1:
             # Single position: use prepare_image directly
-            _, arrays = self._yaozarrs_prepare_image(
+            _, arrays = self._prepare_image(
                 self._group_path,
                 image,
                 datasets=[(shape, dtype)],
@@ -124,7 +121,7 @@ class YaozarrsStream(MultiPositionOMEStream):
             self._arrays["0"] = arrays["0"]
         else:
             # Multi-position: use Bf2RawBuilder for bioformats2raw layout
-            self._builder = self._yaozarrs_Bf2RawBuilder(
+            self._builder = self._Bf2RawBuilder(
                 self._group_path,
                 overwrite=overwrite,
                 writer=self._writer,
@@ -147,75 +144,22 @@ class YaozarrsStream(MultiPositionOMEStream):
 
         return self
 
-    def _reorder_to_ngff(
-        self, dims: Sequence[Dimension]
-    ) -> tuple[list[Dimension], tuple[int, ...]]:
-        """Reorder dimensions to NGFF v0.5 order: time, channel, space.
-
-        NGFF v0.5 requires axes to be ordered as:
-        1. time (t) - optional
-        2. channel (c) or custom - optional
-        3. space (z, y, x) - required 2-3 axes
-
-        Parameters
-        ----------
-        dims : Sequence[Dimension]
-            Dimensions in acquisition order (including spatial dims).
-
-        Returns
-        -------
-        tuple[list[Dimension], tuple[int, ...]]
-            - Reordered dimensions in NGFF order
-            - Index mapping for non-spatial dimensions only (for use during append)
-        """
-        # Categorize dimensions
-        time_dims = [d for d in dims if d.label == "t"]
-        channel_dims = [d for d in dims if d.label == "c"]
-        space_dims = [d for d in dims if d.label in ("z", "y", "x")]
-        non_spatial_dims = [d for d in dims if d.label not in ("y", "x")]
-
-        # Space dimensions must be in z, y, x order
-        space_order = {"z": 0, "y": 1, "x": 2}
-        space_dims.sort(key=lambda d: space_order.get(d.label, 3))
-
-        # Build NGFF order: time, channel, space
-        ngff_dims = time_dims + channel_dims + space_dims
-
-        # Build NGFF order for non-spatial dims (for index mapping during append)
-        ngff_non_spatial = [d for d in ngff_dims if d.label not in ("y", "x")]
-
-        # Create mapping for non-spatial dimensions only
-        # This maps from acquisition position to storage position for non-spatial dims
-        acq_to_ngff = tuple(ngff_non_spatial.index(dim) for dim in non_spatial_dims)
-
-        return ngff_dims, acq_to_ngff
-
     def _write_to_backend(
         self, array_key: str, index: tuple[int, ...], frame: np.ndarray
     ) -> None:
         """Write frame to the yaozarrs-created array.
 
-        The index is in acquisition order, but we need to transpose it to
-        storage (NGFF) order before writing.
-
-        _index_mapping[i] tells us which acquisition dimension goes to storage position i.
-        So storage_index[i] = acquisition_index[_index_mapping[i]].
+        The index is already in storage (NGFF) order thanks to base class.
         """
         array = self._arrays[array_key]
-
-        # Transpose index from acquisition order to storage order
-        if self._index_mapping is not None:
-            storage_index = tuple(index[acq_pos] for acq_pos in self._index_mapping)
-        else:
-            storage_index = index
 
         # Check if this is a tensorstore array or zarr array
         if hasattr(array, "store"):
             # zarr.Array - direct indexing
-            array[storage_index] = frame
+            array[index] = frame
         else:
             # tensorstore.TensorStore - use write() method
-            future = array[storage_index].write(frame)
+            future = array[index].write(frame)
             self._futures.append(future)
 
     def flush(self) -> None:
