@@ -15,8 +15,8 @@ from ome_writers._util import (
     fake_data_for_sizes,
 )
 from ome_writers.backends._acquire_zarr import AcquireZarrStream
-from ome_writers.backends._tensorstore import TensorStoreZarrStream
 from ome_writers.backends._tifffile import TifffileStream
+from ome_writers.backends._yaozarrs import TensorStoreZarrStream
 
 if TYPE_CHECKING:
     from pathlib import Path

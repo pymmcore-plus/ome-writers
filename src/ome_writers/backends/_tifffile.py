@@ -157,7 +157,7 @@ class TifffileStream(MultiPositionOMEStream):
                 ext = possible_ext
                 path_root = path_root[: -len(possible_ext)]
                 break
-        else:
+        else:  # pragma: no cover
             ext = path.suffix
 
         fnames = []
@@ -208,7 +208,7 @@ class TifffileStream(MultiPositionOMEStream):
             # Create ASCII version for tifffile.tiffcomment since tifffile.tiffcomment
             # requires ASCII strings
             ascii_xml = position_ome.to_xml().replace("µ", "&#x00B5;").encode("ascii")
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             raise RuntimeError(
                 f"Failed to create position-specific OME metadata for position "
                 f"{position_idx}. {e}"
@@ -218,7 +218,7 @@ class TifffileStream(MultiPositionOMEStream):
             # TODO:
             # consider a lock on the tiff file itself to prevent concurrent writes?
             self._tf.tiffcomment(thread._path, comment=ascii_xml)
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             raise RuntimeError(
                 f"Failed to update OME metadata in {thread._path}"
             ) from e
@@ -277,7 +277,7 @@ class WriterThread(threading.Thread):
         except Exception as e:
             # suppress an over-eager tifffile exception
             # when the number of bytes written is less than expected
-            if "wrong number of bytes" in str(e):
+            if "wrong number of bytes" in str(e):  # pragma: no cover
                 return
             raise
 

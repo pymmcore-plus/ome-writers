@@ -7,9 +7,8 @@ from typing import TYPE_CHECKING, Literal, TypeAlias
 import numpy as np
 
 from .backends._acquire_zarr import AcquireZarrStream
-from .backends._tensorstore import TensorStoreZarrStream
 from .backends._tifffile import TifffileStream
-from .backends._yaozarrs import ZarrPythonStream
+from .backends._yaozarrs import TensorStoreZarrStream, ZarrPythonStream
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
