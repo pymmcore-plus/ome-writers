@@ -101,6 +101,8 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
 
         # Get shape from NGFF-ordered dimensions
         shape = tuple(d.size for d in self._storage_order_dims)
+        # FIXME: dimension labels of Y or X are not special from a user perspective
+        # perhaps use last two dimensions instead?
         chunks = tuple(
             d.chunk_size or (d.size if d.label in "yx" else 1)
             for d in self._storage_order_dims
