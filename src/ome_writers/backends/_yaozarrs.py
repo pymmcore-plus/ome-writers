@@ -95,17 +95,15 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
         self._writer = writer
         # Use MultiPositionOMEStream with NGFF ordering
         self._init_dimensions(dimensions, ngff_order=True)
-        num_positions = self._num_positions
-        storage_dims = self._storage_order_dims
         self._group_path = Path(self._normalize_path(path))
 
         # Get shape from NGFF-ordered dimensions
-        shape = tuple(d.size for d in storage_dims)
+        shape = tuple(d.size for d in self._storage_order_dims)
 
         # Build the Image metadata with NGFF-ordered dimensions
-        image = build_yaozarrs_image_metadata_v05(storage_dims)
+        image = build_yaozarrs_image_metadata_v05(self._storage_order_dims)
 
-        if num_positions == 1:
+        if self._num_positions == 1:
             # Single position: use prepare_image directly
             _, arrays = self._prepare_image(
                 self._group_path,
@@ -125,7 +123,7 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
             )
 
             # Add each position as a separate series
-            for pos_idx in range(num_positions):
+            for pos_idx in range(self._num_positions):
                 array_key = str(pos_idx)
                 self._builder.add_series(array_key, image, [(shape, dtype)])
 
@@ -134,7 +132,7 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
 
             # Store array handles for each position
             # Bf2RawBuilder returns arrays with keys like "0/0" (series/dataset)
-            for pos_idx in range(num_positions):
+            for pos_idx in range(self._num_positions):
                 array_key = str(pos_idx)
                 # The dataset path within each image is "0" (first/only resolution)
                 self._arrays[array_key] = all_arrays[f"{array_key}/0"]
