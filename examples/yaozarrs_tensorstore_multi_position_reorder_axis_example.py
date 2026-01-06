@@ -1,4 +1,4 @@
-"""Multi-position OME-Zarr with axis reordering example using YaozarrsStream."""
+"""Multi-position OME-Zarr with axis reordering example using TensorStoreZarrStream."""
 
 from __future__ import annotations
 
@@ -21,9 +21,9 @@ dimensions = [
     omew.Dimension(label="x", size=32, chunk_size=16),
 ]
 
-output_path = Path("multipos_reordered.ome.zarr").expanduser()
+output_path = Path("example_yzr_multipos_reordered.ome.zarr").expanduser()
 
-stream = omew.YaozarrsStream()
+stream = omew.TensorStoreZarrStream()
 stream.create(str(output_path), np.dtype("uint16"), dimensions, overwrite=True)
 
 # Append frames in acquisition order (p, t, z, c)

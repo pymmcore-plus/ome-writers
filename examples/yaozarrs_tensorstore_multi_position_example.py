@@ -1,4 +1,4 @@
-"""Multi-position OME-Zarr writing example using YaozarrsStream."""
+"""Multi-position OME-Zarr writing example using TensorStoreZarrStream."""
 
 from __future__ import annotations
 
@@ -15,9 +15,9 @@ data_gen, dimensions, dtype = omew.fake_data_for_sizes(
     dtype=np.uint8,
 )
 
-output_path = Path("multiposition.ome.zarr").expanduser()
+output_path = Path("example_yzr_multipos.ome.zarr").expanduser()
 
-stream = omew.YaozarrsStream()
+stream = omew.TensorStoreZarrStream()
 stream.create(str(output_path), dtype, dimensions, overwrite=True)
 
 # Write all frames
