@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+from abc import abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -10,7 +11,7 @@ from ome_writers._dimensions import build_yaozarrs_image_metadata_v05
 from ome_writers._stream_base import MultiPositionOMEStream
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     import numpy as np
 
@@ -61,16 +62,17 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
         self._arrays: dict[str, Any] = {}
         self._futures: list[Any] = []
         self._builder: Bf2RawBuilder | None = None
-        self._writer: Literal["tensorstore", "zarr"] = "tensorstore"
 
-    def _create(
+    @abstractmethod
+    def _get_writer(self) -> Literal["tensorstore", "zarr"] | Callable: ...
+
+    def create(
         self,
         path: str,
         dtype: np.dtype,
         dimensions: Sequence[Dimension],
         *,
         overwrite: bool = False,
-        writer: Literal["tensorstore", "zarr"],
     ) -> Self:
         """Internal method to create the OME-Zarr storage structure.
 
@@ -92,13 +94,14 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
         Self
             The configured stream instance.
         """
-        self._writer = writer
         # Use MultiPositionOMEStream with NGFF ordering
         self._init_dimensions(dimensions, ngff_order=True)
+        writer = self._get_writer()
         self._group_path = Path(self._normalize_path(path))
 
         # Get shape from NGFF-ordered dimensions
         shape = tuple(d.size for d in self._storage_order_dims)
+        chunks = tuple(d.chunk_size or 1 for d in self._storage_order_dims)
 
         # Build the Image metadata with NGFF-ordered dimensions
         image = build_yaozarrs_image_metadata_v05(self._storage_order_dims)
@@ -110,7 +113,8 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
                 image,
                 datasets=[(shape, dtype)],
                 overwrite=overwrite,
-                writer=self._writer,
+                chunks=chunks,
+                writer=writer,
             )
             # Store array handle for the single position
             self._arrays["0"] = arrays["0"]
@@ -119,7 +123,8 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
             self._builder = self._Bf2RawBuilder(
                 self._group_path,
                 overwrite=overwrite,
-                writer=self._writer,
+                chunks=chunks,
+                writer=writer,
             )
 
             # Add each position as a separate series
@@ -138,24 +143,6 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
                 self._arrays[array_key] = all_arrays[f"{array_key}/0"]
 
         return self
-
-    def _write_to_backend(
-        self, position_key: str, index: tuple[int, ...], frame: np.ndarray
-    ) -> None:
-        """Write frame to the yaozarrs-created array.
-
-        The index is already in storage (NGFF) order thanks to base class.
-        """
-        array = self._arrays[position_key]
-
-        # Check if this is a tensorstore array or zarr array
-        if hasattr(array, "store"):
-            # zarr.Array - direct indexing
-            array[index] = frame
-        else:
-            # tensorstore.TensorStore - use write() method
-            future = array[index].write(frame)
-            self._futures.append(future)
 
     def flush(self) -> None:
         """Flush pending writes and close the stream."""
@@ -185,37 +172,24 @@ class TensorStoreZarrStream(_YaozarrsStreamBase):
             return False
         return importlib.util.find_spec("tensorstore") is not None
 
-    def create(
-        self,
-        path: str,
-        dtype: np.dtype,
-        dimensions: Sequence[Dimension],
-        *,
-        overwrite: bool = False,
-    ) -> Self:
-        """Create the OME-Zarr storage structure using tensorstore.
+    def _get_writer(self) -> Literal["tensorstore"]:
+        return "tensorstore"
 
-        Parameters
-        ----------
-        path : str
-            Path to the output zarr store.
-        dtype : np.dtype
-            Data type for the arrays.
-        dimensions : Sequence[Dimension]
-            Sequence of dimensions describing the data structure.
-        overwrite : bool, optional
-            Whether to overwrite existing stores. Default is False.
-        **kwargs
-            Additional keyword arguments (unused, for compatibility).
+    def _write_to_backend(
+        self, position_key: str, index: tuple[int, ...], frame: np.ndarray
+    ) -> None:
+        """Write frame to the yaozarrs-created array.
 
-        Returns
-        -------
-        Self
-            The configured stream instance.
+        The index is already in storage (NGFF) order thanks to base class.
         """
-        return self._create(
-            path, dtype, dimensions, overwrite=overwrite, writer="tensorstore"
-        )
+        array = self._arrays[position_key]
+        future = array[index].write(frame)
+        self._futures.append(future)
+
+    def flush(self) -> None:
+        for future in self._futures:
+            future.result()
+        return super().flush()
 
 
 class ZarrPythonStream(_YaozarrsStreamBase):
@@ -238,32 +212,136 @@ class ZarrPythonStream(_YaozarrsStreamBase):
         except ImportError:
             return False
 
-    def create(
-        self,
-        path: str,
-        dtype: np.dtype,
-        dimensions: Sequence[Dimension],
-        *,
-        overwrite: bool = False,
-    ) -> Self:
-        """Create the OME-Zarr storage structure using zarr-python.
+    def _get_writer(self) -> Literal["zarr"]:
+        return "zarr"
 
-        Parameters
-        ----------
-        path : str
-            Path to the output zarr store.
-        dtype : np.dtype
-            Data type for the arrays.
-        dimensions : Sequence[Dimension]
-            Sequence of dimensions describing the data structure.
-        overwrite : bool, optional
-            Whether to overwrite existing stores. Default is False.
-        **kwargs
-            Additional keyword arguments (unused, for compatibility).
+    def _write_to_backend(
+        self, position_key: str, index: tuple[int, ...], frame: np.ndarray
+    ) -> None:
+        """Write frame to the yaozarrs-created array.
 
-        Returns
-        -------
-        Self
-            The configured stream instance.
+        The index is already in storage (NGFF) order thanks to base class.
         """
-        return self._create(path, dtype, dimensions, overwrite=overwrite, writer="zarr")
+        self._arrays[position_key][index] = frame
+
+
+# MESSY PROOF OF PRINCIPLE
+# class AcquireZarrStream(_YaozarrsStreamBase):
+#     """OME-Zarr writer using yaozarrs with tensorstore backend.
+
+#     This stream creates OME-Zarr v0.5 compatible stores using tensorstore for
+#     efficient array I/O. Data is always stored in NGFF canonical order (tczyx).
+#     """
+
+#     @classmethod
+#     def is_available(cls) -> bool:
+#         """Check if yaozarrs and tensorstore are available."""
+#         if not super().is_available():
+#             return False
+#         return importlib.util.find_spec("tensorstore") is not None
+
+#     def _init_dimensions(
+#         self, dimensions: Sequence[Dimension], ngff_order: bool = True
+#     ) -> None:
+#         # Force NGFF order for AcquireZarrStream
+#         super()._init_dimensions(dimensions, ngff_order=True)
+
+#         def _create_stream(
+#             path: Path,
+#             shape: tuple[int, ...],
+#             dtype: Any,
+#             chunks: tuple[int, ...],
+#             *,
+#             shards: tuple[int, ...] | None,  # = None,
+#             overwrite: bool,  # = False,
+#             compression: str,  # = "blosc-zstd",
+#             dimension_names: list[str] | None,  # = None,
+#         ) -> Any:
+#             # Dimensions will be the same across all positions, so we can create them once
+#             az_dims = [_dim_toaqz_dim(dim) for dim in self.storage_order_dims]
+
+#             # Create AcquireZarr array settings for each position
+#             az_array_settings = [
+#                 _aqz_pos_array(pos_idx, az_dims, dtype)
+#                 for pos_idx in range(self.num_positions)
+#             ]
+
+#             for arr in az_array_settings:
+#                 for d in arr.dimensions:
+#                     assert d.chunk_size_px > 0, (d.name, d.chunk_size_px)
+#                     assert d.shard_size_chunks > 0, (d.name, d.shard_size_chunks)
+
+#             # keep a strong reference (avoid segfaults)
+#             self._az_dims_keepalive = az_dims
+#             self._az_arrays_keepalive = az_array_settings
+
+#             # Create streams for each position
+#             settings = az.StreamSettings(
+#                 arrays=az_array_settings,
+#                 store_path=str(self._group_path),
+#                 version=az.ZarrVersion.V3,
+#             )
+#             return az.ZarrStream(settings)
+
+#         self._create_stream = _create_stream
+
+#     def _get_writer(self) -> Callable:  # type: ignore[override]
+#         return self._create_stream
+
+#     def _write_to_backend(
+#         self, position_key: str, index: tuple[int, ...], frame: np.ndarray
+#     ) -> None:
+#         """Write frame to the yaozarrs-created array.
+
+#         The index is already in storage (NGFF) order thanks to base class.
+#         """
+#         self._arrays[position_key].append(frame, key=position_key)
+
+#     def flush(self) -> None:
+#         super().flush()
+#         _write_metadata(self._group_path, self._ome_model)
+
+# def _dim_toaqz_dim(
+#     dim: Dimension,
+#     shard_size_chunks: int = 1,
+# ) -> az.Dimension:
+#     return az.Dimension(
+#         name=dim.label,
+#         kind=getattr(az.DimensionType, dim.ome_dim_type.upper()),
+#         array_size_px=dim.size,
+#         chunk_size_px=(dim.chunk_size if dim.chunk_size is not None else dim.size),
+#         shard_size_chunks=shard_size_chunks,
+#     )
+
+
+# def _aqz_pos_array(
+#     position_index: int,
+#     dimensions: list[az.Dimension],
+#     dtype: np.dtype,
+# ) -> az.ArraySettings:
+#     """Create an AcquireZarr ArraySettings for a position."""
+#     return az.ArraySettings(
+#         # this matches the position index key from the base class
+#         output_key=str(position_index),
+#         dimensions=dimensions,
+#         data_type=dtype,
+#     )
+
+
+# def _write_metadata(
+#     dest_path: Path,
+#     ome_model: BaseModel | None = None,
+#     indent: int = 2,
+# ) -> None:
+#     """Create a zarr group directory with optional OME metadata in zarr.json."""
+#     zarr_json_path = dest_path / "zarr.json"
+#     dest_path.mkdir(parents=True, exist_ok=True)
+#     zarr_json: dict[str, Any] = {
+#         "zarr_format": 3,
+#         "node_type": "group",
+#     }
+#     if ome_model is not None:
+#         zarr_json["attributes"] = {
+#             "ome": ome_model.model_dump(mode="json", exclude_none=True),
+#         }
+#     zarr_json_path.write_text(json.dumps(zarr_json, indent=indent))
