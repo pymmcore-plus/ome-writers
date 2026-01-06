@@ -16,7 +16,7 @@ from ome_writers._util import (
 )
 from ome_writers.backends._acquire_zarr import AcquireZarrStream
 from ome_writers.backends._tifffile import TifffileStream
-from ome_writers.backends._yaozarrs import TensorStoreZarrStream
+from ome_writers.backends._yaozarrs import TensorStoreZarrStream, ZarrPythonStream
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -109,15 +109,21 @@ def test_init_stream_backends() -> None:
 
 
 @pytest.mark.skipif(
-    not (AcquireZarrStream.is_available() or TensorStoreZarrStream.is_available()),
+    not (
+        AcquireZarrStream.is_available()
+        or TensorStoreZarrStream.is_available()
+        or ZarrPythonStream.is_available()
+    ),
     reason="no zarr backend available",
 )
 def test_autobackend_zarr(tmp_path: Path) -> None:
     """Test automatic backend selection for .zarr files."""
     zarr_path = tmp_path / "test.zarr"
     stream = init_stream(str(zarr_path), backend="auto")
-    # Should select acquire-zarr if available, otherwise tensorstore
-    assert isinstance(stream, (AcquireZarrStream, TensorStoreZarrStream))
+    # Should select acquire-zarr if available, otherwise tensorstore or zarr-python
+    assert isinstance(
+        stream, (AcquireZarrStream, TensorStoreZarrStream, ZarrPythonStream)
+    )
 
 
 @pytest.mark.skipif(not TifffileStream.is_available(), reason="tifffile not available")

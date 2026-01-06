@@ -180,6 +180,13 @@ class TensorStoreZarrStream(_YaozarrsStreamBase):
     efficient array I/O. Data is always stored in NGFF canonical order (tczyx).
     """
 
+    @classmethod
+    def is_available(cls) -> bool:
+        """Check if yaozarrs and tensorstore are available."""
+        if not super().is_available():
+            return False
+        return importlib.util.find_spec("tensorstore") is not None
+
     def create(
         self,
         path: str,
@@ -219,6 +226,13 @@ class ZarrPythonStream(_YaozarrsStreamBase):
     This stream creates OME-Zarr v0.5 compatible stores using zarr-python for
     array I/O. Data is always stored in NGFF canonical order (tczyx).
     """
+
+    @classmethod
+    def is_available(cls) -> bool:
+        """Check if yaozarrs and zarr-python are available."""
+        if not super().is_available():
+            return False
+        return importlib.util.find_spec("zarr") is not None
 
     def create(
         self,
