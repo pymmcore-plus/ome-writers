@@ -14,9 +14,8 @@ from ._dimensions import Dimension, DimensionLabel, UnitTuple
 from ._stream_base import OMEStream
 from ._util import dims_from_useq, fake_data_for_sizes
 from .backends._acquire_zarr import AcquireZarrStream
-from .backends._tensorstore import TensorStoreZarrStream
 from .backends._tifffile import TifffileStream
-from .backends._yaozarrs import ZarrPythonStream
+from .backends._yaozarrs import TensorStoreZarrStream, ZarrPythonStream
 
 __all__ = [
     "AcquireZarrStream",
