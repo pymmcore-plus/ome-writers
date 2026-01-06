@@ -48,6 +48,8 @@ jobs:
             python-version: "3.10"
           - group: acquire-zarr
             python-version: "3.10"
+          - group: pymmcore
+            python-version: "3.10"
 
     steps:
       - uses: actions/checkout@v6

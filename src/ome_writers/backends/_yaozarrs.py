@@ -232,7 +232,13 @@ class ZarrPythonStream(_YaozarrsStreamBase):
         """Check if yaozarrs and zarr-python are available."""
         if not super().is_available():
             return False
-        return importlib.util.find_spec("zarr") is not None
+        try:
+            import zarr
+            from packaging.version import Version
+
+            return bool(Version(zarr.__version__) >= Version("3.0.0"))
+        except ImportError:
+            return False
 
     def create(
         self,
