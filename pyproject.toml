@@ -29,12 +29,11 @@ classifiers = [
 dependencies = ["numpy>=2", "typing-extensions>=4.10.0"]
 
 [project.optional-dependencies]
-yaozarrs-tensorstore = ["yaozarrs[write-tensorstore]>=0.2.0"]
-yaozarrs-zarr = ["yaozarrs[write-zarr]>=0.2.0"]
-tensorstore = ["tensorstore>=0.1.69,!=0.1.72"]
+tensorstore = ["yaozarrs[write-tensorstore]>=0.2.0"]
+zarr = ["yaozarrs[write-zarr]>=0.2.0"]
 acquire-zarr = ["acquire-zarr>=0.5.2"]
 tifffile = ["tifffile>=2024.8.30", "ome-types>=0.6.1", "pydantic>=2.8"]
-all = ["ome-writers[tensorstore,acquire-zarr,tifffile,yaozarrs-tensorstore,yaozarrs-zarr]"]
+all = ["ome-writers[tensorstore,zarr,acquire-zarr,tifffile]"]
 
 [dependency-groups]
 # used for all tests
@@ -42,9 +41,8 @@ test = ["pytest>=8.4.2", "pytest-cov>=7.0.0", "yaozarrs[io]>=0.2.0", "zarr>=3; p
 # these mirror the extras above
 # but with additional dependencies for testing
 # these are the groups used on CI
-yaozarrs-tensorstore = [{ include-group = 'test' }, "ome-writers[yaozarrs-tensorstore]"]
-yaozarrs-zarr = [{ include-group = 'test' }, "ome-writers[yaozarrs-zarr]", "zarr>=3; python_version >= '3.11'"]
 tensorstore = [{ include-group = 'test' }, "ome-writers[tensorstore]"]
+zarr = [{ include-group = 'test' }, "ome-writers[zarr]", "zarr>=3; python_version >= '3.11'"]
 acquire-zarr = [
     { include-group = 'test' },
     "ome-writers[acquire-zarr]",
@@ -54,7 +52,7 @@ tifffile = [{ include-group = 'test' }, "ome-writers[tifffile]"]
 pymmcore = [
     { include-group = 'test' },
     "pymmcore-plus>=0.15.0",
-    "ome-writers[tensorstore,acquire-zarr,tifffile]",
+    "ome-writers[tensorstore,zarr,acquire-zarr,tifffile]",
 ]
 dev = [
     { include-group = "pymmcore" },
