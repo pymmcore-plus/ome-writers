@@ -145,13 +145,13 @@ class YaozarrsStream(MultiPositionOMEStream):
         return self
 
     def _write_to_backend(
-        self, array_key: str, index: tuple[int, ...], frame: np.ndarray
+        self, position_key: str, index: tuple[int, ...], frame: np.ndarray
     ) -> None:
         """Write frame to the yaozarrs-created array.
 
         The index is already in storage (NGFF) order thanks to base class.
         """
-        array = self._arrays[array_key]
+        array = self._arrays[position_key]
 
         # Check if this is a tensorstore array or zarr array
         if hasattr(array, "store"):
