@@ -262,7 +262,8 @@ class ZarrPythonStream(_YaozarrsStreamBase):
 #             compression: str,  # = "blosc-zstd",
 #             dimension_names: list[str] | None,  # = None,
 #         ) -> Any:
-#             # Dimensions will be the same across all positions, so we can create them once
+#             # Dimensions will be the same across all positions,
+#             # so we can create them once
 #             az_dims = [_dim_toaqz_dim(dim) for dim in self.storage_order_dims]
 
 #             # Create AcquireZarr array settings for each position
