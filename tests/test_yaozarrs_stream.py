@@ -15,6 +15,27 @@ if TYPE_CHECKING:
 
 pytest.importorskip("yaozarrs", reason="yaozarrs not installed")
 
+# Check for available yaozarrs writers
+_available_writers = []
+try:
+    import tensorstore  # noqa: F401
+
+    _available_writers.append("tensorstore")
+except ImportError:
+    pass
+try:
+    import zarr  # noqa: F401
+
+    _available_writers.append("zarr")
+except ImportError:
+    pass
+
+if not _available_writers:
+    pytest.skip(
+        "No yaozarrs writer backends available. Install tensorstore or zarr>=3.",
+        allow_module_level=True,
+    )
+
 
 def test_yaozarrs_stream_availability() -> None:
     """Test that YaozarrsStream availability check works."""
@@ -22,8 +43,10 @@ def test_yaozarrs_stream_availability() -> None:
     assert isinstance(omew.YaozarrsStream.is_available(), bool)
 
 
-def test_yaozarrs_single_position(tmp_path: Path) -> None:
+@pytest.mark.parametrize("writer", ["tensorstore", "zarr"])
+def test_yaozarrs_single_position(tmp_path: Path, writer: str) -> None:
     """Test YaozarrsStream with single position data."""
+    pytest.importorskip(writer)
     from yaozarrs import validate_zarr_store
 
     data_gen, dimensions, dtype = omew.fake_data_for_sizes(
@@ -32,9 +55,9 @@ def test_yaozarrs_single_position(tmp_path: Path) -> None:
         dtype=np.uint16,
     )
 
-    output_path = tmp_path / "single_position.ome.zarr"
+    output_path = tmp_path / f"single_position_{writer}.ome.zarr"
     stream = omew.YaozarrsStream()
-    stream = stream.create(str(output_path), dtype, dimensions, writer="auto")
+    stream = stream.create(str(output_path), dtype, dimensions, writer=writer)
     assert stream.is_active()
 
     # Write all frames
@@ -346,33 +369,40 @@ def test_yaozarrs_axis_reordering(tmp_path: Path, writer: str) -> None:
     stream.flush()
 
     # Verify the data was stored in NGFF order (t, c, z, y, x)
-    import zarr
+    # Use the appropriate reader based on the writer
+    if writer == "tensorstore":
+        import tensorstore as ts
 
-    store = zarr.open_group(output_path, mode="r")
-    array = store["0"]
+        spec = {
+            "driver": "zarr3",
+            "kvstore": {"driver": "file", "path": str(output_path / "0")},
+        }
+        array = ts.open(spec).result()
+        array_data = array.read().result()
+    else:  # zarr
+        import zarr
+
+        store = zarr.open_group(output_path, mode="r")
+        array_data = store["0"][:]
 
     # Check shape matches NGFF order
-    assert array.shape == (2, 2, 3, 32, 32), "Array shape should be (t,c,z,y,x)"
+    assert array_data.shape == (2, 2, 3, 32, 32), "Array shape should be (t,c,z,y,x)"
 
     # Verify a few specific values are in the correct positions
     # Acquisition: t=0, z=0, c=0 → value=0 → Storage: t=0, c=0, z=0
-    assert array[0, 0, 0, 0, 0] == 0
+    assert array_data[0, 0, 0, 0, 0] == 0
 
     # Acquisition: t=0, z=1, c=0 → value=10 → Storage: t=0, c=0, z=1
-    assert array[0, 0, 1, 0, 0] == 10
+    assert array_data[0, 0, 1, 0, 0] == 10
 
     # Acquisition: t=0, z=0, c=1 → value=1 → Storage: t=0, c=1, z=0
-    assert array[0, 1, 0, 0, 0] == 1
+    assert array_data[0, 1, 0, 0, 0] == 1
 
     # Acquisition: t=1, z=2, c=1 → value=121 → Storage: t=1, c=1, z=2
-    assert array[1, 1, 2, 0, 0] == 121
+    assert array_data[1, 1, 2, 0, 0] == 121
 
-    # Check axes are in NGFF order in metadata
-    multiscales = store.attrs.get("multiscales", [{}])[0]
-    [ax["name"] for ax in multiscales.get("axes", [])]
-    # yaozarrs may use bioformats2raw layout which doesn't store axes at top level
-    # But the array shape itself proves the correct storage order
-    assert array.shape == (2, 2, 3, 32, 32)
+    # Verify shape again
+    assert array_data.shape == (2, 2, 3, 32, 32)
 
 
 @pytest.mark.parametrize("writer", ["tensorstore", "zarr"])
@@ -412,35 +442,55 @@ def test_yaozarrs_axis_reordering_multiposition(tmp_path: Path, writer: str) -> 
     stream.flush()
 
     # Verify each position's data is stored in NGFF order (t, c, z, y, x)
-    import zarr
+    # Use the appropriate reader based on the writer
+    if writer == "tensorstore":
+        import tensorstore as ts
 
-    store = zarr.open_group(output_path, mode="r")
+        for p in range(2):
+            spec = {
+                "driver": "zarr3",
+                "kvstore": {"driver": "file", "path": str(output_path / f"{p}/0")},
+            }
+            array = ts.open(spec).result()
+            array_data = array.read().result()
 
-    for p in range(2):
-        array = store[f"{p}/0"]  # bioformats2raw layout: position/resolution
+            # Check shape matches NGFF order (not acquisition order)
+            assert array_data.shape == (
+                2,
+                2,
+                2,
+                16,
+                16,
+            ), f"Position {p} shape should be (t,c,z,y,x)"
 
-        # Check shape matches NGFF order (not acquisition order)
-        assert array.shape == (
-            2,
-            2,
-            2,
-            16,
-            16,
-        ), f"Position {p} shape should be (t,c,z,y,x)"
+            # Verify specific values for this position
+            expected_base = p * 1000
+            assert array_data[0, 0, 0, 0, 0] == expected_base
+            assert array_data[0, 0, 1, 0, 0] == expected_base + 10
+            assert array_data[0, 1, 0, 0, 0] == expected_base + 1
+            assert array_data[1, 1, 1, 0, 0] == expected_base + 111
+    else:  # zarr
+        import zarr
 
-        # Verify specific values for this position
-        # Acquisition: p=p, t=0, z=0, c=0 → value=p*1000 → Storage: array[t=0, c=0, z=0]
-        expected_base = p * 1000
-        assert array[0, 0, 0, 0, 0] == expected_base
+        store = zarr.open_group(output_path, mode="r")
+        for p in range(2):
+            array = store[f"{p}/0"]  # bioformats2raw layout: position/resolution
 
-        # Acquisition: p=p, t=0, z=1, c=0 → value=p*1000+10 → Storage: [t=0, c=0, z=1]
-        assert array[0, 0, 1, 0, 0] == expected_base + 10
+            # Check shape matches NGFF order (not acquisition order)
+            assert array.shape == (
+                2,
+                2,
+                2,
+                16,
+                16,
+            ), f"Position {p} shape should be (t,c,z,y,x)"
 
-        # Acquisition: p=p, t=0, z=0, c=1 → value=p*1000+1 → Storage: [t=0, c=1, z=0]
-        assert array[0, 1, 0, 0, 0] == expected_base + 1
-
-        # Acquisition: p=p, t=1, z=1, c=1 → value=p*1000+111 → Storage: [t=1, c=1, z=1]
-        assert array[1, 1, 1, 0, 0] == expected_base + 111
+            # Verify specific values for this position
+            expected_base = p * 1000
+            assert array[0, 0, 0, 0, 0] == expected_base
+            assert array[0, 0, 1, 0, 0] == expected_base + 10
+            assert array[0, 1, 0, 0, 0] == expected_base + 1
+            assert array[1, 1, 1, 0, 0] == expected_base + 111
 
 
 def test_yaozarrs_writer_zarr_backend(tmp_path: Path) -> None:
@@ -476,24 +526,26 @@ def test_yaozarrs_writer_zarr_backend(tmp_path: Path) -> None:
     assert array.shape == (2, 2, 16, 16)
 
 
-def test_yaozarrs_writer_auto_backend(tmp_path: Path) -> None:
-    """Test YaozarrsStream with auto backend selection."""
+@pytest.mark.parametrize("writer", ["tensorstore", "zarr"])
+def test_yaozarrs_writer_auto_backend(tmp_path: Path, writer: str) -> None:
+    """Test YaozarrsStream with both backend options."""
+    pytest.importorskip(writer)
     data_gen, dimensions, dtype = omew.fake_data_for_sizes(
         sizes={"t": 2, "y": 16, "x": 16},
         chunk_sizes={"t": 1, "y": 16, "x": 16},
         dtype=np.uint8,
     )
 
-    output_path = tmp_path / "auto_backend.ome.zarr"
+    output_path = tmp_path / f"{writer}_backend.ome.zarr"
     stream = omew.YaozarrsStream()
 
-    # Use auto backend
+    # Test specified backend
     stream = stream.create(
         str(output_path),
         dtype,
         dimensions,
         overwrite=True,
-        writer="auto",
+        writer=writer,
     )
 
     # Write frames

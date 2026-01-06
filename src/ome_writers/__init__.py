@@ -16,7 +16,7 @@ from ._util import dims_from_useq, fake_data_for_sizes
 from .backends._acquire_zarr import AcquireZarrStream
 from .backends._tensorstore import TensorStoreZarrStream
 from .backends._tifffile import TifffileStream
-from .backends._yaozarrs import YaozarrsStream
+from .backends._yaozarrs import ZarrPythonStream
 
 __all__ = [
     "AcquireZarrStream",
@@ -27,7 +27,7 @@ __all__ = [
     "TensorStoreZarrStream",
     "TifffileStream",
     "UnitTuple",
-    "YaozarrsStream",
+    "ZarrPythonStream",
     "__version__",
     "create_stream",
     "dims_from_useq",

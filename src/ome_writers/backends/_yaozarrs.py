@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from ome_writers._dimensions import Dimension
 
 
-class YaozarrsStream(MultiPositionOMEStream):
+class _YaozarrsStreamBase(MultiPositionOMEStream):
     """OME-Zarr writer using the yaozarrs library.
 
     This stream uses yaozarrs to create OME-Zarr v0.5 compatible stores with
@@ -61,18 +61,18 @@ class YaozarrsStream(MultiPositionOMEStream):
         self._arrays: dict[str, Any] = {}
         self._futures: list[Any] = []
         self._builder: Bf2RawBuilder | None = None
-        self._writer: Literal["auto", "tensorstore", "zarr"] = "tensorstore"
+        self._writer: Literal["tensorstore", "zarr"] = "tensorstore"
 
-    def create(
+    def _create(
         self,
         path: str,
         dtype: np.dtype,
         dimensions: Sequence[Dimension],
         *,
         overwrite: bool = False,
-        writer: Literal["auto", "tensorstore", "zarr"] = "tensorstore",
+        writer: Literal["tensorstore", "zarr"],
     ) -> Self:
-        """Create the OME-Zarr storage structure.
+        """Internal method to create the OME-Zarr storage structure.
 
         Parameters
         ----------
@@ -84,11 +84,8 @@ class YaozarrsStream(MultiPositionOMEStream):
             Sequence of dimensions describing the data structure.
         overwrite : bool, optional
             Whether to overwrite existing stores. Default is False.
-        writer : Literal["auto", "tensorstore", "zarr"], optional
-            Backend to use for writing arrays. Options are:
-            - "auto": Automatically select based on availability
-            - "tensorstore": Use tensorstore backend (default)
-            - "zarr": Use zarr-python backend
+        writer : Literal["tensorstore", "zarr"]
+            Backend to use for writing arrays.
 
         Returns
         -------
@@ -174,3 +171,81 @@ class YaozarrsStream(MultiPositionOMEStream):
     def is_active(self) -> bool:
         """Return True if the stream has active arrays."""
         return bool(self._arrays)
+
+
+class TensorStoreZarrStream(_YaozarrsStreamBase):
+    """OME-Zarr writer using yaozarrs with tensorstore backend.
+
+    This stream creates OME-Zarr v0.5 compatible stores using tensorstore for
+    efficient array I/O. Data is always stored in NGFF canonical order (tczyx).
+    """
+
+    def create(
+        self,
+        path: str,
+        dtype: np.dtype,
+        dimensions: Sequence[Dimension],
+        *,
+        overwrite: bool = False,
+    ) -> Self:
+        """Create the OME-Zarr storage structure using tensorstore.
+
+        Parameters
+        ----------
+        path : str
+            Path to the output zarr store.
+        dtype : np.dtype
+            Data type for the arrays.
+        dimensions : Sequence[Dimension]
+            Sequence of dimensions describing the data structure.
+        overwrite : bool, optional
+            Whether to overwrite existing stores. Default is False.
+        **kwargs
+            Additional keyword arguments (unused, for compatibility).
+
+        Returns
+        -------
+        Self
+            The configured stream instance.
+        """
+        return self._create(
+            path, dtype, dimensions, overwrite=overwrite, writer="tensorstore"
+        )
+
+
+class ZarrPythonStream(_YaozarrsStreamBase):
+    """OME-Zarr writer using yaozarrs with zarr-python backend.
+
+    This stream creates OME-Zarr v0.5 compatible stores using zarr-python for
+    array I/O. Data is always stored in NGFF canonical order (tczyx).
+    """
+
+    def create(
+        self,
+        path: str,
+        dtype: np.dtype,
+        dimensions: Sequence[Dimension],
+        *,
+        overwrite: bool = False,
+    ) -> Self:
+        """Create the OME-Zarr storage structure using zarr-python.
+
+        Parameters
+        ----------
+        path : str
+            Path to the output zarr store.
+        dtype : np.dtype
+            Data type for the arrays.
+        dimensions : Sequence[Dimension]
+            Sequence of dimensions describing the data structure.
+        overwrite : bool, optional
+            Whether to overwrite existing stores. Default is False.
+        **kwargs
+            Additional keyword arguments (unused, for compatibility).
+
+        Returns
+        -------
+        Self
+            The configured stream instance.
+        """
+        return self._create(path, dtype, dimensions, overwrite=overwrite, writer="zarr")

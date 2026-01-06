@@ -125,16 +125,16 @@ def test_data_integrity_roundtrip(
     sizes: dict[str, int],
 ) -> None:
     """Test data integrity roundtrip with different data types and dimension orders."""
-    # yaozarrs stores in NGFF order (time, channel, space), not acquisition order
-    # Skip non-canonical orders for yaozarrs since data will be reordered
+    # tensorstore and zarr backends store in NGFF order (time, channel, space)
+    # Skip non-canonical orders for these backends since data will be reordered
     dim_labels = list(sizes.keys())
     non_spatial_labels = [d for d in dim_labels if d not in ("y", "x")]
     is_canonical = non_spatial_labels == sorted(
         non_spatial_labels, key=lambda x: {"t": 0, "c": 1, "z": 2}.get(x, 3)
     )
-    if backend.name == "yaozarrs" and not is_canonical:
+    if backend.name in ("tensorstore", "zarr") and not is_canonical:
         pytest.skip(
-            "yaozarrs reorders to NGFF order; skipping non-canonical order test"
+            "tensorstore/zarr reorder to NGFF order; skipping non-canonical test"
         )
 
     data_gen, dimensions, dtype = omew.fake_data_for_sizes(
@@ -176,7 +176,12 @@ def test_data_integrity_roundtrip(
     # Test 2: Try to create again without overwrite (should fail)
     with pytest.raises(FileExistsError, match=r".*already exists"):
         stream = backend.cls()
-        stream = stream.create(str(output_path), dtype, dimensions, overwrite=False)
+        stream = stream.create(
+            str(output_path),
+            dtype,
+            dimensions,
+            overwrite=False,
+        )
 
     # Test 3: Create again with overwrite=True (should succeed)
     stream = backend.cls()
@@ -288,11 +293,15 @@ def test_zarr_metadata_correctness(
     zarr_backend: AvailableBackend, sizes: dict[str, int], tmp_path: Path
 ) -> None:
     """Test that zarr metadata preserves acquisition order."""
-    # yaozarrs stores in NGFF order, not acquisition order
-    if zarr_backend.name == "yaozarrs":
-        pytest.skip(
-            "yaozarrs stores metadata in NGFF v0.5 order, not acquisition order"
-        )
+    # tensorstore and zarr backends store in NGFF order, not acquisition order
+    # Skip non-canonical orders for these backends since metadata will be reordered
+    dim_labels = list(sizes.keys())
+    non_spatial_labels = [d for d in dim_labels if d not in ("y", "x")]
+    is_canonical = non_spatial_labels == sorted(
+        non_spatial_labels, key=lambda x: {"t": 0, "c": 1, "z": 2}.get(x, 3)
+    )
+    if zarr_backend.name in ("tensorstore", "zarr") and not is_canonical:
+        pytest.skip("tensorstore/zarr store metadata in NGFF v0.5 order")
 
     output_path = tmp_path / "test_metadata.zarr"
     data_gen, dims, dtype = omew.fake_data_for_sizes(sizes)
@@ -320,7 +329,19 @@ def test_zarr_metadata_correctness(
         "y": {"type": "space", "unit": "micrometer"},
         "x": {"type": "space", "unit": "micrometer"},
     }
-    expected_axes = [{"name": d.label, **axis_info[d.label]} for d in dims]
+
+    if zarr_backend.name in ("tensorstore", "zarr"):
+        # NGFF v0.5 doesn't include unit for channel axes
+        expected_axes = []
+        for d in dims:
+            ax = {"name": d.label, "type": axis_info[d.label]["type"]}
+            # Only add unit for time and space axes in NGFF v0.5
+            if d.label != "c":
+                ax["unit"] = axis_info[d.label]["unit"]
+            expected_axes.append(ax)
+    else:
+        expected_axes = [{"name": d.label, **axis_info[d.label]} for d in dims]
+
     assert axes == expected_axes
 
     # Check array metadata

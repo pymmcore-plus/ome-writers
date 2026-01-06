@@ -84,18 +84,39 @@ def test_axis_order(
     range_z = range(seq.z_plan.num_positions())
     non_pos_dims = [d.label for d in dims if d.label not in "pyx"]
 
-    if backend.name in ("acquire-zarr", "tensorstore"):
+    if backend.name in ("acquire-zarr", "tensorstore", "zarr"):
         zarr = pytest.importorskip("zarr")
         zg = zarr.open_group(output_path, mode="r")
 
         for p in range_p:
-            pos_array = zg[str(p)]
-            for t in range_t:
-                for c in range_c:
-                    for z in range_z:
-                        idx = tuple({"t": t, "c": c, "z": z}[d] for d in non_pos_dims)
-                        frame = pos_array[(*idx, slice(None), slice(None))]
-                        assert_frame_value(frame, p, t, c, z)
+            # tensorstore and zarr use bioformats2raw layout: scale/array (0) for single
+            # or position/scale/array (p/0) for multi-position
+            # acquire-zarr uses direct layout: array (0) for single position
+            # or position/array (p) for multi-position
+            if backend.name in ("tensorstore", "zarr"):
+                if multi_position:
+                    pos_group = zg[str(p)]
+                    pos_array = pos_group["0"]  # Scale level 0
+                else:
+                    pos_array = zg["0"]  # Scale level 0
+                # tensorstore/zarr always use canonical NGFF order (tczyx)
+                # so we always index as [t, c, z, y, x] regardless of acquisition order
+                for t in range_t:
+                    for c in range_c:
+                        for z in range_z:
+                            frame = pos_array[t, c, z, :, :]
+                            assert_frame_value(frame, p, t, c, z)
+            else:
+                # acquire-zarr uses acquisition order
+                pos_array = zg[str(p)]
+                for t in range_t:
+                    for c in range_c:
+                        for z in range_z:
+                            idx = tuple(
+                                {"t": t, "c": c, "z": z}[d] for d in non_pos_dims
+                            )
+                            frame = pos_array[(*idx, slice(None), slice(None))]
+                            assert_frame_value(frame, p, t, c, z)
         validate_path(output_path)
 
     elif backend.name == "tiff":
