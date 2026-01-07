@@ -24,6 +24,9 @@ if TYPE_CHECKING:
 
 
 class AcquireZarrStream(MultiPositionOMEStream):
+    # NOTE: this class will soon be replaced with an implementation based on
+    # _YaozarrsStreamBase.
+
     @classmethod
     def is_available(cls) -> bool:
         """Check if the acquire-zarr package is available."""
@@ -42,14 +45,19 @@ class AcquireZarrStream(MultiPositionOMEStream):
         super().__init__()
         self._stream: acquire_zarr.ZarrStream | None = None
 
-    def create(
+    def create(  # type: ignore
         self,
         path: str,
         dtype: np.dtype,
         dimensions: Sequence[Dimension],
         *,
+        plate=None,  # noqa: ANN001
         overwrite: bool = False,
     ) -> Self:
+        if plate is not None:
+            raise NotImplementedError(
+                "Plate support is not yet implemented for AcquireZarrStream."
+            )
         # Initialize dimensions from MultiPositionOMEStream
         # NOTE: Data will be stored in acquisition order.
         self._configure_dimensions(dimensions)

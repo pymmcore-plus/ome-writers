@@ -75,8 +75,8 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
         dtype: np.dtype,
         dimensions: Sequence[Dimension],
         *,
-        overwrite: bool = False,
         plate: PlateDef | None = None,
+        overwrite: bool = False,
     ) -> Self:
         """Internal method to create the OME-Zarr storage structure.
 

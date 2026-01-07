@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Sequence
 
     import useq
+    from yaozarrs.v05 import PlateDef
 
     from ._dimensions import UnitTuple
 
@@ -276,3 +277,110 @@ class DimensionIndexIterator:
 
     def __len__(self) -> int:
         return int(np.prod(self._shape)) if self._shape else 0
+
+
+def plate_from_useq_to_yaozarrs(
+    plan: useq.WellPlatePlan,
+) -> PlateDef:
+    """Convert a useq.WellPlatePlan to a yaozarrs.v05.PlateDef.
+
+    Parameters
+    ----------
+    plan : useq.WellPlatePlan
+        The useq well plate plan to convert.
+
+    Returns
+    -------
+    yaozarrs.v05.PlateDef
+        Plate definition compatible with yaozarrs-based OME-Zarr streams.
+
+    Examples
+    --------
+    ```python
+    import useq
+    from ome_writers import plate_from_useq_to_yaozarrs
+
+    # Create a useq plate plan
+    plate_plan = useq.WellPlatePlan(
+        plate=96,
+        a1_center_xy=(500, 200),
+        selected_wells=[(0, 0), (0, 1), (1, 0), (1, 1)],
+        well_points_plan=useq.GridRowsColumns(rows=2, columns=2),
+    )
+
+    # Convert to yaozarrs PlateDef
+    plate_def = plate_from_useq_to_yaozarrs(plate_plan)
+
+    # Use with yaozarrs stream
+    from ome_writers import TensorStoreZarrStream
+
+    stream = TensorStoreZarrStream()
+    stream.create(..., plate=plate_def)
+    ```
+    """
+    try:
+        from useq import WellPlatePlan
+        from yaozarrs import v05
+    except ImportError as e:
+        msg = "plate_from_useq_to_yaozarrs requires useq-schema and yaozarrs"
+        raise ImportError(msg) from e
+
+    if not isinstance(plan, WellPlatePlan):
+        raise TypeError("plan must be a useq.WellPlatePlan")
+
+    # Extract unique rows and columns from selected wells
+    well_names = plan.selected_well_names
+    rows_set: set[str] = set()
+    cols_set: set[str] = set()
+
+    for well_name in well_names:
+        # Well names are like "A1", "B2", "AA10", etc.
+        # Split at the letter/digit boundary
+        i = 0
+        while i < len(well_name) and well_name[i].isalpha():
+            i += 1
+        row_name = well_name[:i]  # Letter part
+        col_name = well_name[i:]  # Number part
+        rows_set.add(row_name)
+        cols_set.add(col_name)
+
+    # Sort rows alphabetically, columns numerically
+    rows = sorted(rows_set)
+    cols = sorted(cols_set, key=int)
+
+    # Create Row and Column objects
+    row_objects = [v05.Row(name=r) for r in rows]
+    col_objects = [v05.Column(name=c) for c in cols]
+
+    # Create PlateWell objects (deduplicate to avoid pydantic validation errors)
+    wells_dict: dict[str, v05.PlateWell] = {}
+    for well_name in well_names:
+        # Split at the letter/digit boundary
+        i = 0
+        while i < len(well_name) and well_name[i].isalpha():
+            i += 1
+        row_name = well_name[:i]
+        col_name = well_name[i:]
+        row_idx = rows.index(row_name)
+        col_idx = cols.index(col_name)
+
+        well_key = f"{row_name}/{col_name}"
+        if well_key not in wells_dict:
+            wells_dict[well_key] = v05.PlateWell(
+                path=well_key,
+                rowIndex=row_idx,
+                columnIndex=col_idx,
+            )
+
+    wells = list(wells_dict.values())
+
+    # Determine field count from well_points_plan
+    field_count = plan.num_points_per_well
+
+    return v05.PlateDef(
+        name=plan.plate.name or "Plate",
+        rows=row_objects,
+        columns=col_objects,
+        wells=wells,
+        field_count=field_count if field_count > 1 else None,
+    )

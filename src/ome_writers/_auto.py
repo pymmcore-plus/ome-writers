@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal, TypeAlias
 
 import numpy as np
+from ome_types.model import Plate
+from yaozarrs.v05 import PlateDef
 
 from .backends._acquire_zarr import AcquireZarrStream
 from .backends._tifffile import TifffileStream
@@ -74,6 +76,7 @@ def create_stream(
     dimensions: Sequence[Dimension],
     *,
     backend: Literal[BackendName, "auto"] = "auto",
+    plate: PlateDef | Plate | None = None,
     overwrite: bool = False,
 ) -> OMEStream:
     """Create a stream for writing OME-TIFF or OME-ZARR data.
@@ -88,7 +91,6 @@ def create_stream(
         Sequence of dimension information describing the data structure.
         The order of dimensions in this sequence determines the acquisition order
         (i.e., the order in which frames will be appended to the stream).
-
     backend : Literal["acquire-zarr", "tensorstore", "zarr", "tiff", "auto"]
         The backend to use for writing the data. Options are:
 
@@ -99,6 +101,10 @@ def create_stream(
         - "auto": Automatically determine the backend based on the file extension.
 
         Default is "auto".
+    plate : PlateDef | Plate | None, optional
+        Plate definition for HCS datasets, if applicable. Default is None.
+        It can be either a yaozarrs PlateDef if using a "tensorstore", "zarr" or
+        "acquire-zarr" backend, or an ome_types Plate if using "tiff" backend.
     overwrite : bool, optional
         Whether to overwrite existing files or directories. Default is False.
 
@@ -107,8 +113,24 @@ def create_stream(
     OMEStream
         A configured stream ready for writing frames.
     """
+    # if plate is not None, if is a PlateDef or Plate is checked in the respective
+    # backend create methods
+    if plate is not None:
+        if backend == "tiff" and not isinstance(plate, Plate):
+            raise TypeError(  # pragma: no cover
+                "For 'tiff' backend, plate must be an ome_types.model.Plate instance."
+            )
+        elif backend in {"acquire-zarr", "tensorstore", "zarr"} and not isinstance(
+            plate, PlateDef
+        ):
+            raise TypeError(  # pragma: no cover
+                "For 'acquire-zarr', 'tensorstore', or 'zarr' backends, "
+                "plate must be a yaozarrs.v05.PlateDef instance."
+            )
     stream = init_stream(path, backend=backend)
-    return stream.create(str(path), np.dtype(dtype), dimensions, overwrite=overwrite)
+    return stream.create(
+        str(path), np.dtype(dtype), dimensions, plate=plate, overwrite=overwrite
+    )
 
 
 def _autobackend(

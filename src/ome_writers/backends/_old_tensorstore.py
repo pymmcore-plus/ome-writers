@@ -41,12 +41,13 @@ class OldTensorStoreZarrStream(MultiPositionOMEStream):
         self._stores: dict[str, tensorstore.TensorStore] = {}  # array_key -> store
         self._delete_existing = True
 
-    def create(
+    def create(  # type: ignore
         self,
         path: str,
         dtype: np.dtype,
         dimensions: Sequence[Dimension],
         *,
+        plate=None,  # noqa: ANN001
         overwrite: bool = False,
     ) -> Self:
         # Initialize dimensions from MultiPositionOMEStream
