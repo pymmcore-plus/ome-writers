@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 from ome_writers import fake_data_for_sizes
-from ome_writers.backends import _tensorstore, _yaozarrs
+from ome_writers.backends import _old_tensorstore, _yaozarrs
 
 
 def _run_bench(cls: type) -> None:
@@ -34,7 +34,7 @@ def _run_bench(cls: type) -> None:
 time1 = _run_bench(_yaozarrs.TensorStoreZarrStream)
 print(f"New yaozarrs stream time: {time1:.2f} seconds")
 
-time1 = _run_bench(_tensorstore.TensorStoreZarrStream)
+time1 = _run_bench(_old_tensorstore.OldTensorStoreZarrStream)
 print(f"Old tensorstore stream time: {time1:.2f} seconds")
 
 time1 = _run_bench(_yaozarrs.ZarrPythonStream)

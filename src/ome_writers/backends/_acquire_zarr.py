@@ -52,7 +52,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
     ) -> Self:
         # Initialize dimensions from MultiPositionOMEStream
         # NOTE: Data will be stored in acquisition order.
-        self._init_dimensions(dimensions)
+        self._configure_dimensions(dimensions)
 
         self._group_path = Path(self._normalize_path(path))
 
@@ -66,7 +66,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
             shutil.rmtree(self._group_path)
 
         # Dimensions will be the same across all positions, so we can create them once
-        az_dims = [self._dim_toaqz_dim(dim) for dim in self.storage_order_dims]
+        az_dims = [self._dim_toaqz_dim(dim) for dim in self.storage_dims]
         # keep a strong reference (avoid segfaults)
         self._az_dims_keepalive = az_dims
 
@@ -103,7 +103,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
         """
         # Use storage order dims as-is (acquisition order)
         attrs = ome_meta_v5(
-            {str(i): self.storage_order_dims for i in range(self.num_positions)}
+            {str(i): self.storage_dims for i in range(self.num_positions)}
         )
         zarr_json = Path(self._group_path) / "zarr.json"
         current_meta: dict = {

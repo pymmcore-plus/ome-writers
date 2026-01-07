@@ -104,20 +104,21 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
             The configured stream instance.
         """
         # Use MultiPositionOMEStream with NGFF ordering
-        self._init_dimensions(dimensions, ngff_order=True)
+        self._configure_dimensions(dimensions, ngff_order=True)
+
         writer = self._get_writer()
         self._group_path = Path(self._normalize_path(path))
 
         # Get shape from NGFF-ordered dimensions
-        shape = tuple(d.size for d in self._storage_order_dims)
+        shape = tuple(d.size for d in self.storage_dims)
         # FIXME: dimension labels of Y or X are not special from a user perspective
         # perhaps use last two dimensions instead?
         chunks = tuple(
             d.chunk_size or (d.size if d.label in "yx" else 1)
-            for d in self._storage_order_dims
+            for d in self.storage_dims
         )
         # Build the Image metadata with NGFF-ordered dimensions
-        image = build_yaozarrs_image_metadata_v05(self._storage_order_dims)
+        image = build_yaozarrs_image_metadata_v05(self.storage_dims)
 
         self._arrays = self._prepare_arrays(
             image, plate, shape, dtype, chunks, writer, overwrite
@@ -171,9 +172,9 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
         # Validate plate dimensions match the position count
         if plate is not None:
             expected_positions = len(plate.wells) * (plate.field_count or 1)
-            if self._num_positions != expected_positions:
+            if self.num_positions != expected_positions:
                 msg = (
-                    f"Position dimension size ({self._num_positions}) does not match "
+                    f"Position dimension size ({self.num_positions}) does not match "
                     f"plate structure ({len(plate.wells)} wells * "
                     f"{plate.field_count or 1} fields = {expected_positions} positions)"
                 )
@@ -183,7 +184,7 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
             return self._prepare_plate_arrays(
                 image, plate, shape, dtype, chunks, writer, overwrite
             )
-        elif self._num_positions == 1:
+        elif self.num_positions == 1:
             return self._prepare_single_position_arrays(
                 image, shape, dtype, chunks, writer, overwrite
             )
@@ -352,7 +353,7 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
         )
 
         # Add each position as a separate series
-        for pos_idx in range(self._num_positions):
+        for pos_idx in range(self.num_positions):
             array_key = str(pos_idx)
             builder.add_series(array_key, image, [(shape, dtype)])
 
@@ -361,7 +362,7 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
 
         # Remap Bf2RawBuilder keys ("0/0", "1/0", etc.) to position indices
         arrays = {}
-        for pos_idx in range(self._num_positions):
+        for pos_idx in range(self.num_positions):
             array_key = str(pos_idx)
             # The dataset path within each image is "0" (first/only resolution)
             arrays[array_key] = all_arrays[f"{array_key}/0"]

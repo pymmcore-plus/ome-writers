@@ -84,19 +84,17 @@ class TifffileStream(MultiPositionOMEStream):
     ) -> Self:
         # Initialize dimensions from MultiPositionOMEStream
         # NOTE: Data will be stored in acquisition order.
-        self._init_dimensions(dimensions)
+        self._configure_dimensions(dimensions)
 
         self._delete_existing = overwrite
         self._path = Path(self._normalize_path(path))
-        shape_5d = tuple(d.size for d in self.storage_order_dims)
+        shape_5d = tuple(d.size for d in self.storage_dims)
 
         fnames = self._prepare_files(self._path, self.num_positions, overwrite)
 
         # Create a memmap for each position
         for p_idx, fname in enumerate(fnames):
-            ome = dims_to_ome(
-                self.storage_order_dims, dtype=dtype, tiff_file_name=fname
-            )
+            ome = dims_to_ome(self.storage_dims, dtype=dtype, tiff_file_name=fname)
             self._queues[p_idx] = q = Queue()  # type: ignore
             self._threads[p_idx] = thread = WriterThread(
                 fname,

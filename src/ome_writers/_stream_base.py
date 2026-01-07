@@ -110,22 +110,38 @@ class MultiPositionOMEStream(OMEStream):
     for their specific storage mechanisms. The class separates position
     dimensions from other dimensions (time, z, channel, y, x) and creates
     appropriate indexing schemes for efficient data organization.
+
+    Attributes
+    ----------
+    num_positions : int
+        The number of positions in the stream.
+    storage_dims : Sequence[Dimension]
+        The dimensions in storage order (as stored on disk), excluding the
+        position dimension.
+    acquisition_iter : Iterator[tuple[int, tuple[int, ...]]]
+        An iterator yielding tuples of (position_key, index_tuple) in
+        acquisition order, where `position_key` is an integer identifying
+        the position, and `index_tuple` contains the indices for the
+        non-spatial axes in acquisition order.
+    ngff_axis_reordering : tuple[int, ...] | None
+        A tuple mapping acquisition order indices to NGFF storage order indices
+        for non-spatial dimensions, or None if no reordering is applied.
     """
 
     def __init__(self) -> None:
         # property to track number of positions
         self._num_positions = 0
         # property to track non-position dimensions in storage order (as stored on disk)
-        self._storage_order_dims: Sequence[Dimension] = []
+        self._storage_dims: Sequence[Dimension] = []
         # iterator to yield (position_key, index) tuples in acquisition order
-        self._dim_iter: Iterator[tuple[int, tuple[int, ...]]] = iter(())
-        # mapping from acquisition index to storage index for non-spatial dims
-        self._index_mapping: tuple[int, ...] | None = None
+        self._acquisition_iter: Iterator[tuple[int, tuple[int, ...]]] = iter(())
+        # axis reordering from acquisition to NGFF storage order for non-spatial dims
+        self._ngff_axis_reordering: tuple[int, ...] | None = None
 
-    def _init_dimensions(
+    def _configure_dimensions(
         self, dimensions: Sequence[Dimension], *, ngff_order: bool = False
     ) -> None:
-        """Initialize dimensions.
+        """Configure dimension attributes for the stream.
 
         This method performs two related tasks:
 
@@ -135,26 +151,12 @@ class MultiPositionOMEStream(OMEStream):
            specification (time, channel, space).
 
         2) Build an iterator that yields per-frame indices in acquisition order.
-           The iterator `self._dim_iter` yields tuples `(position_key, index_tuple)`
-           where `position_key` is an integer identifying the position, and
+           The iterator yields tuples `(position_key, index_tuple)` where
+           `position_key` is an integer identifying the position, and
            `index_tuple` contains the indices for the non-spatial axes in acquisition
            order (e.g., `(t, c, z)` or `(c, t, z)` depending on the acquisition).
            This allows the stream to correctly place each incoming frame in the
            correct location of the storage array.
-
-        Properties Set
-        --------------
-        num_positions : int
-            The number of positions in the stream.
-        storage_order_dims : Sequence[Dimension]
-            The non-position dimensions in storage order. If ngff_order=False,
-            this is acquisition order. If ngff_order=True, this is NGFF v0.5 order
-            (time, channel, space).
-        dim_iter : Iterator[tuple[int, tuple[int, ...]]]
-            An iterator over (position_key, index_tuple) tuples in acquisition order.
-        index_mapping : tuple[int, ...] | None
-            Mapping from acquisition index to storage index for non-spatial dimensions.
-            None if no reordering (ngff_order=False).
 
         Parameters
         ----------
@@ -173,13 +175,13 @@ class MultiPositionOMEStream(OMEStream):
 
         if ngff_order:
             # Reorder to NGFF v0.5 and get index mapping
-            self._storage_order_dims, self._index_mapping = (
+            self._storage_dims, self._ngff_axis_reordering = (
                 self._reorder_to_ngff_storage(non_position_dims)
             )
         else:
             # Keep the acquisition order for non-position dimensions (no 'p')
-            self._storage_order_dims = list(non_position_dims)
-            self._index_mapping = None
+            self._storage_dims = list(non_position_dims)
+            self._ngff_axis_reordering = None
 
         # Extract labels of non-spatial acquisition order dims
         # Iterator should use acquisition order labels, not storage order
@@ -188,7 +190,7 @@ class MultiPositionOMEStream(OMEStream):
         ]
 
         # Create iterator yielding (position_key, index_tuple) in acquisition order
-        self._dim_iter = iter(
+        self._acquisition_iter = iter(
             DimensionIndexIterator(dimensions, acquisition_order_labels)
         )
 
@@ -198,14 +200,42 @@ class MultiPositionOMEStream(OMEStream):
         return self._num_positions
 
     @property
-    def storage_order_dims(self) -> Sequence[Dimension]:
-        """Return the storage order dimensions."""
-        return self._storage_order_dims
+    def storage_dims(self) -> Sequence[Dimension]:
+        """Return the storage dimensions.
+
+        Returns
+        -------
+        Sequence[Dimension]
+            The dimensions in storage order (as stored on disk), excluding the
+            position dimension.
+        """
+        return self._storage_dims
 
     @property
-    def dim_iter(self) -> Iterator[tuple[int, tuple[int, ...]]]:
-        """Return an iterator over (position_key, index) tuples."""
-        return self._dim_iter
+    def acquisition_iter(self) -> Iterator[tuple[int, tuple[int, ...]]]:
+        """Return an iterator over (position_key, index) tuples.
+
+        Returns
+        -------
+        Iterator[tuple[int, tuple[int, ...]]]
+            An iterator yielding tuples of (position_key, index_tuple) in
+            acquisition order, where `position_key` is an integer identifying
+            the position, and `index_tuple` contains the indices for the
+            non-spatial axes in acquisition order.
+        """
+        return self._acquisition_iter
+
+    @property
+    def ngff_axis_reordering(self) -> tuple[int, ...] | None:
+        """Return the NGFF axis reordering mapping, or None if not applicable.
+
+        Returns
+        -------
+        tuple[int, ...] | None
+            A tuple mapping acquisition order indices to NGFF storage order indices
+            for non-spatial dimensions, or None if no reordering is applied.
+        """
+        return self._ngff_axis_reordering
 
     def _get_position_dim(self, dimensions: Sequence[Dimension]) -> Dimension | None:
         """Return the position Dimension if it exists, else None."""
@@ -283,11 +313,11 @@ class MultiPositionOMEStream(OMEStream):
         if not self.is_active():
             msg = "Stream is closed or uninitialized. Call create() first."
             raise RuntimeError(msg)
-        position_key, acq_index = next(self._dim_iter)
+        position_key, acq_index = next(self._acquisition_iter)
 
         # Transpose index from acquisition order to storage order if needed
-        if self._index_mapping:
-            storage_index = tuple(acq_index[i] for i in self._index_mapping)
+        if self._ngff_axis_reordering:
+            storage_index = tuple(acq_index[i] for i in self._ngff_axis_reordering)
         else:
             storage_index = acq_index
 
