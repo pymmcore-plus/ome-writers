@@ -18,6 +18,10 @@ except ImportError:
     pytest.skip("yaozarrs not installed", allow_module_level=True)
 
 
+@pytest.mark.skipif(
+    not omew.TensorStoreZarrStream.is_available(),
+    reason="tensorstore not available",
+)
 def test_tensorstore_plate_write(tmp_path: Path) -> None:
     """Test writing HCS plate data with TensorStoreZarrStream."""
     output = tmp_path / "test_plate.ome.zarr"
@@ -65,21 +69,10 @@ def test_tensorstore_plate_write(tmp_path: Path) -> None:
 
     stream.flush()
 
-    # Verify the plate structure was created
-    import json
+    # Validate the zarr store structure and metadata
+    from .conftest import validate_zarr_store
 
-    zarr_json = output / "zarr.json"
-    assert zarr_json.exists()
-
-    with open(zarr_json) as f:
-        root_meta = json.load(f)
-
-    assert "ome" in root_meta["attributes"]
-    assert "plate" in root_meta["attributes"]["ome"]
-    plate_meta = root_meta["attributes"]["ome"]["plate"]
-    assert plate_meta["name"] == "Test Plate"
-    assert len(plate_meta["wells"]) == 4
-    assert plate_meta["field_count"] == 2
+    validate_zarr_store(output)
 
     # Verify well structure exists
     assert (output / "A" / "1" / "0" / "0").exists()  # Well A/1, field 0, dataset 0
@@ -87,22 +80,30 @@ def test_tensorstore_plate_write(tmp_path: Path) -> None:
     assert (output / "B" / "2" / "0" / "0").exists()  # Well B/2, field 0, dataset 0
 
     # Verify data values
-    import zarr
-    from zarr import Array
+    import tensorstore as ts
 
-    store = zarr.open_group(output, mode="r")
-    # Check first position (A/1, field 0) - position index 0
-    arr: Array = store["A/1/0/0"]  # type: ignore[assignment]
+    spec = {
+        "driver": "zarr3",
+        "kvstore": {"driver": "file", "path": str(output / "A" / "1" / "0" / "0")},
+    }
+    arr = ts.open(spec).result()
     assert arr.shape == (2, 32, 32)
-    assert arr[0, 0, 0] == 0  # pos=0, z=0
-    assert arr[1, 0, 0] == 1  # pos=0, z=1
+    assert arr[0, 0, 0].read().result() == 0  # pos=0, z=0
+    assert arr[1, 0, 0].read().result() == 1  # pos=0, z=1
 
-    # Check second position (A/1, field 1) - position index 1
-    arr = store["A/1/1/0"]  # type: ignore[assignment]
-    assert arr[0, 0, 0] == 100  # pos=1, z=0
-    assert arr[1, 0, 0] == 101  # pos=1, z=1
+    spec = {
+        "driver": "zarr3",
+        "kvstore": {"driver": "file", "path": str(output / "A" / "1" / "1" / "0")},
+    }
+    arr = ts.open(spec).result()
+    assert arr[0, 0, 0].read().result() == 100  # pos=1, z=0
+    assert arr[1, 0, 0].read().result() == 101  # pos=1, z=1
 
 
+@pytest.mark.skipif(
+    not omew.ZarrPythonStream.is_available(),
+    reason="zarr-python not available",
+)
 def test_zarr_python_plate_write(tmp_path: Path) -> None:
     """Test writing HCS plate data with ZarrPythonStream."""
     output = tmp_path / "test_plate_zarr.ome.zarr"
@@ -135,7 +136,12 @@ def test_zarr_python_plate_write(tmp_path: Path) -> None:
     stream.append(frame)
     stream.flush()
 
-    # Verify
+    # Validate the zarr store structure
+    from .conftest import validate_zarr_store
+
+    validate_zarr_store(output)
+
+    # Verify data values - try tensorstore first, then zarr-python
     import zarr
     from zarr import Array
 
@@ -145,6 +151,10 @@ def test_zarr_python_plate_write(tmp_path: Path) -> None:
     assert np.all(arr[:] == 42)
 
 
+@pytest.mark.skipif(
+    not omew.TensorStoreZarrStream.is_available(),
+    reason="tensorstore not available",
+)
 def test_plate_dimension_mismatch(tmp_path: Path) -> None:
     """Test that providing mismatched plate dimensions raises an error."""
     output = tmp_path / "test_plate_mismatch.ome.zarr"
