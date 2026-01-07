@@ -47,11 +47,7 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
     def __init__(self) -> None:
         try:
             from yaozarrs import v05
-            from yaozarrs.write.v05 import (
-                Bf2RawBuilder,
-                PlateBuilder,
-                prepare_image,
-            )
+            from yaozarrs.write.v05 import Bf2RawBuilder, PlateBuilder, prepare_image
         except ImportError as e:
             msg = (
                 "YaozarrsStream requires yaozarrs with write support: "
