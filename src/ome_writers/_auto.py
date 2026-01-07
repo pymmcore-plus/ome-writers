@@ -5,8 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal, TypeAlias
 
 import numpy as np
-from ome_types.model import Plate
-from yaozarrs.v05 import PlateDef
 
 from .backends._acquire_zarr import AcquireZarrStream
 from .backends._tifffile import TifffileStream
@@ -17,6 +15,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from numpy.typing import DTypeLike
+    from ome_types.model import Plate
+    from yaozarrs.v05 import PlateDef
 
     from ._dimensions import Dimension
     from ._stream_base import OMEStream
@@ -116,17 +116,31 @@ def create_stream(
     # if plate is not None, if is a PlateDef or Plate is checked in the respective
     # backend create methods
     if plate is not None:
-        if backend == "tiff" and not isinstance(plate, Plate):
-            raise TypeError(  # pragma: no cover
-                "For 'tiff' backend, plate must be an ome_types.model.Plate instance."
-            )
-        elif backend in {"acquire-zarr", "tensorstore", "zarr"} and not isinstance(
-            plate, PlateDef
-        ):
-            raise TypeError(  # pragma: no cover
-                "For 'acquire-zarr', 'tensorstore', or 'zarr' backends, "
-                "plate must be a yaozarrs.v05.PlateDef instance."
-            )
+        if backend == "tiff":
+            try:
+                from ome_types.model import Plate
+            except ImportError:
+                raise ImportError(
+                    "ome-types is required for tiff backend with plates. "
+                    "Install with: pip install ome-writers[tifffile]"
+                ) from None
+            if not isinstance(plate, Plate):
+                raise TypeError(  # pragma: no cover
+                    "For 'tiff' backend, plate must be an ome_types.model.Plate instance."  # noqa: E501
+                )
+        elif backend in {"acquire-zarr", "tensorstore", "zarr"}:
+            try:
+                from yaozarrs.v05 import PlateDef
+            except ImportError:
+                raise ImportError(
+                    f"yaozarrs is required for {backend} backend with plates. "
+                    f"Install with: pip install ome-writers[{backend}]"
+                ) from None
+            if not isinstance(plate, PlateDef):
+                raise TypeError(  # pragma: no cover
+                    "For 'acquire-zarr', 'tensorstore', or 'zarr' backends, "
+                    "plate must be a yaozarrs.v05.PlateDef instance."
+                )
     stream = init_stream(path, backend=backend)
     return stream.create(
         str(path), np.dtype(dtype), dimensions, plate=plate, overwrite=overwrite
