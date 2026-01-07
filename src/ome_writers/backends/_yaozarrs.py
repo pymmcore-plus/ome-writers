@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     import numpy as np
+    from yaozarrs.v05 import Image, PlateDef
 
     from ome_writers._dimensions import Dimension
 
@@ -26,7 +27,8 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
     through yaozarrs' unified API.
 
     For multi-position data, this uses the bioformats2raw layout pattern where
-    each position is a separate Image in the hierarchy.
+    each position is a separate Image in the hierarchy. For plate data, it uses
+    the HCS (High-Content Screening) layout with proper well/field structure.
     """
 
     @classmethod
@@ -44,7 +46,12 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
 
     def __init__(self) -> None:
         try:
-            from yaozarrs.write.v05 import Bf2RawBuilder, prepare_image
+            from yaozarrs import v05
+            from yaozarrs.write.v05 import (
+                Bf2RawBuilder,
+                PlateBuilder,
+                prepare_image,
+            )
         except ImportError as e:
             msg = (
                 "YaozarrsStream requires yaozarrs with write support: "
@@ -54,14 +61,14 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
             raise ImportError(msg) from e
 
         self._prepare_image = prepare_image
+        self._PlateBuilder = PlateBuilder
         self._Bf2RawBuilder = Bf2RawBuilder
+        self._v05 = v05
 
         super().__init__()
 
         self._group_path: Path | None = None
         self._arrays: dict[str, Any] = {}
-        self._futures: list[Any] = []
-        self._builder: Bf2RawBuilder | None = None
 
     @abstractmethod
     def _get_writer(self) -> Literal["tensorstore", "zarr"] | Callable: ...
@@ -73,6 +80,7 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
         dimensions: Sequence[Dimension],
         *,
         overwrite: bool = False,
+        plate: PlateDef | None = None,
     ) -> Self:
         """Internal method to create the OME-Zarr storage structure.
 
@@ -86,8 +94,9 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
             Sequence of dimensions describing the data structure.
         overwrite : bool, optional
             Whether to overwrite existing stores. Default is False.
-        writer : Literal["tensorstore", "zarr"]
-            Backend to use for writing arrays.
+        plate : yaozarrs.v05.PlateDef | None, optional
+            Plate metadata for HCS layout. If provided, creates a plate structure
+            instead of a simple multi-position layout. Default is None.
 
         Returns
         -------
@@ -107,60 +116,257 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
             d.chunk_size or (d.size if d.label in "yx" else 1)
             for d in self._storage_order_dims
         )
-
         # Build the Image metadata with NGFF-ordered dimensions
         image = build_yaozarrs_image_metadata_v05(self._storage_order_dims)
 
-        if self._num_positions == 1:
-            # Single position: use prepare_image directly
-            _, arrays = self._prepare_image(
-                self._group_path,
-                image,
-                datasets=[(shape, dtype)],
-                overwrite=overwrite,
-                chunks=chunks,
-                writer=writer,
-            )
-            # Store array handle for the single position
-            self._arrays["0"] = arrays["0"]
-        else:
-            # Multi-position: use Bf2RawBuilder for bioformats2raw layout
-            self._builder = self._Bf2RawBuilder(
-                self._group_path,
-                overwrite=overwrite,
-                chunks=chunks,
-                writer=writer,
-            )
-
-            # Add each position as a separate series
-            for pos_idx in range(self._num_positions):
-                array_key = str(pos_idx)
-                self._builder.add_series(array_key, image, [(shape, dtype)])
-
-            # Prepare all arrays
-            _, all_arrays = self._builder.prepare()
-
-            # Store array handles for each position
-            # Bf2RawBuilder returns arrays with keys like "0/0" (series/dataset)
-            for pos_idx in range(self._num_positions):
-                array_key = str(pos_idx)
-                # The dataset path within each image is "0" (first/only resolution)
-                self._arrays[array_key] = all_arrays[f"{array_key}/0"]
+        self._arrays = self._prepare_arrays(
+            image, plate, shape, dtype, chunks, writer, overwrite
+        )
 
         return self
 
     def flush(self) -> None:
         """Flush pending writes and close the stream."""
-        # Wait for all tensorstore writes to finish
-        for future in self._futures:
-            future.result()
-        self._futures.clear()
         self._arrays.clear()
-        self._builder = None
 
     def is_active(self) -> bool:
         """Return True if the stream has active arrays."""
         return bool(self._arrays)
+
+    def _prepare_arrays(
+        self,
+        image: Image,
+        plate: PlateDef | None,
+        shape: tuple[int, ...],
+        dtype: np.dtype,
+        chunks: tuple[int, ...],
+        writer: Literal["tensorstore", "zarr"] | Callable,
+        overwrite: bool,
+    ) -> dict[str, Any]:
+        """Prepare arrays for the appropriate layout (plate, single, or multi-position).
+
+        Parameters
+        ----------
+        image : yaozarrs.v05.Image
+            Yaozarrs Image metadata.
+        plate : yaozarrs.v05.PlateDef | None
+            Plate definition for HCS layout. If None, creates single or multi-position
+            layout.
+        shape : tuple[int, ...]
+            Shape of arrays in NGFF order.
+        dtype : np.dtype
+            Data type for arrays.
+        chunks : tuple[int, ...]
+            Chunk sizes for arrays.
+        writer : Literal["tensorstore", "zarr"] | Callable
+            Writer backend to use.
+        overwrite : bool
+            Whether to overwrite existing data.
+
+        Returns
+        -------
+        dict[str, Any]
+            Dictionary mapping position indices to array handles.
+        """
+        # Validate plate dimensions match the position count
+        if plate is not None:
+            expected_positions = len(plate.wells) * (plate.field_count or 1)
+            if self._num_positions != expected_positions:
+                msg = (
+                    f"Position dimension size ({self._num_positions}) does not match "
+                    f"plate structure ({len(plate.wells)} wells * "
+                    f"{plate.field_count or 1} fields = {expected_positions} positions)"
+                )
+                raise ValueError(msg)
+
+        if plate is not None:
+            return self._prepare_plate_arrays(
+                image, plate, shape, dtype, chunks, writer, overwrite
+            )
+        elif self._num_positions == 1:
+            return self._prepare_single_position_arrays(
+                image, shape, dtype, chunks, writer, overwrite
+            )
+        else:
+            return self._prepare_multi_position_arrays(
+                image, shape, dtype, chunks, writer, overwrite
+            )
+
+    def _prepare_plate_arrays(
+        self,
+        image: Image,
+        plate: PlateDef,
+        shape: tuple[int, ...],
+        dtype: np.dtype,
+        chunks: tuple[int, ...],
+        writer: Literal["tensorstore", "zarr"] | Callable,
+        overwrite: bool,
+    ) -> dict[str, Any]:
+        """Prepare arrays for HCS plate layout.
+
+        Parameters
+        ----------
+        image : yaozarrs.v05.Image
+            Yaozarrs Image metadata.
+        plate : yaozarrs.v05.PlateDef
+            Plate definition with wells and fields.
+        shape : tuple[int, ...]
+            Shape of arrays in NGFF order.
+        dtype : np.dtype
+            Data type for arrays.
+        chunks : tuple[int, ...]
+            Chunk sizes for arrays.
+        writer : Literal["tensorstore", "zarr"] | Callable
+            Writer backend to use.
+        overwrite : bool
+            Whether to overwrite existing data.
+        """
+        if self._group_path is None:
+            raise RuntimeError("Stream has not been created yet.")
+
+        plate_metadata = self._v05.Plate(version="0.5", plate=plate)
+        plate_builder = self._PlateBuilder(
+            self._group_path,
+            plate=plate_metadata,
+            overwrite=overwrite,
+            chunks=chunks,
+            writer=writer,
+        )
+
+        # Add wells to the plate
+        # Build mapping from position index to well/field path
+        position_to_array_key: dict[str, str] = {}
+        position_idx = 0
+        fields_per_well = plate.field_count or 1
+
+        for well in plate.wells:
+            row_name, col_name = well.path.split("/")
+            # Create field entries for this well
+            well_images = {}
+            for field_idx in range(fields_per_well):
+                field_key = str(field_idx)
+                well_images[field_key] = (image, [(shape, dtype)])
+
+                # Map position index to array key (well_path/field_idx)
+                # PlateBuilder creates keys like "row/col/field/dataset"
+                # so we need to append "/0" for the first (and only) dataset
+                array_key = f"{well.path}/{field_idx}/0"
+                position_to_array_key[str(position_idx)] = array_key
+                position_idx += 1
+
+            plate_builder.add_well(row=row_name, col=col_name, images=well_images)
+
+        # Prepare the plate and remap arrays to use position indices as keys
+        _, plate_arrays = plate_builder.prepare()
+
+        # Remap from PlateBuilder's keys (e.g., "A/1/0/0") to position indices
+        remapped_arrays = {}
+        for pos_idx_str, array_key in position_to_array_key.items():
+            remapped_arrays[pos_idx_str] = plate_arrays[array_key]
+
+        return remapped_arrays
+
+    def _prepare_single_position_arrays(
+        self,
+        image: Image,
+        shape: tuple[int, ...],
+        dtype: np.dtype,
+        chunks: tuple[int, ...],
+        writer: Literal["tensorstore", "zarr"] | Callable,
+        overwrite: bool,
+    ) -> dict[str, Any]:
+        """Prepare arrays for single position data.
+
+        Parameters
+        ----------
+        image : yaozarrs.v05.Image
+            Yaozarrs Image metadata.
+        shape : tuple[int, ...]
+            Shape of arrays in NGFF order.
+        dtype : np.dtype
+            Data type for arrays.
+        chunks : tuple[int, ...]
+            Chunk sizes for arrays.
+        writer : Literal["tensorstore", "zarr"] | Callable
+            Writer backend to use.
+        overwrite : bool
+            Whether to overwrite existing data.
+
+        Returns
+        -------
+        dict[str, Any]
+            Dictionary mapping position index "0" to array handle.
+        """
+        if self._group_path is None:
+            raise RuntimeError("Stream has not been created yet.")
+
+        _, arrays = self._prepare_image(
+            self._group_path,
+            image,
+            datasets=[(shape, dtype)],
+            overwrite=overwrite,
+            chunks=chunks,
+            writer=writer,
+        )
+        return arrays  # type: ignore
+
+    def _prepare_multi_position_arrays(
+        self,
+        image: Image,
+        shape: tuple[int, ...],
+        dtype: np.dtype,
+        chunks: tuple[int, ...],
+        writer: Literal["tensorstore", "zarr"] | Callable,
+        overwrite: bool,
+    ) -> dict[str, Any]:
+        """Prepare arrays for multi-position data using bioformats2raw layout.
+
+        Parameters
+        ----------
+        image : yaozarrs.v05.Image
+            Yaozarrs Image metadata.
+        shape : tuple[int, ...]
+            Shape of arrays in NGFF order.
+        dtype : np.dtype
+            Data type for arrays.
+        chunks : tuple[int, ...]
+            Chunk sizes for arrays.
+        writer : Literal["tensorstore", "zarr"] | Callable
+            Writer backend to use.
+        overwrite : bool
+            Whether to overwrite existing data.
+
+        Returns
+        -------
+        dict[str, Any]
+            Dictionary mapping position indices to array handles.
+        """
+        if self._group_path is None:
+            raise RuntimeError("Stream has not been created yet.")
+
+        builder = self._Bf2RawBuilder(
+            self._group_path,
+            overwrite=overwrite,
+            chunks=chunks,
+            writer=writer,
+        )
+
+        # Add each position as a separate series
+        for pos_idx in range(self._num_positions):
+            array_key = str(pos_idx)
+            builder.add_series(array_key, image, [(shape, dtype)])
+
+        # Prepare all arrays
+        _, all_arrays = builder.prepare()
+
+        # Remap Bf2RawBuilder keys ("0/0", "1/0", etc.) to position indices
+        arrays = {}
+        for pos_idx in range(self._num_positions):
+            array_key = str(pos_idx)
+            # The dataset path within each image is "0" (first/only resolution)
+            arrays[array_key] = all_arrays[f"{array_key}/0"]
+
+        return arrays
 
 
 class TensorStoreZarrStream(_YaozarrsStreamBase):
@@ -169,6 +375,10 @@ class TensorStoreZarrStream(_YaozarrsStreamBase):
     This stream creates OME-Zarr v0.5 compatible stores using tensorstore for
     efficient array I/O. Data is always stored in NGFF canonical order (tczyx).
     """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._futures: list[Any] = []
 
     @classmethod
     def is_available(cls) -> bool:
