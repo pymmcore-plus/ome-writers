@@ -106,6 +106,11 @@ def dims_from_useq(
 ) -> list[Dimension]:
     """Convert a useq.MDASequence to a list of Dimensions for ome-writers.
 
+    If the sequence includes a grid_plan, the grid positions ("g" axis) will be
+    combined with stage positions ("p" axis) into a single position dimension,
+    since OME-NGFF does not have a separate grid concept. The total number of
+    positions will be `num_stage_positions * num_grid_positions`.
+
     Parameters
     ----------
     seq : useq.MDASequence
@@ -140,6 +145,20 @@ def dims_from_useq(
         for frame in whatever_generates_your_data():
             stream.append(frame)
     ```
+
+    When using grid_plan, positions are flattened:
+
+    ```python
+    import useq
+    from ome_writers import dims_from_useq
+
+    seq = useq.MDASequence(
+        stage_positions=[(0, 0), (100, 100)],  # 2 stage positions
+        grid_plan=useq.GridRowsColumns(rows=2, columns=2),  # 4 grid points each
+    )
+    dims = dims_from_useq(seq, image_width=512, image_height=512)
+    # dims will include a position dimension with size=8 (2 * 4)
+    ```
     """
     try:
         from useq import MDASequence
@@ -156,13 +175,38 @@ def dims_from_useq(
     }
 
     dims: list[Dimension] = []
-    for ax, size in seq.sizes.items():
+    p_size = 0  # Track position dimension size
+    g_size = 0  # Track grid dimension size
+    p_index: int | None = None  # Track where 'p' was in the original order
+
+    for _i, (ax, size) in enumerate(seq.sizes.items()):
         if size:
+            ax_str = str(ax)
+            # Handle grid axis by combining with position axis
+            if ax_str == "g":
+                g_size = size
+                # If we haven't seen 'p' yet, this becomes the position index
+                if p_index is None:
+                    p_index = len(dims)
+                continue  # Don't add 'g' as a separate dimension
+            elif ax_str == "p":
+                p_size = size
+                p_index = len(dims)  # Mark where 'p' should go
+                continue  # Will add combined p dimension later
+
             # all of the useq axes are the same as the ones used here.
-            dim_label = cast("DimensionLabel", str(ax))
+            dim_label = cast("DimensionLabel", ax_str)
             if dim_label not in _units:
                 raise ValueError(f"Unsupported axis for OME: {ax}")
             dims.append(Dimension(label=dim_label, size=size, unit=_units[dim_label]))
+
+    # Add combined position dimension at the correct location if either p or g exists
+    total_positions = max(1, p_size) * max(1, g_size)
+    if p_size > 0 or g_size > 0:
+        if p_index is not None:
+            dims.insert(
+                p_index, Dimension(label="p", size=total_positions, unit=_units["p"])
+            )
 
     return [
         *dims,
