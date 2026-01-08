@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from typing_extensions import Self
 
-from ome_writers._dimensions import build_yaozarrs_image_metadata_v05
+from ome_writers._ngff_metadata import build_yaozarrs_image_metadata_v05
 from ome_writers._stream_base import MultiPositionOMEStream
 
 if TYPE_CHECKING:
