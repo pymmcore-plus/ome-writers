@@ -16,8 +16,8 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     import numpy as np
-    from ome_types.model import Plate
-    from yaozarrs.v05 import PlateDef
+    import ome_types.model as ome
+    import yaozarrs.v05 as yao
 
     from ._dimensions import Dimension, DimensionLabel
 
@@ -41,7 +41,7 @@ class OMEStream(abc.ABC):
         dtype: np.dtype,
         dimensions: Sequence[Dimension],
         *,
-        plate: PlateDef | Plate | None = None,
+        plate: yao.PlateDef | ome.Plate | None = None,
         overwrite: bool = False,
     ) -> Self:
         """Create a new stream for path, dtype, and dimensions.
@@ -56,7 +56,7 @@ class OMEStream(abc.ABC):
             Sequence of dimension information describing the data structure.
             The order of dimensions in this sequence determines the acquisition order
             (i.e., the order in which frames will be appended to the stream).
-        plate : PlateDef | Plate | None, optional
+        plate : yao.PlateDef | ome.Plate | None, optional
             Plate definition for HCS datasets, if applicable. Default is None.
             It can be either a yaozarrs PlateDef or an ome_types Plate object.
         overwrite : bool, optional

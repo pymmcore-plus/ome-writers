@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     import numpy as np
+    import yaozarrs.v05 as yao
 
     from ome_writers._dimensions import Dimension
 
@@ -41,13 +42,13 @@ class OldTensorStoreZarrStream(MultiPositionOMEStream):
         self._stores: dict[str, tensorstore.TensorStore] = {}  # array_key -> store
         self._delete_existing = True
 
-    def create(  # type: ignore
+    def create(
         self,
         path: str,
         dtype: np.dtype,
         dimensions: Sequence[Dimension],
         *,
-        plate=None,  # noqa: ANN001
+        plate: yao.Plate | None = None,
         overwrite: bool = False,
     ) -> Self:
         # Initialize dimensions from MultiPositionOMEStream

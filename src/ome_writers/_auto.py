@@ -14,9 +14,9 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
+    import ome_types.model as ome
+    import yaozarrs.v05 as yao
     from numpy.typing import DTypeLike
-    from ome_types.model import Plate
-    from yaozarrs.v05 import PlateDef
 
     from ._dimensions import Dimension
     from ._stream_base import OMEStream
@@ -76,7 +76,7 @@ def create_stream(
     dimensions: Sequence[Dimension],
     *,
     backend: Literal[BackendName, "auto"] = "auto",
-    plate: PlateDef | Plate | None = None,
+    plate: yao.PlateDef | ome.Plate | None = None,
     overwrite: bool = False,
 ) -> OMEStream:
     """Create a stream for writing OME-TIFF or OME-ZARR data.
@@ -101,7 +101,7 @@ def create_stream(
         - "auto": Automatically determine the backend based on the file extension.
 
         Default is "auto".
-    plate : PlateDef | Plate | None, optional
+    plate : yao.PlateDef | ome.Plate | None, optional
         Plate definition for HCS datasets, if applicable. Default is None.
         It can be either a yaozarrs PlateDef if using a "tensorstore", "zarr" or
         "acquire-zarr" backend, or an ome_types Plate if using "tiff" backend.
@@ -126,7 +126,8 @@ def create_stream(
                 ) from None
             if not isinstance(plate, Plate):
                 raise TypeError(  # pragma: no cover
-                    "For 'tiff' backend, plate must be an ome_types.model.Plate instance."  # noqa: E501
+                    "For 'tiff' backend, plate must be an ome_types.model.Plate "
+                    "instance."
                 )
         elif backend in {"acquire-zarr", "tensorstore", "zarr"}:
             try:

@@ -19,14 +19,17 @@ if TYPE_CHECKING:
 
     import acquire_zarr
     import numpy as np
+    import yaozarrs.v05 as yao
 
     from ome_writers._dimensions import Dimension
 
 
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+# NOTE: this class will soon be replaced with an implementation based on
+# _YaozarrsStreamBase. Plate logic is not implemented and will be added to the
+# _YaozarrsStreamBase-based AcquireZarrStream later.
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 class AcquireZarrStream(MultiPositionOMEStream):
-    # NOTE: this class will soon be replaced with an implementation based on
-    # _YaozarrsStreamBase.
-
     @classmethod
     def is_available(cls) -> bool:
         """Check if the acquire-zarr package is available."""
@@ -45,13 +48,13 @@ class AcquireZarrStream(MultiPositionOMEStream):
         super().__init__()
         self._stream: acquire_zarr.ZarrStream | None = None
 
-    def create(  # type: ignore
+    def create(
         self,
         path: str,
         dtype: np.dtype,
         dimensions: Sequence[Dimension],
         *,
-        plate=None,  # noqa: ANN001
+        plate: yao.Plate | None = None,
         overwrite: bool = False,
     ) -> Self:
         if plate is not None:
