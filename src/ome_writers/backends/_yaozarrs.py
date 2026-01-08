@@ -107,11 +107,11 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
 
         # Get shape from NGFF-ordered dimensions
         shape = tuple(d.size for d in self.storage_dims)
-        # FIXME: dimension labels of Y or X are not special from a user perspective
-        # perhaps use last two dimensions instead?
+        # For chunking, if not specified, use full size for last 2 dims (spatial), 1\
+        # for others if not specified
         chunks = tuple(
-            d.chunk_size or (d.size if d.label in "yx" else 1)
-            for d in self.storage_dims
+            d.chunk_size or (d.size if i >= len(self.storage_dims) - 2 else 1)
+            for i, d in enumerate(self.storage_dims)
         )
         # Build the Image metadata with NGFF-ordered dimensions
         image = build_yaozarrs_image_metadata_v05(self.storage_dims)
