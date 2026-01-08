@@ -191,3 +191,30 @@ def test_plate_dimension_mismatch(tmp_path: Path) -> None:
             overwrite=True,
             plate=plate_def,
         )
+
+
+@pytest.mark.skipif(
+    not omew.TensorStoreZarrStream.is_available(),
+    reason="tensorstore not available",
+)
+def test_yaozarrs_stream_invalid_plate_type(tmp_path: Path) -> None:
+    """Test error when providing invalid plate type to yaozarrs stream."""
+    output = tmp_path / "test.ome.zarr"
+
+    dims = [
+        omew.Dimension(label="p", size=1),
+        omew.Dimension(label="y", size=32),
+        omew.Dimension(label="x", size=32),
+    ]
+
+    stream = omew.TensorStoreZarrStream()
+
+    # Try with a dict (wrong type)
+    with pytest.raises(TypeError, match=r"YaozarrsStream only supports.*PlateDef"):
+        stream.create(
+            str(output),
+            np.dtype("uint16"),
+            dims,
+            overwrite=True,
+            plate={"invalid": "plate"},  # type: ignore
+        )

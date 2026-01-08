@@ -389,7 +389,7 @@ class TensorStoreZarrStream(_YaozarrsStreamBase):
     @classmethod
     def is_available(cls) -> bool:
         """Check if yaozarrs and tensorstore are available."""
-        if not super().is_available():
+        if not super().is_available():  # pragma: no cover
             return False
         return importlib.util.find_spec("tensorstore") is not None
 
@@ -423,7 +423,7 @@ class ZarrPythonStream(_YaozarrsStreamBase):
     @classmethod
     def is_available(cls) -> bool:
         """Check if yaozarrs and zarr-python are available."""
-        if not super().is_available():
+        if not super().is_available():  # pragma: no cover
             return False
         try:
             import zarr

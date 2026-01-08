@@ -266,3 +266,34 @@ def test_autobackend_tiff(tmp_path: Path) -> None:
     ome_tiff_path = tmp_path / "test.ome.tiff"
     stream = init_stream(str(ome_tiff_path), backend="auto")
     assert isinstance(stream, TifffileStream)
+
+
+def test_zarr_python_stream_old_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test ZarrPythonStream.is_available() with old zarr version."""
+    # Skip if zarr not installed at all
+    pytest.importorskip("zarr")
+    pytest.importorskip("yaozarrs")
+
+    # Mock zarr version to be < 3.0
+    import sys
+    from unittest.mock import Mock
+
+    # Create mock zarr module with old version
+    mock_zarr = Mock()
+    mock_zarr.__version__ = "2.18.0"
+
+    original_zarr = sys.modules.get("zarr")
+    sys.modules["zarr"] = mock_zarr
+
+    try:
+        # Re-import to get fresh class
+        from ome_writers.backends._yaozarrs import ZarrPythonStream
+
+        # With version 2.x, should not be available
+        assert not ZarrPythonStream.is_available()
+    finally:
+        # Restore original zarr module
+        if original_zarr is not None:
+            sys.modules["zarr"] = original_zarr
+        else:
+            sys.modules.pop("zarr", None)
