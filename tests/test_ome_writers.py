@@ -8,21 +8,13 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
-from yaozarrs import validate_zarr_store
 
 import ome_writers as omew
 
+from .conftest import validate_path
+
 if TYPE_CHECKING:
     from .conftest import AvailableBackend
-
-
-def validate_path(path: Path) -> None:
-    """Helper function to validate that a file exists and is non-empty."""
-    assert path.exists(), f"File {path} does not exist."
-    if path.suffix == ".tiff":
-        ...
-    elif path.suffix in {".zarr", ".zarr/"}:
-        validate_zarr_store(path)
 
 
 def test_minimal_2d_dimensions(backend: AvailableBackend, tmp_path: Path) -> None:
@@ -115,20 +107,34 @@ def test_create_stream_factory_function(
 @pytest.mark.parametrize(
     "dtype", [np.dtype(np.uint8), np.dtype(np.uint16)], ids=["uint8", "uint16"]
 )
+@pytest.mark.parametrize(
+    "sizes",
+    [
+        {"t": 3, "c": 2, "z": 2, "y": 64, "x": 64},  # TCZYX - canonical order
+        {"c": 2, "t": 3, "z": 2, "y": 64, "x": 64},  # CTZYX - non-canonical
+        {"t": 3, "z": 2, "c": 2, "y": 64, "x": 64},  # TZCYX - non-canonical
+        {"z": 2, "y": 64, "x": 64},  # ZYX - only spatial (canonical)
+        {"t": 2, "y": 64, "x": 64},  # TYX - time only (canonical)
+    ],
+    ids=["tczyx", "ctzyx", "tzcyx", "zyx", "tyx"],
+)
 def test_data_integrity_roundtrip(
     backend: AvailableBackend,
     tmp_path: Path,
     dtype: np.dtype,
+    sizes: dict[str, int],
 ) -> None:
-    """Test data integrity roundtrip with different data types."""
+    """Test data integrity roundtrip with different data types and dimension orders."""
     data_gen, dimensions, dtype = omew.fake_data_for_sizes(
-        sizes={"t": 3, "c": 2, "z": 2, "y": 64, "x": 64},
+        sizes=sizes,
         chunk_sizes={"y": 32, "x": 32},
     )
 
     # Convert generator to list to use data multiple times
     original_frames = list(data_gen)
-    output_path = tmp_path / f"{backend.name.lower()}_{dtype.name}{backend.file_ext}"
+    dim_order = "".join([d.label for d in dimensions if d.label not in "yx"])
+    filename = f"{backend.name.lower()}_{dtype.name}_{dim_order}{backend.file_ext}"
+    output_path = tmp_path / filename
 
     # Write data using our stream
     stream = backend.cls()
@@ -235,3 +241,52 @@ def test_multiposition_acquisition(backend: AvailableBackend, tmp_path: Path) ->
             # Shape should be (t, z, c, y, x) = (3, 2, 2, 32, 32)
             expected_shape = (3, 2, 2, 32, 32)
             assert data.shape == expected_shape
+
+
+@pytest.mark.parametrize(
+    "sizes",
+    [
+        {"t": 2, "c": 3, "z": 4, "y": 32, "x": 32},  # TCZYX - canonical
+        {"t": 2, "z": 4, "c": 3, "y": 32, "x": 32},  # TZCYX - non-canonical
+        {"c": 3, "t": 2, "z": 4, "y": 32, "x": 32},  # CTZYX - non-canonical
+    ],
+)
+def test_zarr_metadata_correctness(
+    zarr_backend: AvailableBackend, sizes: dict[str, int], tmp_path: Path
+) -> None:
+    """Test that zarr metadata preserves acquisition order."""
+    output_path = tmp_path / "test_metadata.zarr"
+    data_gen, dims, dtype = omew.fake_data_for_sizes(sizes)
+
+    stream = omew.create_stream(
+        path=str(output_path),
+        dimensions=dims,
+        dtype=dtype,
+        backend=zarr_backend.name,
+        overwrite=True,
+    )
+    for frame in data_gen:
+        stream.append(frame)
+    stream.flush()
+
+    # Check group metadata
+    group_meta = json.loads((output_path / "zarr.json").read_text())
+    axes = group_meta["attributes"]["ome"]["multiscales"][0]["axes"]
+
+    # Verify axes are in acquisition order
+    axis_info = {
+        "t": {"type": "time", "unit": "second"},
+        "c": {"type": "channel", "unit": "unknown"},
+        "z": {"type": "space", "unit": "micrometer"},
+        "y": {"type": "space", "unit": "micrometer"},
+        "x": {"type": "space", "unit": "micrometer"},
+    }
+    expected_axes = [{"name": d.label, **axis_info[d.label]} for d in dims]
+    assert axes == expected_axes
+
+    # Check array metadata
+    array_meta = json.loads((output_path / "0" / "zarr.json").read_text())
+    assert array_meta["dimension_names"] == [d.label for d in dims]
+    assert array_meta["shape"] == [d.size for d in dims]
+
+    validate_path(output_path)

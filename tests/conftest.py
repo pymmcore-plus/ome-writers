@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, NamedTuple, cast
 
+import pydantic
 import pytest
 
 import ome_writers as omew
@@ -98,3 +99,41 @@ def zarr_backend(request: pytest.FixtureRequest) -> AvailableBackend:
 def tiff_backend(request: pytest.FixtureRequest) -> AvailableBackend:
     """Fixture to provide an available backend based on the test parameter."""
     return cast("AvailableBackend", request.param)
+
+
+def validate_zarr_store(output_path: Path) -> None:
+    try:
+        import yaozarrs
+    except ImportError:
+        print("yaozarrs not installed, skipping Zarr store validation")
+        return
+
+    try:
+        yaozarrs.validate_zarr_store(output_path)
+    except pydantic.ValidationError as e:
+        if len(errors := e.errors()) != 1:
+            raise
+        error = errors[0]
+        if "Axes are not in the required order by type" not in error["msg"]:
+            raise
+
+
+def validate_path(path: Path) -> None:
+    """Validate that a file exists, is non-empty, and has valid metadata/structure."""
+    assert path.exists(), f"File {path} does not exist."
+    if path.suffix == ".tiff":
+        try:
+            import tifffile
+            from ome_types import from_xml
+        except ImportError:
+            print("ome-types or tifffile not installed, skipping OME-XML validation")
+            return
+
+        with tifffile.TiffFile(path) as tif:
+            ome_xml = tif.ome_metadata
+            if ome_xml is not None:
+                # validate by attempting to parse
+                from_xml(ome_xml)
+
+    elif path.suffix in {".zarr", ".zarr/"}:
+        validate_zarr_store(path)

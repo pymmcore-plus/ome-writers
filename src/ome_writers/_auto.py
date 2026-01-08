@@ -84,6 +84,8 @@ def create_stream(
         NumPy data type for the image data.
     dimensions : Sequence[DimensionInfo]
         Sequence of dimension information describing the data structure.
+        The order of dimensions in this sequence determines the acquisition order
+        (i.e., the order in which frames will be appended to the stream).
 
     backend : Literal["acquire-zarr", "tensorstore", "tiff", "auto"], optional
         The backend to use for writing the data. Options are:

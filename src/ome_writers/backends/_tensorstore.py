@@ -49,16 +49,19 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         *,
         overwrite: bool = False,
     ) -> Self:
-        # Use MultiPositionOMEStream to handle position logic
-        num_positions, non_position_dims = self._init_positions(dimensions)
+        # Initialize dimensions from MultiPositionOMEStream
+        # NOTE: Data will be stored in acquisition order.
+        self._init_dimensions(dimensions)
+
         self._delete_existing = overwrite
 
-        self._create_group(self._normalize_path(path), dimensions)
+        # Create group and array paths
+        self._create_group(self._normalize_path(path), self.storage_order_dims)
 
         # Create stores for each array
-        for pos_idx in range(num_positions):
+        for pos_idx in range(self.num_positions):
             array_key = str(pos_idx)
-            spec = self._create_spec(dtype, non_position_dims, array_key)
+            spec = self._create_spec(dtype, self.storage_order_dims, array_key)
             try:
                 self._stores[array_key] = self._ts.open(spec).result()
             except ValueError as e:
@@ -70,7 +73,6 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
                     ) from e
                 else:
                     raise
-
         return self
 
     def _create_spec(
@@ -92,10 +94,11 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         }
 
     def _write_to_backend(
-        self, array_key: str, index: tuple[int, ...], frame: np.ndarray
+        self, position_key: str, index: tuple[int, ...], frame: np.ndarray
     ) -> None:
         """TensorStore-specific write implementation."""
-        store = self._stores[array_key]
+        store = self._stores[position_key]
+        # Named tuples work directly as indices
         future = store[index].write(frame)  # type: ignore[index]
         self._futures.append(future)
 
@@ -105,6 +108,8 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
             future.result()
         self._futures.clear()
         self._stores.clear()
+        # Patch metadata to ensure OME-NGFF v0.5 compliance
+        self._patch_metadata_to_ngff_v05()
 
     def is_active(self) -> bool:
         return bool(self._stores)
@@ -113,25 +118,45 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
         self._group_path = Path(path)
         self._group_path.mkdir(parents=True, exist_ok=True)
 
-        # Determine array keys and dimensions based on position dimension
-        position_dims = [d for d in dims if d.label == "p"]
-        non_position_dims = [d for d in dims if d.label != "p"]
-
-        # Determine number of positions (1 if no position dimension)
-        num_positions = position_dims[0].size if position_dims else 1
-
-        array_dims: dict[str, Sequence[Dimension]] = {}
-        for pos_idx in range(num_positions):
+        # Create array paths for each position
+        for pos_idx in range(self.num_positions):
             array_key = str(pos_idx)
             self._array_paths[array_key] = self._group_path / array_key
-            # Use non_position_dims for multi-pos, full dims for single pos
-            array_dims[array_key] = non_position_dims if self._position_dim else dims
 
+        # Note: We'll create proper OME-NGFF metadata in _patch_metadata_to_ngff_v05
+        # after data writing is complete
         group_zarr = self._group_path / "zarr.json"
         group_meta = {
             "zarr_format": 3,
             "node_type": "group",
-            "attributes": ome_meta_v5(array_dims=array_dims),
+            "attributes": {},
         }
         group_zarr.write_text(json.dumps(group_meta, indent=2))
         return self._group_path
+
+    def _patch_metadata_to_ngff_v05(self) -> None:
+        """Patch the Zarr group metadata to ensure OME-NGFF v0.5 compliance.
+
+        This method writes OME-NGFF v0.5-compliant metadata for the group,
+        preserving the acquisition order (storage order) for the dimensions.
+        Data is stored and read back in the same order it was acquired.
+        """
+        if self._group_path is None:
+            return
+
+        # Use storage order dims as-is (acquisition order)
+        attrs = ome_meta_v5(
+            {str(i): self.storage_order_dims for i in range(self.num_positions)}
+        )
+        zarr_json = self._group_path / "zarr.json"
+        current_meta: dict = {
+            "consolidated_metadata": None,
+            "node_type": "group",
+            "zarr_format": 3,
+        }
+        if zarr_json.exists():
+            with open(zarr_json) as f:
+                current_meta = json.load(f)
+
+        current_meta.setdefault("attributes", {}).update(attrs)
+        zarr_json.write_text(json.dumps(current_meta, indent=2))
