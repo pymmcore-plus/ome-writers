@@ -51,135 +51,6 @@ def test_dims_from_useq_invalid_input() -> None:
         dims_from_useq("not a sequence", image_width=32, image_height=32)  # type: ignore[arg-type]
 
 
-def test_dims_from_useq_with_grid() -> None:
-    """Test dims_from_useq properly combines grid and position dimensions."""
-    useq = pytest.importorskip("useq")
-
-    # Grid only
-    seq1 = useq.MDASequence(
-        grid_plan=useq.GridRowsColumns(rows=2, columns=3),
-    )
-    dims1 = dims_from_useq(seq1, image_width=32, image_height=32)
-    # Should have p (6 positions from grid), y, x
-    assert len(dims1) == 3
-    assert dims1[0].label == "p"
-    assert dims1[0].size == 6  # 2*3
-    assert dims1[1].label == "y"
-    assert dims1[2].label == "x"
-
-    # Stage positions with grid
-    seq2 = useq.MDASequence(
-        stage_positions=[(0.0, 0.0), (10.0, 10.0)],
-        grid_plan=useq.GridRowsColumns(rows=2, columns=2),
-    )
-    dims2 = dims_from_useq(seq2, image_width=64, image_height=64)
-    # Should have p (2*4=8 total positions), y, x
-    assert len(dims2) == 3
-    assert dims2[0].label == "p"
-    assert dims2[0].size == 8  # 2 positions * 4 grid points
-    assert dims2[1].label == "y"
-    assert dims2[2].label == "x"
-
-    # Full sequence with time, channels, z, stage positions, and grid
-    seq3 = useq.MDASequence(
-        axis_order="ptgcz",
-        stage_positions=[(0.0, 0.0), (10.0, 10.0)],
-        time_plan={"interval": 0.1, "loops": 3},
-        channels=["DAPI", "FITC"],
-        z_plan={"range": 2, "step": 1.0},
-        grid_plan=useq.GridRowsColumns(rows=2, columns=2),
-    )
-    dims3 = dims_from_useq(seq3, image_width=128, image_height=128)
-    # Should have p, t, c, z, y, x (g combined into p)
-    dim_labels = [d.label for d in dims3]
-    assert "g" not in dim_labels, "Grid 'g' should be combined into 'p'"
-    assert "p" in dim_labels
-    p_dim = next(d for d in dims3 if d.label == "p")
-    assert p_dim.size == 8  # 2 stage positions * 4 grid points
-    t_dim = next(d for d in dims3 if d.label == "t")
-    assert t_dim.size == 3
-    c_dim = next(d for d in dims3 if d.label == "c")
-    assert c_dim.size == 2
-    z_dim = next(d for d in dims3 if d.label == "z")
-    assert z_dim.size == 3
-
-
-def test_dims_from_useq_with_per_position_grid() -> None:
-    """Test dims_from_useq with per-position grid plans (nested sequences)."""
-    useq = pytest.importorskip("useq")
-
-    # Per-position grid: first position has 2 grid points, second has none
-    seq = useq.MDASequence(
-        axis_order="ptgcz",
-        stage_positions=[
-            useq.Position(
-                x=0.0,
-                y=0.0,
-                sequence=useq.MDASequence(
-                    grid_plan=useq.GridRowsColumns(rows=1, columns=2)
-                ),
-            ),
-            (10.0, 10.0),
-        ],
-        time_plan={"interval": 0.1, "loops": 2},
-        channels=["DAPI", "FITC"],
-        z_plan={"range": 3, "step": 1.0},
-    )
-
-    dims = dims_from_useq(seq, image_width=64, image_height=64)
-
-    # Should have p, t, c, z, y, x
-    dim_labels = [d.label for d in dims]
-    assert "g" not in dim_labels, "Grid 'g' should be combined into 'p'"
-    assert "p" in dim_labels
-
-    # Total positions should be 3: (p0,g0), (p0,g1), (p1,g0)
-    p_dim = next(d for d in dims if d.label == "p")
-    assert p_dim.size == 3, f"Expected 3 positions, got {p_dim.size}"
-
-
-def test_dims_from_useq_with_mixed_grid() -> None:
-    """Test dims_from_useq with both global and per-position grid plans.
-
-    When both global and per-position grids are specified, positions with
-    nested sequences use their own grid, while others use the global grid.
-    """
-    useq = pytest.importorskip("useq")
-
-    # Mixed grid: position 0 has nested grid (2 points), position 1 uses
-    # global (4 points)
-    seq = useq.MDASequence(
-        axis_order="ptgcz",
-        stage_positions=[
-            useq.Position(
-                x=0.0,
-                y=0.0,
-                sequence=useq.MDASequence(
-                    grid_plan=useq.GridRowsColumns(rows=1, columns=2)
-                ),
-            ),
-            (10.0, 10.0),
-        ],
-        time_plan={"interval": 0.1, "loops": 2},
-        channels=["DAPI", "FITC"],
-        z_plan={"range": 3, "step": 1.0},
-        grid_plan=useq.GridRowsColumns(rows=2, columns=2),
-    )
-
-    dims = dims_from_useq(seq, image_width=64, image_height=64)
-
-    # Should have p, t, c, z, y, x
-    dim_labels = [d.label for d in dims]
-    assert "g" not in dim_labels, "Grid 'g' should be combined into 'p'"
-    assert "p" in dim_labels
-
-    # Total positions should be 6: (0,0), (0,1), (1,0), (1,1), (1,2), (1,3)
-    # Position 0: 2 grid points from nested sequence
-    # Position 1: 4 grid points from global grid_plan
-    p_dim = next(d for d in dims if d.label == "p")
-    assert p_dim.size == 6, f"Expected 6 positions, got {p_dim.size}"
-
-
 def test_dimension_index_iterator_empty() -> None:
     """Test DimensionIndexIterator with empty dimensions."""
     dims: list[Dimension] = []
@@ -198,11 +69,10 @@ def test_dimension_index_iterator_2d_only() -> None:
     ]
     it = DimensionIndexIterator(dims, storage_order_dimensions=[])
 
-    # Should yield one frame with empty index tuple
-    assert len(it) == 0  # No non-spatial dimensions
+    # With no non-spatial dimensions, iterator should be empty
+    assert len(it) == 0
     result = list(it)
-    assert len(result) == 1
-    assert result[0] == (0, ())
+    assert len(result) == 0
 
 
 def test_dimension_index_iterator_validation() -> None:

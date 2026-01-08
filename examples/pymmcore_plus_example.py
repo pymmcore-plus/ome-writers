@@ -40,7 +40,6 @@ seq = useq.MDASequence(
     time_plan={"interval": 0.1, "loops": 3},
     channels=["DAPI", "FITC"],
     z_plan={"range": 2, "step": 1.0},
-    grid_plan={"rows": 2, "columns": 2},
 )
 # -------------------------------------------------------------------------#
 

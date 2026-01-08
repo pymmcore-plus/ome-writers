@@ -16,7 +16,6 @@ if TYPE_CHECKING:
     import numpy as np
 
     from ome_writers._dimensions import Dimension
-    from ome_writers._stream_base import PlateType
 
 
 class OldTensorStoreZarrStream(MultiPositionOMEStream):
@@ -48,7 +47,6 @@ class OldTensorStoreZarrStream(MultiPositionOMEStream):
         dtype: np.dtype,
         dimensions: Sequence[Dimension],
         *,
-        plate: PlateType = None,
         overwrite: bool = False,
     ) -> Self:
         # Initialize dimensions from MultiPositionOMEStream

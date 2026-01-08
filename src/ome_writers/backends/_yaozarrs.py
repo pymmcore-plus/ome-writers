@@ -14,10 +14,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     import numpy as np
-    from yaozarrs.v05 import Image, PlateDef
+    from yaozarrs.v05 import Image
 
     from ome_writers._dimensions import Dimension
-    from ome_writers._stream_base import PlateType
 
 
 class _YaozarrsStreamBase(MultiPositionOMEStream):
@@ -28,8 +27,7 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
     through yaozarrs' unified API.
 
     For multi-position data, this uses the bioformats2raw layout pattern where
-    each position is a separate Image in the hierarchy. For plate data, it uses
-    the HCS (High-Content Screening) layout with proper well/field structure.
+    each position is a separate Image in the hierarchy.
     """
 
     @classmethod
@@ -76,7 +74,6 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
         dtype: np.dtype,
         dimensions: Sequence[Dimension],
         *,
-        plate: PlateType = None,
         overwrite: bool = False,
     ) -> Self:
         """Internal method to create the OME-Zarr storage structure.
@@ -91,9 +88,6 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
             Sequence of dimensions describing the data structure.
         overwrite : bool, optional
             Whether to overwrite existing stores. Default is False.
-        plate : yaozarrs.v05.PlateDef | None, optional
-            Plate metadata for HCS layout. If provided, creates a plate structure
-            instead of a simple multi-position layout. Default is None.
 
         Returns
         -------
@@ -102,14 +96,6 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
         """
         # Use MultiPositionOMEStream with NGFF ordering
         self._configure_dimensions(dimensions, ngff_order=True)
-
-        # Validate plate type - yaozarrs backend only supports PlateDef
-        if plate is not None and not isinstance(plate, self._v05.PlateDef):
-            msg = (
-                "YaozarrsStream only supports yaozarrs.v05.PlateDef for plate metadata."
-                f" Received: {type(plate).__name__}"
-            )
-            raise TypeError(msg)
 
         writer = self._get_writer()
         self._group_path = Path(self._normalize_path(path))
@@ -126,7 +112,7 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
         image = build_yaozarrs_image_metadata_v05(self.storage_dims)
 
         self._arrays = self._prepare_arrays(
-            image, plate, shape, dtype, chunks, writer, overwrite
+            image, shape, dtype, chunks, writer, overwrite
         )
 
         return self
@@ -142,22 +128,18 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
     def _prepare_arrays(
         self,
         image: Image,
-        plate: PlateDef | None,
         shape: tuple[int, ...],
         dtype: np.dtype,
         chunks: tuple[int, ...],
         writer: Literal["tensorstore", "zarr"] | Callable,
         overwrite: bool,
     ) -> dict[str, Any]:
-        """Prepare arrays for the appropriate layout (plate, single, or multi-position).
+        """Prepare arrays for the appropriate layout (single or multi-position).
 
         Parameters
         ----------
         image : yaozarrs.v05.Image
             Yaozarrs Image metadata.
-        plate : yaozarrs.v05.PlateDef | None
-            Plate definition for HCS layout. If None, creates single or multi-position
-            layout.
         shape : tuple[int, ...]
             Shape of arrays in NGFF order.
         dtype : np.dtype
@@ -174,22 +156,7 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
         dict[str, Any]
             Dictionary mapping position indices to array handles.
         """
-        # Validate plate dimensions match the position count
-        if plate is not None:
-            expected_positions = len(plate.wells) * (plate.field_count or 1)
-            if self.num_positions != expected_positions:
-                msg = (
-                    f"Position dimension size ({self.num_positions}) does not match "
-                    f"plate structure ({len(plate.wells)} wells * "
-                    f"{plate.field_count or 1} fields = {expected_positions} positions)"
-                )
-                raise ValueError(msg)
-
-        if plate is not None:
-            return self._prepare_plate_arrays(
-                image, plate, shape, dtype, chunks, writer, overwrite
-            )
-        elif self.num_positions == 1:
+        if self.num_positions == 1:
             return self._prepare_single_position_arrays(
                 image, shape, dtype, chunks, writer, overwrite
             )
@@ -197,80 +164,6 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
             return self._prepare_multi_position_arrays(
                 image, shape, dtype, chunks, writer, overwrite
             )
-
-    def _prepare_plate_arrays(
-        self,
-        image: Image,
-        plate: PlateDef,
-        shape: tuple[int, ...],
-        dtype: np.dtype,
-        chunks: tuple[int, ...],
-        writer: Literal["tensorstore", "zarr"] | Callable,
-        overwrite: bool,
-    ) -> dict[str, Any]:
-        """Prepare arrays for HCS plate layout.
-
-        Parameters
-        ----------
-        image : yaozarrs.v05.Image
-            Yaozarrs Image metadata.
-        plate : yaozarrs.v05.PlateDef
-            Plate definition with wells and fields.
-        shape : tuple[int, ...]
-            Shape of arrays in NGFF order.
-        dtype : np.dtype
-            Data type for arrays.
-        chunks : tuple[int, ...]
-            Chunk sizes for arrays.
-        writer : Literal["tensorstore", "zarr"] | Callable
-            Writer backend to use.
-        overwrite : bool
-            Whether to overwrite existing data.
-        """
-        if self._group_path is None:
-            raise RuntimeError("Stream has not been created yet.")
-
-        plate_metadata = self._v05.Plate(version="0.5", plate=plate)
-        plate_builder = self._PlateBuilder(
-            self._group_path,
-            plate=plate_metadata,
-            overwrite=overwrite,
-            chunks=chunks,
-            writer=writer,
-        )
-
-        # Add wells to the plate
-        # Build mapping from position index to well/field path
-        position_to_array_key: dict[str, str] = {}
-        position_idx = 0
-        fields_per_well = plate.field_count or 1
-
-        for well in plate.wells:
-            row_name, col_name = well.path.split("/")
-            # Create field entries for this well
-            well_images = {}
-            for field_idx in range(fields_per_well):
-                field_key = str(field_idx)
-                well_images[field_key] = (image, [(shape, dtype)])
-
-                # Map position index to array key (well_path/field_idx)
-                # PlateBuilder creates keys like "row/col/field/dataset"
-                # so we need to append "/0" for the first (and only) dataset
-                array_key = f"{well.path}/{field_idx}/0"
-                position_to_array_key[str(position_idx)] = array_key
-                position_idx += 1
-
-            plate_builder.add_well(row=row_name, col=col_name, images=well_images)
-
-        # Prepare the plate and remap arrays to use position indices as keys
-        _, plate_arrays = plate_builder.prepare()
-
-        # Remap from PlateBuilder's keys (e.g., "A/1/0/0") to position indices
-        remapped_arrays = {}
-        for pos_idx_str, array_key in position_to_array_key.items():
-            remapped_arrays[pos_idx_str] = plate_arrays[array_key]
-
-        return remapped_arrays
 
     def _prepare_single_position_arrays(
         self,
