@@ -13,6 +13,7 @@ from ome_writers._util import (
     DimensionIndexIterator,
     dims_from_useq,
     fake_data_for_sizes,
+    position_names_from_useq,
 )
 from ome_writers.backends._acquire_zarr import AcquireZarrStream
 from ome_writers.backends._tifffile import TifffileStream
@@ -178,6 +179,72 @@ def test_dims_from_useq_with_mixed_grid() -> None:
     # Position 1: 4 grid points from global grid_plan
     p_dim = next(d for d in dims if d.label == "p")
     assert p_dim.size == 6, f"Expected 6 positions, got {p_dim.size}"
+
+
+def test_position_names_from_useq() -> None:
+    """Test position_names_from_useq returns correct name mapping."""
+    useq = pytest.importorskip("useq")
+
+    # Test with global grid
+    seq1 = useq.MDASequence(
+        stage_positions=[(0.0, 0.0), (10.0, 10.0)],
+        grid_plan=useq.GridRowsColumns(rows=2, columns=2),
+    )
+    names1 = position_names_from_useq(seq1)
+    assert len(names1) == 8
+    assert names1[0] == "p0g0"
+    assert names1[1] == "p0g1"
+    assert names1[7] == "p1g3"
+
+    # Test with per-position grid
+    seq2 = useq.MDASequence(
+        stage_positions=[
+            useq.Position(
+                x=0.0,
+                y=0.0,
+                sequence=useq.MDASequence(
+                    grid_plan=useq.GridRowsColumns(rows=1, columns=2)
+                ),
+            ),
+            (10.0, 10.0),
+        ],
+    )
+    names2 = position_names_from_useq(seq2)
+    assert len(names2) == 3
+    assert names2[0] == "p0g0"
+    assert names2[1] == "p0g1"
+    assert names2[2] == "p1g0"
+
+    # Test without grid (just positions)
+    seq3 = useq.MDASequence(
+        stage_positions=[(0.0, 0.0), (10.0, 10.0), (20.0, 20.0)],
+    )
+    names3 = position_names_from_useq(seq3)
+    assert len(names3) == 3
+    assert names3[0] == "p0"
+    assert names3[1] == "p1"
+    assert names3[2] == "p2"
+
+    # Test with mixed grid
+    seq4 = useq.MDASequence(
+        stage_positions=[
+            useq.Position(
+                x=0.0,
+                y=0.0,
+                sequence=useq.MDASequence(
+                    grid_plan=useq.GridRowsColumns(rows=1, columns=2)
+                ),
+            ),
+            (10.0, 10.0),
+        ],
+        grid_plan=useq.GridRowsColumns(rows=2, columns=2),
+    )
+    names4 = position_names_from_useq(seq4)
+    assert len(names4) == 6
+    assert names4[0] == "p0g0"
+    assert names4[1] == "p0g1"
+    assert names4[2] == "p1g0"
+    assert names4[5] == "p1g3"
 
 
 def test_dimension_index_iterator_empty() -> None:
