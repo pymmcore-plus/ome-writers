@@ -6,7 +6,11 @@ OME-NGFF and OME-TIFF do not have a separate "grid" concept - all positions
 are treated the same regardless of whether they come from stage_positions or
 grid_plan.
 
-The total number of positions will be: num_stage_positions * num_grid_points
+Useq supports two types of grid plans:
+1. Global grid_plan: applied to all positions
+   Total positions = num_stage_positions * num_grid_points
+2. Per-position grid_plan: each position can have its own grid (via nested sequences)
+   Total positions = sum of grid points for each position
 """
 
 import numpy as np
@@ -14,9 +18,11 @@ import useq
 
 import ome_writers as omew
 
-# Create a sequence with stage positions and a grid plan
-# This creates 2 stage positions * 4 grid points = 8 total positions
-seq = useq.MDASequence(
+# Example 1: Global grid plan (applied to all positions)
+print("=" * 70)
+print("Example 1: Global grid_plan")
+print("=" * 70)
+seq1 = useq.MDASequence(
     axis_order="ptgcz",
     stage_positions=[(0.0, 0.0), (100.0, 100.0)],
     time_plan={"interval": 0.1, "loops": 2},
@@ -25,30 +31,69 @@ seq = useq.MDASequence(
     grid_plan=useq.GridRowsColumns(rows=2, columns=2),
 )
 
-# Convert to ome-writers dimensions
-# The grid "g" axis will be combined with "p" axis
-dims = omew.dims_from_useq(seq, image_width=32, image_height=32)
+dims1 = omew.dims_from_useq(seq1, image_width=32, image_height=32)
+print(f"Stage positions: {len(seq1.stage_positions)}")
+print(f"Grid points per position: {seq1.grid_plan.num_positions()}")
+p_dim1 = next(d for d in dims1 if d.label == "p")
+print(f"Total positions in ome-writers: {p_dim1.size}")
+print(
+    f"  (= {len(seq1.stage_positions)} stage * "
+    f"{seq1.grid_plan.num_positions()} grid points)\n"
+)
 
-print("Sequence info:")
-print(f"  useq axis order: {seq.axis_order}")
-print(f"  useq sizes: {dict(seq.sizes)}")
-print(f"  Total frames: {len(list(seq))}")
-print()
-print("ome-writers dimensions:")
+# Example 2: Per-position grid plan (different grids for different positions)
+print("=" * 70)
+print("Example 2: Per-position grid_plan (nested sequences)")
+print("=" * 70)
+seq2 = useq.MDASequence(
+    axis_order="ptgcz",
+    stage_positions=[
+        useq.Position(
+            x=0.0,
+            y=0.0,
+            sequence=useq.MDASequence(
+                grid_plan=useq.GridRowsColumns(rows=1, columns=2)
+            ),
+        ),
+        (10.0, 10.0),  # No grid for this position
+    ],
+    time_plan={"interval": 0.1, "loops": 2},
+    channels=["DAPI", "FITC"],
+    z_plan={"range": 3, "step": 1.0},
+)
+
+dims2 = omew.dims_from_useq(seq2, image_width=32, image_height=32)
+print(f"Stage positions: {len(seq2.stage_positions)}")
+print("  Position 0: 2 grid points")
+print("  Position 1: 1 grid point (no grid)")
+p_dim2 = next(d for d in dims2 if d.label == "p")
+print(f"Total positions in ome-writers: {p_dim2.size}")
+print("  (= 2 + 1 = 3 unique position combinations)\n")
+
+# Use the second example for demonstration
+seq = seq2
+dims = dims2
+
+print("=" * 70)
+print("Writing data with per-position grid")
+print("=" * 70)
+
+# Count actual unique positions
+unique_positions = set()
+for event in seq:
+    p = event.index.get("p", 0)
+    g = event.index.get("g", 0)
+    unique_positions.add((p, g))
+print(f"Unique (p, g) combinations: {sorted(unique_positions)}")
+
+# Convert to ome-writers dimensions
+print("\nome-writers dimensions:")
 for dim in dims:
     print(f"  {dim.label}: size={dim.size}")
 print()
 
-# Note: The position dimension now has size=8 (2 stage * 4 grid)
-p_dim = next(d for d in dims if d.label == "p")
-print(
-    f"Total positions: {p_dim.size} (from {len(seq.stage_positions)} stage positions * "
-    f"{seq.grid_plan.num_positions()} grid points)"
-)
-print()
-
 # Create a stream and write data
-output_path = "test_grid_output.zarr"
+output_path = "example_test_grid_output.zarr"
 with omew.create_stream(
     path=output_path,
     dimensions=dims,
@@ -65,24 +110,16 @@ with omew.create_stream(
         c = event.index.get("c", 0)
         z = event.index.get("z", 0)
 
-        # Calculate the flattened position index
-        # For axis_order="ptgcz", frames are ordered as:
-        # p0g0t0c0z0, p0g0t0c0z1, ..., p0g1t0c0z0, ..., p1g0t0c0z0, ...
-        flattened_p = p * seq.grid_plan.num_positions() + g
-
         # Create a frame (in practice, this would be your actual image data)
         frame = np.full((32, 32), i, dtype=np.uint16)
 
         stream.append(frame)
 
         if i < 5 or i == len(list(seq)) - 1:
-            print(
-                f"  Frame {i}: useq(p={p}, g={g}, t={t}, c={c}, z={z}) "
-                f"-> flattened position={flattened_p}"
-            )
+            print(f"  Frame {i}: useq(p={p}, g={g}, t={t}, c={c}, z={z})")
         elif i == 5:
             print("  ...")
 
 print(f"\nData written to {output_path}")
 print("\nThe grid positions have been flattened into the position dimension.")
-print("In the output Zarr, you'll see 8 position arrays (p/0 through p/7).")
+print(f"In the output Zarr, you'll see {p_dim2.size} position arrays.")
