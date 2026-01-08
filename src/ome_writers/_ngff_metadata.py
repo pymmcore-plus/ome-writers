@@ -78,6 +78,54 @@ def _ome_axes_scales(dims: Sequence[Dimension]) -> tuple[list[dict], list[float]
     return axes, scales
 
 
+def build_yaozarrs_image_metadata_v05(dims: Sequence[Dimension]) -> Any:
+    """Build a yaozarrs v05 Image metadata model from Dimension objects.
+
+    Parameters
+    ----------
+    dims : Sequence[Dimension]
+        Sequence of dimensions describing the image axes.
+
+    Returns
+    -------
+    Any
+        A yaozarrs v05 Image model with a single multiscale.
+    """
+    try:
+        from yaozarrs import v05
+    except ImportError as e:
+        raise ImportError(
+            "The `yaozarrs` package is required to use this function. "
+            "Please install it via `pip install yaozarrs`."
+        ) from e
+
+    axes = []
+    scales = []
+
+    for dim in dims:
+        axis = dim_to_yaozarrs_axis_v05(dim)
+        axes.append(axis)
+        scales.append(dim.ome_scale)
+
+    # Create the Image model with a single multiscale (single resolution level)
+    image = v05.Image(
+        multiscales=[
+            v05.Multiscale(
+                axes=axes,
+                datasets=[
+                    v05.Dataset(
+                        path="0",
+                        coordinateTransformations=[
+                            v05.ScaleTransformation(scale=scales)
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+    return image
+
+
 def dim_to_yaozarrs_axis_v05(dim: Dimension) -> Any:
     """Convert a Dimension to a yaozarrs v05 Axis object.
 

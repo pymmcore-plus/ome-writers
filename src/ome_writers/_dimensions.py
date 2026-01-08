@@ -12,7 +12,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     import ome_types
-    from yaozarrs import v05
 
 OME_DIM_TYPE = {"y": "space", "x": "space", "z": "space", "t": "time", "c": "channel"}
 OME_UNIT = {"um": "micrometer", "ml": "milliliter", "s": "second", None: "unknown"}
@@ -47,55 +46,6 @@ class Dimension(NamedTuple):
         if isinstance(self.unit, tuple):
             return self.unit[0]
         return 1.0
-
-
-def build_yaozarrs_image_metadata_v05(dims: Sequence[Dimension]) -> v05.Image:
-    """Build a yaozarrs v05 Image metadata model from Dimension objects.
-
-    Parameters
-    ----------
-    dims : Sequence[Dimension]
-        Sequence of dimensions describing the image axes.
-
-    Returns
-    -------
-    Image
-        A yaozarrs v05 Image model with a single multiscale.
-    """
-    try:
-        from yaozarrs import v05
-    except ImportError as e:
-        raise ImportError(
-            "The `yaozarrs` package is required to use this function. "
-            "Please install it via `pip install yaozarrs`."
-        ) from e
-    from ome_writers._ngff_metadata import dim_to_yaozarrs_axis_v05
-
-    axes = []
-    scales = []
-
-    for dim in dims:
-        axis = dim_to_yaozarrs_axis_v05(dim)
-        axes.append(axis)
-        scales.append(dim.ome_scale)
-
-    # Create the Image model with a single multiscale (single resolution level)
-    image = v05.Image(
-        multiscales=[
-            v05.Multiscale(
-                axes=axes,
-                datasets=[
-                    v05.Dataset(
-                        path="0",
-                        coordinateTransformations=[
-                            v05.ScaleTransformation(scale=scales)
-                        ],
-                    )
-                ],
-            )
-        ],
-    )
-    return image
 
 
 def dims_to_ome(

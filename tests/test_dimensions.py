@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from ome_writers._dimensions import (
-    Dimension,
-    build_yaozarrs_image_metadata_v05,
-)
+from ome_writers._dimensions import Dimension
+from ome_writers._ngff_metadata import build_yaozarrs_image_metadata_v05
 
 
 def test_dimension_properties() -> None:
