@@ -35,7 +35,7 @@ backend = "tensorstore"
 # Create a MDASequence
 # NOTE: axis_order determines the order in which frames will be appended to the stream.
 seq = useq.MDASequence(
-    axis_order="ptgcz",
+    axis_order="ptcz",
     stage_positions=[(0.0, 0.0), (10.0, 10.0)],
     time_plan={"interval": 0.1, "loops": 3},
     channels=["DAPI", "FITC"],
