@@ -19,9 +19,9 @@ if TYPE_CHECKING:
 
     import acquire_zarr
     import numpy as np
-    import yaozarrs.v05 as yao
 
     from ome_writers._dimensions import Dimension
+    from ome_writers._stream_base import PlateType
 
 
 # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -54,7 +54,7 @@ class AcquireZarrStream(MultiPositionOMEStream):
         dtype: np.dtype,
         dimensions: Sequence[Dimension],
         *,
-        plate: yao.Plate | None = None,
+        plate: PlateType = None,
         overwrite: bool = False,
     ) -> Self:
         if plate is not None:

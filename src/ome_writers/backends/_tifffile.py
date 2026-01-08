@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     import ome_types.model as ome
 
     from ome_writers._dimensions import Dimension
+    from ome_writers._stream_base import PlateType
 
 else:
     with suppress(ImportError):
@@ -80,7 +81,7 @@ class TifffileStream(MultiPositionOMEStream):
         dtype: np.dtype,
         dimensions: Sequence[Dimension],
         *,
-        plate: ome.Plate | None = None,
+        plate: PlateType = None,
         overwrite: bool = False,
     ) -> Self:
         if plate is not None:

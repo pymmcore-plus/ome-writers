@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from yaozarrs.v05 import Image, PlateDef
 
     from ome_writers._dimensions import Dimension
+    from ome_writers._stream_base import PlateType
 
 
 class _YaozarrsStreamBase(MultiPositionOMEStream):
@@ -75,7 +76,7 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
         dtype: np.dtype,
         dimensions: Sequence[Dimension],
         *,
-        plate: PlateDef | None = None,
+        plate: PlateType = None,
         overwrite: bool = False,
     ) -> Self:
         """Internal method to create the OME-Zarr storage structure.
@@ -101,6 +102,14 @@ class _YaozarrsStreamBase(MultiPositionOMEStream):
         """
         # Use MultiPositionOMEStream with NGFF ordering
         self._configure_dimensions(dimensions, ngff_order=True)
+
+        # Validate plate type - yaozarrs backend only supports PlateDef
+        if plate is not None and not isinstance(plate, self._v05.PlateDef):
+            msg = (
+                "YaozarrsStream only supports yaozarrs.v05.PlateDef for plate metadata."
+                f" Received: {type(plate).__name__}"
+            )
+            raise TypeError(msg)
 
         writer = self._get_writer()
         self._group_path = Path(self._normalize_path(path))

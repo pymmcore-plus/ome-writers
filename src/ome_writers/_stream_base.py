@@ -3,7 +3,7 @@ from __future__ import annotations
 import abc
 from abc import abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeAlias
 
 from typing_extensions import Self
 
@@ -20,6 +20,9 @@ if TYPE_CHECKING:
     import yaozarrs.v05 as yao
 
     from ._dimensions import Dimension, DimensionLabel
+
+# Type alias for plate metadata that supports both yaozarrs and ome_types
+PlateType: TypeAlias = "yao.PlateDef | ome.Plate | None"
 
 
 class OMEStream(abc.ABC):
@@ -41,7 +44,7 @@ class OMEStream(abc.ABC):
         dtype: np.dtype,
         dimensions: Sequence[Dimension],
         *,
-        plate: yao.PlateDef | ome.Plate | None = None,
+        plate: PlateType = None,
         overwrite: bool = False,
     ) -> Self:
         """Create a new stream for path, dtype, and dimensions.
@@ -56,7 +59,7 @@ class OMEStream(abc.ABC):
             Sequence of dimension information describing the data structure.
             The order of dimensions in this sequence determines the acquisition order
             (i.e., the order in which frames will be appended to the stream).
-        plate : yao.PlateDef | ome.Plate | None, optional
+        plate : PlateType, optional
             Plate definition for HCS datasets, if applicable. Default is None.
             It can be either a yaozarrs PlateDef or an ome_types Plate object.
         overwrite : bool, optional
