@@ -63,14 +63,12 @@ seq2 = useq.MDASequence(
 )
 
 dims2 = omew.dims_from_useq(seq2, image_width=32, image_height=32)
-names2 = omew.position_names_from_useq(seq2)
 print(f"Stage positions: {len(seq2.stage_positions)}")
 print("  Position 0: 2 grid points")
 print("  Position 1: 1 grid point (no grid)")
 p_dim2 = next(d for d in dims2 if d.label == "p")
 print(f"Total positions in ome-writers: {p_dim2.size}")
 print("  (= 2 + 1 = 3 unique position combinations)")
-print(f"Position names: {names2}\n")
 
 # Use the second example for demonstration
 seq = seq2
@@ -125,8 +123,3 @@ with omew.create_stream(
 print(f"\nData written to {output_path}")
 print("\nThe grid positions have been flattened into the position dimension.")
 print(f"In the output Zarr, you'll see {p_dim2.size} position arrays.")
-print("\nTo track which position is which, use position_names_from_useq():")
-names = omew.position_names_from_useq(seq)
-print(f"Position mapping: {names}")
-print("\nThis mapping can be stored in custom metadata, logs, or used to")
-print("label positions in downstream analysis.")

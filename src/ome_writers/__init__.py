@@ -16,7 +16,6 @@ from ._util import (
     dims_from_useq,
     fake_data_for_sizes,
     plate_from_useq_to_yaozarrs,
-    position_names_from_useq,
 )
 from .backends._acquire_zarr import AcquireZarrStream
 from .backends._tifffile import TifffileStream
@@ -37,5 +36,4 @@ __all__ = [
     "dims_from_useq",
     "fake_data_for_sizes",
     "plate_from_useq_to_yaozarrs",
-    "position_names_from_useq",
 ]
