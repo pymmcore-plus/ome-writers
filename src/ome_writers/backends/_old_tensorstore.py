@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from ome_writers._dimensions import Dimension
 
 
-class TensorStoreZarrStream(MultiPositionOMEStream):
+class OldTensorStoreZarrStream(MultiPositionOMEStream):
     @classmethod
     def is_available(cls) -> bool:  # pragma: no cover
         """Check if the tensorstore package is available."""
@@ -51,17 +51,16 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
     ) -> Self:
         # Initialize dimensions from MultiPositionOMEStream
         # NOTE: Data will be stored in acquisition order.
-        self._init_dimensions(dimensions)
-
+        self._configure_dimensions(dimensions)
         self._delete_existing = overwrite
 
         # Create group and array paths
-        self._create_group(self._normalize_path(path), self.storage_order_dims)
+        self._create_group(self._normalize_path(path), self.storage_dims)
 
         # Create stores for each array
         for pos_idx in range(self.num_positions):
             array_key = str(pos_idx)
-            spec = self._create_spec(dtype, self.storage_order_dims, array_key)
+            spec = self._create_spec(dtype, self.storage_dims, array_key)
             try:
                 self._stores[array_key] = self._ts.open(spec).result()
             except ValueError as e:
@@ -146,7 +145,7 @@ class TensorStoreZarrStream(MultiPositionOMEStream):
 
         # Use storage order dims as-is (acquisition order)
         attrs = ome_meta_v5(
-            {str(i): self.storage_order_dims for i in range(self.num_positions)}
+            {str(i): self.storage_dims for i in range(self.num_positions)}
         )
         zarr_json = self._group_path / "zarr.json"
         current_meta: dict = {

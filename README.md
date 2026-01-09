@@ -23,9 +23,10 @@ pip install ome-writers
 
 Or, include all optional dependencies for specific backends:
 
- - `tensorstore`: for [`tensorstore`](https://github.com/google/tensorstore) backend support
- - `acquire-zarr`: for [`acquire-zarr`](https://github.com/acquire-project/acquire-zarr) backend support
- - `tiff`: for `tiff` backend support using [`tifffile`](https://github.com/cgohlke/tifffile).
+ - `tensorstore`: for OME-Zarr writing using [`yaozarrs`](https://github.com/tlambert03/yaozarrs) with the tensorstore backend
+ - `zarr`: for OME-Zarr writing using [`yaozarrs`](https://github.com/tlambert03/yaozarrs) with the zarr-python backend
+ - `acquire-zarr`: for OME-Zarr writing using [`acquire-zarr`](https://github.com/acquire-project/acquire-zarr)
+ - `tifffile`: for OME-TIFF writing using [`tifffile`](https://github.com/cgohlke/tifffile)
  - `all`: install all backends
 
 ```bash
@@ -54,7 +55,7 @@ stream = create_stream(
     dimensions=dims,
     dtype='uint16',
     # backend may be any of
-    # "acquire-zarr", "tensorstore", "tiff" (for ome-tiff) or "auto"
+    # "tensorstore", "zarr", "acquire-zarr", "tiff" (for ome-tiff) or "auto"
     backend="acquire-zarr"  
 )
 

@@ -15,8 +15,8 @@ from ome_writers._util import (
     fake_data_for_sizes,
 )
 from ome_writers.backends._acquire_zarr import AcquireZarrStream
-from ome_writers.backends._tensorstore import TensorStoreZarrStream
 from ome_writers.backends._tifffile import TifffileStream
+from ome_writers.backends._yaozarrs import TensorStoreZarrStream, ZarrPythonStream
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -60,6 +60,21 @@ def test_dimension_index_iterator_empty() -> None:
     assert list(it) == []
 
 
+def test_dimension_index_iterator_2d_only() -> None:
+    """Test DimensionIndexIterator with only spatial dimensions (2D)."""
+    # Only spatial dimensions, no time/channel/etc
+    dims = [
+        Dimension(label="y", size=32, unit=None, chunk_size=1),
+        Dimension(label="x", size=32, unit=None, chunk_size=1),
+    ]
+    it = DimensionIndexIterator(dims, storage_order_dimensions=[])
+
+    # With no non-spatial dimensions, iterator should be empty
+    assert len(it) == 0
+    result = list(it)
+    assert len(result) == 0
+
+
 def test_dimension_index_iterator_validation() -> None:
     """Test DimensionIndexIterator parameter validation."""
     dims = [
@@ -93,15 +108,21 @@ def test_init_stream_backends() -> None:
 
 
 @pytest.mark.skipif(
-    not (AcquireZarrStream.is_available() or TensorStoreZarrStream.is_available()),
+    not (
+        AcquireZarrStream.is_available()
+        or TensorStoreZarrStream.is_available()
+        or ZarrPythonStream.is_available()
+    ),
     reason="no zarr backend available",
 )
 def test_autobackend_zarr(tmp_path: Path) -> None:
     """Test automatic backend selection for .zarr files."""
     zarr_path = tmp_path / "test.zarr"
     stream = init_stream(str(zarr_path), backend="auto")
-    # Should select acquire-zarr if available, otherwise tensorstore
-    assert isinstance(stream, (AcquireZarrStream, TensorStoreZarrStream))
+    # Should select acquire-zarr if available, otherwise tensorstore or zarr-python
+    assert isinstance(
+        stream, (AcquireZarrStream, TensorStoreZarrStream, ZarrPythonStream)
+    )
 
 
 @pytest.mark.skipif(not TifffileStream.is_available(), reason="tifffile not available")

@@ -26,19 +26,37 @@ class AvailableBackend(NamedTuple):
 def _read_tstore(output_path: Path) -> np.ndarray:
     import tensorstore as ts
 
-    spec = {
-        "driver": "zarr3",
-        "kvstore": {"driver": "file", "path": str(output_path / "0")},
-    }
-    store = ts.open(spec).result()
-    return store.read().result()  # type: ignore
+    # Try bioformats2raw layout first (yaozarrs): data at 0/0
+    # Then try direct layout (acquire-zarr): data at 0
+    array_paths = [str(output_path / "0" / "0"), str(output_path / "0")]
+
+    for array_path in array_paths:
+        try:
+            spec = {
+                "driver": "zarr3",
+                "kvstore": {"driver": "file", "path": array_path},
+            }
+            store = ts.open(spec).result()
+            return store.read().result()  # type: ignore
+        except Exception:
+            continue
+
+    raise RuntimeError(f"Could not read zarr array from {output_path}")
 
 
 def _read_zarr_python(output_path: Path) -> np.ndarray:
     import zarr  # type: ignore
 
-    z = zarr.open_array(output_path, mode="r", path="0")
-    return z[:]
+    # Try bioformats2raw layout first (yaozarrs): data at 0/0
+    # Then try direct layout (acquire-zarr): data at 0
+    for array_path in ["0/0", "0"]:
+        try:
+            z = zarr.open_array(output_path, mode="r", path=array_path)
+            return z[:]
+        except Exception:
+            continue
+
+    raise RuntimeError(f"Could not read zarr array from {output_path}")
 
 
 def _read_zarr(output_path: Path) -> np.ndarray:
@@ -63,18 +81,38 @@ def _read_tiff(output_path: Path) -> np.ndarray:
 # Test configurations for each backend
 TIFF_BACKENDS: list[AvailableBackend] = []
 ZARR_BACKENDS: list[AvailableBackend] = []
+
+# Add tensorstore backend (uses yaozarrs with tensorstore writer)
 if omew.TensorStoreZarrStream.is_available():
     ZARR_BACKENDS.append(
         AvailableBackend(
-            "tensorstore", omew.TensorStoreZarrStream, ".ome.zarr", _read_zarr
+            "tensorstore",
+            omew.TensorStoreZarrStream,
+            ".ome.zarr",
+            _read_zarr,
         )
     )
+
+# Add zarr-python backend (uses yaozarrs with zarr writer)
+if omew.ZarrPythonStream.is_available():
+    ZARR_BACKENDS.append(
+        AvailableBackend(
+            "zarr",
+            omew.ZarrPythonStream,
+            ".ome.zarr",
+            _read_zarr,
+        )
+    )
+
+# Add acquire-zarr backend
 if omew.AcquireZarrStream.is_available():
     ZARR_BACKENDS.append(
         AvailableBackend(
             "acquire-zarr", omew.AcquireZarrStream, ".ome.zarr", _read_zarr
         )
     )
+
+# Add tiff backend
 if omew.TifffileStream.is_available():
     TIFF_BACKENDS.append(
         AvailableBackend("tiff", omew.TifffileStream, ".ome.tiff", _read_tiff)
