@@ -86,7 +86,16 @@ def test_axis_order(
 
     if backend.name in ("acquire-zarr", "tensorstore", "zarr"):
         zarr = pytest.importorskip("zarr")
-        zg = zarr.open_group(output_path, mode="r")
+
+        # acquire-zarr and tensorstore create zarr v3 stores which cannot be read
+        # by zarr v2. Skip the test if zarr v2 is used with these backends.
+        if backend.name in ("acquire-zarr", "tensorstore"):
+            from packaging.version import Version
+
+            if Version(zarr.__version__) < Version("3.0.0"):
+                return
+
+        zg = zarr.open(output_path, mode="r")
 
         for p in range_p:
             # tensorstore and zarr use bioformats2raw layout: scale/array (0) for single
