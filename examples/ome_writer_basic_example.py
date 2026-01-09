@@ -8,19 +8,20 @@ from ome_writers import create_stream, fake_data_for_sizes
 
 # Generate fake data with specified sizes and chunk sizes
 plane_iter, dims, dtype = fake_data_for_sizes(
-    # The order of dimensions is always determines the order in which frames will be
-    # appended to the stream.
+    # NOTE: For "tensorstore" and "zarr" backends, the dimension order in the output
+    # is always normalized to the NGFF specification, which is TCZYX (Time, Channel, Z,
+    # Y, X), regardless of the acquisition order specified in the sizes dict below.
     sizes={"t": 10, "p": 2, "c": 2, "z": 7, "y": 256, "x": 256},
     chunk_sizes={"y": 64, "x": 64},
 )
 
 # setup output path and create stream
-output = Path("example_basic.zarr").expanduser()
+output = Path("example_basic.ome.zarr").expanduser()
 stream = create_stream(
     output,
     dtype,
     dims,
-    backend="acquire-zarr",  # or "tensorstore", or "tiff"
+    backend="tensorstore",  # or "acquire-zarr", "zarr" or "tiff"
     overwrite=True,
 )
 

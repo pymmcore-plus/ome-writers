@@ -15,8 +15,8 @@ from ome_writers._util import (
     fake_data_for_sizes,
 )
 from ome_writers.backends._acquire_zarr import AcquireZarrStream
-from ome_writers.backends._tensorstore import TensorStoreZarrStream
 from ome_writers.backends._tifffile import TifffileStream
+from ome_writers.backends._yaozarrs import TensorStoreZarrStream, ZarrPythonStream
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -60,6 +60,22 @@ def test_dimension_index_iterator_empty() -> None:
     assert list(it) == []
 
 
+def test_dimension_index_iterator_2d_only() -> None:
+    """Test DimensionIndexIterator with only spatial dimensions (2D)."""
+    # Only spatial dimensions, no time/channel/etc
+    dims = [
+        Dimension(label="y", size=32, unit=None, chunk_size=1),
+        Dimension(label="x", size=32, unit=None, chunk_size=1),
+    ]
+    it = DimensionIndexIterator(dims, storage_order_dimensions=[])
+
+    # Should yield one frame with empty index tuple
+    assert len(it) == 0  # No non-spatial dimensions
+    result = list(it)
+    assert len(result) == 1
+    assert result[0] == (0, ())
+
+
 def test_dimension_index_iterator_validation() -> None:
     """Test DimensionIndexIterator parameter validation."""
     dims = [
@@ -93,15 +109,21 @@ def test_init_stream_backends() -> None:
 
 
 @pytest.mark.skipif(
-    not (AcquireZarrStream.is_available() or TensorStoreZarrStream.is_available()),
+    not (
+        AcquireZarrStream.is_available()
+        or TensorStoreZarrStream.is_available()
+        or ZarrPythonStream.is_available()
+    ),
     reason="no zarr backend available",
 )
 def test_autobackend_zarr(tmp_path: Path) -> None:
     """Test automatic backend selection for .zarr files."""
     zarr_path = tmp_path / "test.zarr"
     stream = init_stream(str(zarr_path), backend="auto")
-    # Should select acquire-zarr if available, otherwise tensorstore
-    assert isinstance(stream, (AcquireZarrStream, TensorStoreZarrStream))
+    # Should select acquire-zarr if available, otherwise tensorstore or zarr-python
+    assert isinstance(
+        stream, (AcquireZarrStream, TensorStoreZarrStream, ZarrPythonStream)
+    )
 
 
 @pytest.mark.skipif(not TifffileStream.is_available(), reason="tifffile not available")
@@ -115,3 +137,34 @@ def test_autobackend_tiff(tmp_path: Path) -> None:
     ome_tiff_path = tmp_path / "test.ome.tiff"
     stream = init_stream(str(ome_tiff_path), backend="auto")
     assert isinstance(stream, TifffileStream)
+
+
+def test_zarr_python_stream_old_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test ZarrPythonStream.is_available() with old zarr version."""
+    # Skip if zarr not installed at all
+    pytest.importorskip("zarr")
+    pytest.importorskip("yaozarrs")
+
+    # Mock zarr version to be < 3.0
+    import sys
+    from unittest.mock import Mock
+
+    # Create mock zarr module with old version
+    mock_zarr = Mock()
+    mock_zarr.__version__ = "2.18.0"
+
+    original_zarr = sys.modules.get("zarr")
+    sys.modules["zarr"] = mock_zarr
+
+    try:
+        # Re-import to get fresh class
+        from ome_writers.backends._yaozarrs import ZarrPythonStream
+
+        # With version 2.x, should not be available
+        assert not ZarrPythonStream.is_available()
+    finally:
+        # Restore original zarr module
+        if original_zarr is not None:
+            sys.modules["zarr"] = original_zarr
+        else:
+            sys.modules.pop("zarr", None)

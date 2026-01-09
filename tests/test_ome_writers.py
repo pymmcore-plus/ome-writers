@@ -125,6 +125,18 @@ def test_data_integrity_roundtrip(
     sizes: dict[str, int],
 ) -> None:
     """Test data integrity roundtrip with different data types and dimension orders."""
+    # tensorstore and zarr backends store in NGFF order (time, channel, space)
+    # Skip non-canonical orders for these backends since data will be reordered
+    dim_labels = list(sizes.keys())
+    non_spatial_labels = [d for d in dim_labels if d not in ("y", "x")]
+    is_canonical = non_spatial_labels == sorted(
+        non_spatial_labels, key=lambda x: {"t": 0, "c": 1, "z": 2}.get(x, 3)
+    )
+    if backend.name in ("tensorstore", "zarr") and not is_canonical:
+        pytest.skip(
+            "tensorstore/zarr reorder to NGFF order; skipping non-canonical test"
+        )
+
     data_gen, dimensions, dtype = omew.fake_data_for_sizes(
         sizes=sizes,
         chunk_sizes={"y": 32, "x": 32},
@@ -164,7 +176,12 @@ def test_data_integrity_roundtrip(
     # Test 2: Try to create again without overwrite (should fail)
     with pytest.raises(FileExistsError, match=r".*already exists"):
         stream = backend.cls()
-        stream = stream.create(str(output_path), dtype, dimensions, overwrite=False)
+        stream = stream.create(
+            str(output_path),
+            dtype,
+            dimensions,
+            overwrite=False,
+        )
 
     # Test 3: Create again with overwrite=True (should succeed)
     stream = backend.cls()
@@ -218,14 +235,35 @@ def test_multiposition_acquisition(backend: AvailableBackend, tmp_path: Path) ->
             group_meta = json.load(f)
 
         ome_attrs = group_meta["attributes"]["ome"]
-        multiscales = ome_attrs["multiscales"]
         assert ome_attrs["version"] == "0.5"
-        assert isinstance(multiscales, list)
-        assert len(multiscales) == 1
-        assert len(multiscales[0]["datasets"]) == 3
 
-        axes_names = {ax["name"] for ax in multiscales[0]["axes"]}
-        assert all(x in axes_names for x in ["t", "c", "y", "x"])
+        # Two valid structures for multi-position:
+        # 1. bioformats2raw layout (yaozarrs): has "bioformats2raw.layout" key
+        #    Each position is an independent Image in subdirectories
+        # 2. multiscales with positions as datasets (acquire-zarr): has
+        #    "multiscales" key. Positions are listed as datasets in a multiscale
+        if "bioformats2raw.layout" in ome_attrs:
+            # yaozarrs uses bioformats2raw layout for multi-position
+            assert ome_attrs["bioformats2raw.layout"] == 3
+            # Each position should have its own Image metadata
+            for pos_idx in range(3):
+                pos_zarr = output_path / str(pos_idx) / "zarr.json"
+                assert pos_zarr.exists()
+                with open(pos_zarr) as f:
+                    pos_meta = json.load(f)
+                pos_ome = pos_meta["attributes"]["ome"]
+                assert "multiscales" in pos_ome
+                axes_names = {ax["name"] for ax in pos_ome["multiscales"][0]["axes"]}
+                assert all(x in axes_names for x in ["t", "c", "y", "x"])
+        else:
+            # acquire-zarr uses multiscales with positions as datasets
+            multiscales = ome_attrs["multiscales"]
+            assert isinstance(multiscales, list)
+            assert len(multiscales) == 1
+            assert len(multiscales[0]["datasets"]) == 3
+
+            axes_names = {ax["name"] for ax in multiscales[0]["axes"]}
+            assert all(x in axes_names for x in ["t", "c", "y", "x"])
 
     elif (ext := backend.file_ext).endswith("tiff"):
         # For TIFF, separate files are created for each position
@@ -255,6 +293,16 @@ def test_zarr_metadata_correctness(
     zarr_backend: AvailableBackend, sizes: dict[str, int], tmp_path: Path
 ) -> None:
     """Test that zarr metadata preserves acquisition order."""
+    # tensorstore and zarr backends store in NGFF order, not acquisition order
+    # Skip non-canonical orders for these backends since metadata will be reordered
+    dim_labels = list(sizes.keys())
+    non_spatial_labels = [d for d in dim_labels if d not in ("y", "x")]
+    is_canonical = non_spatial_labels == sorted(
+        non_spatial_labels, key=lambda x: {"t": 0, "c": 1, "z": 2}.get(x, 3)
+    )
+    if zarr_backend.name in ("tensorstore", "zarr") and not is_canonical:
+        pytest.skip("tensorstore/zarr store metadata in NGFF v0.5 order")
+
     output_path = tmp_path / "test_metadata.zarr"
     data_gen, dims, dtype = omew.fake_data_for_sizes(sizes)
 
@@ -281,7 +329,19 @@ def test_zarr_metadata_correctness(
         "y": {"type": "space", "unit": "micrometer"},
         "x": {"type": "space", "unit": "micrometer"},
     }
-    expected_axes = [{"name": d.label, **axis_info[d.label]} for d in dims]
+
+    if zarr_backend.name in ("tensorstore", "zarr"):
+        # NGFF v0.5 doesn't include unit for channel axes
+        expected_axes = []
+        for d in dims:
+            ax = {"name": d.label, "type": axis_info[d.label]["type"]}
+            # Only add unit for time and space axes in NGFF v0.5
+            if d.label != "c":
+                ax["unit"] = axis_info[d.label]["unit"]
+            expected_axes.append(ax)
+    else:
+        expected_axes = [{"name": d.label, **axis_info[d.label]} for d in dims]
+
     assert axes == expected_axes
 
     # Check array metadata

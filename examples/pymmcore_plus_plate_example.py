@@ -25,7 +25,7 @@ except ImportError as e:
 
 # --------------------------CONFIGURATION SECTION--------------------------#
 # Define output path
-output = Path("example_pymmcore_plus").expanduser()
+output = Path("example_pymmcore_plus_plate").expanduser()
 
 # Choose backend: acquire-zarr, tensorstore, or tiff
 backend = "tensorstore"
@@ -34,9 +34,17 @@ backend = "tensorstore"
 
 # Create a MDASequence
 # NOTE: axis_order determines the order in which frames will be appended to the stream.
+
+plate_plan = useq.WellPlatePlan(
+    plate=useq.WellPlate.from_str("96-well"),
+    a1_center_xy=(0.0, 0.0),
+    selected_wells=((0, 1), (0, 1)),  # A1, B2
+    well_points_plan=useq.GridRowsColumns(rows=1, columns=1),
+)
+
 seq = useq.MDASequence(
-    axis_order="ptgcz",
-    stage_positions=[(0.0, 0.0), (10.0, 10.0)],
+    axis_order="ptcz",
+    stage_positions=plate_plan,
     time_plan={"interval": 0.1, "loops": 3},
     channels=["DAPI", "FITC"],
     z_plan={"range": 2, "step": 1.0},
@@ -51,14 +59,16 @@ core.loadSystemConfiguration()
 dims = omew.dims_from_useq(
     seq, image_width=core.getImageWidth(), image_height=core.getImageHeight()
 )
+plate = omew.plate_from_useq_to_yaozarrs(plate_plan)
 
 # Create an stream using the selected backend
 ext = "tiff" if backend == "tiff" else "zarr"
 path = output / f"{ext}_example.ome.{ext}"
 stream = omew.create_stream(
     path=str(path),
-    dimensions=dims,
     dtype=np.uint16,
+    dimensions=dims,
+    plate=plate,
     backend=backend,
     overwrite=True,
 )
