@@ -167,8 +167,8 @@ class MultiPositionOMEStream(OMEStream):
 
         if ngff_order:
             # Reorder to NGFF v0.5 and get index mapping
-            self._storage_dims, self._ngff_axis_indices = (
-                self._reorder_to_ngff_storage(non_position_dims)
+            self._storage_dims, self._ngff_axis_indices = self._reorder_to_ngff_storage(
+                non_position_dims
             )
         else:
             # Keep the acquisition order for non-position dimensions (no 'p')
