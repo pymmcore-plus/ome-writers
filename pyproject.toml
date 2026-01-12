@@ -67,6 +67,7 @@ dev = [
     "tensorstore-stubs>=0.1.2",
     "pre-commit>=4.1.0",
     "pytest-xdist>=3.8.0",
+    "acquire-zarr",
 ]
 
 [project.urls]
@@ -75,6 +76,7 @@ repository = "https://github.com/pymmcore-plus/ome-writers"
 
 [tool.uv.sources]
 ome-writers = { workspace = true }
+acquire-zarr = { path = "../acquire-zarr" }
 
 # https://docs.astral.sh/ruff
 [tool.ruff]
