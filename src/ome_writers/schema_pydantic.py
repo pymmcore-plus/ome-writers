@@ -161,7 +161,7 @@ class AcquisitionSettings(_BaseModel):
     """Top-level acquisition settings."""
 
     root_path: str
-    arrays: list[ArraySettings] | ArraySettings | None = None
+    arrays: ArraySettings | None = None
     plate: Plate | None = None
     overwrite: bool = False
     backend: str = "auto"
@@ -169,10 +169,6 @@ class AcquisitionSettings(_BaseModel):
     @model_validator(mode="after")
     def _validate_arrays_or_plate(self) -> AcquisitionSettings:
         """Ensure exactly one of arrays or plate is provided."""
-        # Coerce single ArraySettings to list
-        if isinstance(self.arrays, ArraySettings):
-            object.__setattr__(self, "arrays", [self.arrays])
-
         if (self.arrays is None) == (self.plate is None):
             raise ValueError("Either arrays or plate must be provided, but not both.")
         return self

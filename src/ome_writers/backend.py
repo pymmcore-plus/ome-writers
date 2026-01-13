@@ -24,18 +24,21 @@ when settings don't match capabilities. For example:
 Example Usage
 -------------
 >>> from ome_writers.backend import ArrayBackend
->>> from ome_writers.schema_pydantic import ArraySettings, dims_from_standard_axes
+>>> from ome_writers.schema_pydantic import AcquisitionSettings, dims_from_standard_axes
 >>>
->>> settings = ArraySettings(
-...     dimensions=dims_from_standard_axes({"t": 10, "c": 2, "y": 512, "x": 512}),
-...     dtype="uint16",
+>>> settings = AcquisitionSettings(
+...     root_path="/data/output.zarr",
+...     arrays=ArraySettings(
+...         dimensions=dims_from_standard_axes({"t": 10, "c": 2, "y": 512, "x": 512}),
+...         dtype="uint16",
+...     ),
 ... )
 >>>
 >>> backend = SomeConcreteBackend()
 >>> if not backend.is_compatible(settings):
 ...     raise ValueError(backend.compatibility_error(settings))
 >>>
->>> backend.prepare(settings, "/data/output.zarr", router, overwrite=True)
+>>> backend.prepare(settings, router)
 >>> for pos_key, idx in router:
 ...     frame = get_next_frame()
 ...     backend.write(pos_key, idx, frame)
@@ -53,7 +56,7 @@ if TYPE_CHECKING:
     import numpy as np
 
     from ome_writers.router import FrameRouter
-    from ome_writers.schema_pydantic import ArraySettings
+    from ome_writers.schema_pydantic import AcquisitionSettings
 
 
 class ArrayBackend(ABC):
@@ -65,7 +68,7 @@ class ArrayBackend(ABC):
     Subclasses must implement all abstract methods. The typical lifecycle is:
 
     1. Check `is_compatible(settings)` to verify settings work with this backend
-    2. Call `prepare(settings, path, ...)` to initialize storage
+    2. Call `prepare(settings, router)` to initialize storage
     3. Call `write(pos_key, idx, frame)` for each frame
     4. Call `finalize()` to flush and close
     """
@@ -75,7 +78,7 @@ class ArrayBackend(ABC):
     # -------------------------------------------------------------------------
 
     @abstractmethod
-    def is_compatible(self, settings: ArraySettings) -> bool:
+    def is_compatible(self, settings: AcquisitionSettings) -> bool:
         """Check if this backend can handle the given settings.
 
         This method validates that the backend supports the requested
@@ -88,7 +91,7 @@ class ArrayBackend(ABC):
         Parameters
         ----------
         settings
-            The array settings to validate.
+            The acquisition settings to validate.
 
         Returns
         -------
@@ -100,13 +103,13 @@ class ArrayBackend(ABC):
         compatibility_error : Get a human-readable explanation of incompatibility.
         """
 
-    def compatibility_error(self, settings: ArraySettings) -> str | None:
+    def compatibility_error(self, settings: AcquisitionSettings) -> str | None:
         """Return a human-readable error if settings are incompatible.
 
         Parameters
         ----------
         settings
-            The array settings to check.
+            The acquisition settings to check.
 
         Returns
         -------
@@ -130,11 +133,8 @@ class ArrayBackend(ABC):
     @abstractmethod
     def prepare(
         self,
-        settings: ArraySettings,
-        path: str,
+        settings: AcquisitionSettings,
         router: FrameRouter,
-        *,
-        overwrite: bool = False,
     ) -> None:
         """Initialize storage structure for the given settings.
 
@@ -144,20 +144,17 @@ class ArrayBackend(ABC):
         Parameters
         ----------
         settings
-            Array settings describing dimensions, dtype, chunking, etc.
-        path
-            Output path (file or directory depending on format).
+            Acquisition settings containing path, array settings, and options.
+            The backend extracts `root_path`, `overwrite`, and array-specific
+            settings (dimensions, dtype, chunking, etc.) from this object.
         router
             The FrameRouter that will be used for iteration. Backends can use
             `router.position_keys` to get the list of positions to create.
-        overwrite
-            If True, remove existing data at path. If False and path exists,
-            raise FileExistsError.
 
         Raises
         ------
         FileExistsError
-            If path exists and overwrite is False.
+            If path exists and `settings.overwrite` is False.
         ValueError
             If settings are incompatible with this backend.
         """
