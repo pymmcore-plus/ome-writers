@@ -84,6 +84,21 @@ Backends receive indices in storage order and don't need to know about acquisiti
 3. **Backends are simple adapters** — receive storage-order indices, write bytes
 4. **Position is a meta-dimension** — appears in iteration but becomes separate arrays/files, not an array axis
 
+## Why this level of abstraction?
+
+The separation of schema, router, and backend allows us to leave the performance-critical
+tasks to C++ libraries (like tensorstore, acquire-zarr), while keeping "fiddly" metadata
+logic and frame routing in Python (where it's easier to maintain).
+
+The API of this library is heavily inspired by the acquire-zarr API
+(declare deterministic experiment with schema, append frames with single `append()` calls).
+But we also:
+
+- want to support non-zarr formats (OME-TIFF)
+- want to take advantage of Python for metadata management (e.g. `ome-types` for
+  OME-XML generation and `yaozarrs` for OME-Zarr metadata)
+- want to support other zarr array libraries, such as tensorstore.
+
 ## Supported Use Cases
 
 ### Well Supported
