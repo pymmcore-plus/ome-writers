@@ -31,6 +31,13 @@ class StandardAxis(str, Enum):
             return "channel"
         return "other"
 
+    def unit(self) -> str | None:
+        if self in {StandardAxis.X, StandardAxis.Y, StandardAxis.Z}:
+            return "micrometer"
+        if self == StandardAxis.TIME:
+            return "ssecond"
+        return None
+
 
 @dataclass(slots=True, frozen=True)
 class Dimension:
@@ -116,6 +123,7 @@ class ArraySettings:
                 name=axis.value,
                 size_px=sizes[axis.value],
                 type=axis.dimension_type(),
+                unit=axis.unit(),
                 chunk_size_px=chunk_shapes[axis],
             )
             for axis in std_axes

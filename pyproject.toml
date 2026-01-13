@@ -76,7 +76,6 @@ repository = "https://github.com/pymmcore-plus/ome-writers"
 
 [tool.uv.sources]
 ome-writers = { workspace = true }
-acquire-zarr = { path = "../acquire-zarr" }
 
 # https://docs.astral.sh/ruff
 [tool.ruff]
