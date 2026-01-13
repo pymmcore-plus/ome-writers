@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, model_validator
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -104,31 +104,39 @@ class PositionDimension(_BaseModel):
         return [p.name for p in self.positions]
 
 
+def _validate_dims_list(
+    dims: list[Dimension | PositionDimension],
+) -> list[Dimension | PositionDimension]:
+    dim_names = [dim.name for dim in dims]
+    if len(dim_names) != len(set(dim_names)):
+        raise ValueError("Dimension names must be unique.")
+
+    # no more than one unlimited dimension (count=None):
+    unlimited_dims = [
+        dim for dim in dims if isinstance(dim, Dimension) and dim.count is None
+    ]
+    if len(unlimited_dims) > 1:
+        raise ValueError("Only one dimension may be unlimited (count=None).")
+
+    # ensure at least 2 spatial dimensions at the end
+    spatial_dims = [d for d in dims if isinstance(d, Dimension) and d.type == "space"]
+    if len(spatial_dims) < 2 or dims[-2:] != spatial_dims[-2:]:
+        raise ValueError("The last two dimensions must be spatial (Y and X).")
+    return dims
+
+
 class ArraySettings(_BaseModel):
     """Settings for a single array/image."""
 
     # PositionDimension can appear anywhere in the list to control acquisition order.
     # Its location determines when positions are visited relative to other dimensions.
-    dimensions: list[Dimension | PositionDimension]
+    dimensions: Annotated[
+        list[Dimension | PositionDimension], AfterValidator(_validate_dims_list)
+    ]
     dtype: str
     compression: str | None = None
     position_name: str | None = None
     storage_order: Literal["acquisition", "ngff"] | list[str] = "acquisition"
-
-    @model_validator(mode="after")
-    def _validate_dimensions(self) -> ArraySettings:
-        """Validate dimension names are unique and unlimited only first."""
-        dim_names = [dim.name for dim in self.dimensions]
-        if len(dim_names) != len(set(dim_names)):
-            raise ValueError("Dimension names must be unique within an ArraySettings.")
-
-        # Only the first dimension may have count=None (unlimited)
-        for dim in self.dimensions[1:]:
-            if dim.count is None:
-                raise ValueError(
-                    "Only the first dimension may have count=None (unlimited)."
-                )
-        return self
 
     @property
     def shape(self) -> tuple[int | None, ...]:

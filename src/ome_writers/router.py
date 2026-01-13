@@ -146,7 +146,7 @@ class FrameRouter:
         # Parse dimensions, tracking where position appears in the order.
         # all_sizes includes position; index_dim_names excludes it.
         all_sizes: list[int] = []
-        index_dim_names: list[str] = []
+        index_dims: list[Dimension] = []
         position_axis: int | None = None
         position_names: list[str] = ["0"]  # default single position
 
@@ -157,25 +157,24 @@ class FrameRouter:
                 position_axis = len(all_sizes)
                 all_sizes.append(dim.count)
                 position_names = dim.names
-            elif isinstance(dim, Dimension) and dim.name not in ("y", "x"):
+            # FIXME!!! don't hardcode names "Y" and "X"
+            elif isinstance(dim, Dimension) and dim.name.lower() not in ("y", "x"):
                 all_sizes.append(dim.count)
-                index_dim_names.append(dim.name)
+                index_dims.append(dim)
 
         self._all_sizes = tuple(all_sizes)
         self._position_axis = position_axis
         self._position_names = position_names
-        self._index_dim_names = index_dim_names
+        self._index_dim_names = index_dims
 
         # Total frames across all positions
         self._total_frames = int(np.prod(self._all_sizes)) if self._all_sizes else 1
 
         # Compute storage order permutation (for non-position dimensions only)
         self._storage_dim_names = _resolve_storage_order(
-            index_dim_names, settings.storage_order
+            index_dims, settings.storage_order
         )
-        self._permutation = _compute_permutation(
-            index_dim_names, self._storage_dim_names
-        )
+        self._permutation = _compute_permutation(index_dims, self._storage_dim_names)
 
         # Iteration state
         self._current_frame = 0
@@ -232,29 +231,35 @@ class FrameRouter:
         """
         return list(self._position_names)
 
+    @property
+    def storage_dimension_names(self) -> list[str]:
+        """Dimension names in storage order (excluding frame dims like XY)."""
+        return list(self._storage_dim_names)
 
-def _ngff_sort_key(name: str) -> tuple[int, int]:
+
+def _ngff_sort_key(dim: Dimension) -> tuple[int, int]:
     """Sort key for NGFF canonical order: time, channel, space (z, y, x)."""
-    if name == "t":
+    if dim.type == "time":
         return (0, 0)
-    if name == "c":
+    if dim.type == "channel":
         return (1, 0)
-    if name in ("z", "y", "x"):
-        return (2, {"z": 0, "y": 1, "x": 2}[name])
+    if dim.type == "space":
+        return (2, {"z": 0, "y": 1, "x": 2}.get(dim.name, -1))
     return (3, 0)
 
 
 def _resolve_storage_order(
-    acq_dim_names: list[str],
+    acq_dims: list[Dimension],
     storage_order: str | list[str],
 ) -> list[str]:
     """Resolve storage_order setting to explicit list of dimension names."""
     if storage_order == "acquisition":
-        return list(acq_dim_names)
+        return [dim.name for dim in acq_dims]
     elif storage_order == "ngff":
-        return sorted(acq_dim_names, key=_ngff_sort_key)
+        return [x.name for x in sorted(acq_dims, key=_ngff_sort_key)]
     elif isinstance(storage_order, list):
-        if set(storage_order) != set(acq_dim_names):
+        acq_dim_names = {dim.name for dim in acq_dims}
+        if set(storage_order) != acq_dim_names:
             raise ValueError(
                 f"storage_order {storage_order} doesn't match "
                 f"acquisition dimensions {acq_dim_names}"
@@ -265,7 +270,8 @@ def _resolve_storage_order(
 
 
 def _compute_permutation(
-    acq_names: list[str], storage_names: list[str]
+    acq_dims: list[Dimension], storage_names: list[str]
 ) -> tuple[int, ...]:
     """Compute permutation to convert acquisition indices to storage indices."""
-    return tuple(acq_names.index(name) for name in storage_names)
+    dim_names = [dim.name for dim in acq_dims]
+    return tuple(dim_names.index(name) for name in storage_names)

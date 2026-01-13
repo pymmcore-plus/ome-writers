@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Literal
 
 import pytest
+from pydantic import ValidationError
 
 from ome_writers.router import FrameRouter
 from ome_writers.schema_pydantic import (
@@ -114,7 +115,8 @@ def test_router_iteration(
 ) -> None:
     """Test router yields correct (position_key, index) sequence."""
     settings = ArraySettings(dimensions=dims_from_standard_axes(sizes), dtype="uint16")
-    assert list(FrameRouter(settings)) == expected
+    router = FrameRouter(settings)
+    assert list(router) == expected
 
 
 @pytest.mark.parametrize("sizes,storage_order,expected", STORAGE_ORDER_CASES)
@@ -141,13 +143,13 @@ def test_router_position_keys() -> None:
 
 def test_schema_unique_dimension_names() -> None:
     """Test that duplicate dimension names raise ValueError."""
-    with pytest.raises(ValueError, match="unique"):
+    with pytest.raises(ValidationError, match="unique"):
         ArraySettings(
             dimensions=[
                 Dimension(name="t", count=10),
                 Dimension(name="t", count=5),
-                Dimension(name="y", count=64),
-                Dimension(name="x", count=64),
+                Dimension(name="y", count=64, type="space"),
+                Dimension(name="x", count=64, type="space"),
             ],
             dtype="uint16",
         )
@@ -159,20 +161,20 @@ def test_schema_unlimited_first_only() -> None:
     ArraySettings(
         dimensions=[
             Dimension(name="t", count=None),
-            Dimension(name="y", count=64),
-            Dimension(name="x", count=64),
+            Dimension(name="y", count=64, type="space"),
+            Dimension(name="x", count=64, type="space"),
         ],
         dtype="uint16",
     )
 
     # Second dimension unlimited - error
-    with pytest.raises(ValueError, match="first dimension"):
+    with pytest.raises(ValidationError, match="Only one dimension may be unlimited"):
         ArraySettings(
             dimensions=[
-                Dimension(name="t", count=10),
+                Dimension(name="t", count=None),
                 Dimension(name="c", count=None),
-                Dimension(name="y", count=64),
-                Dimension(name="x", count=64),
+                Dimension(name="y", count=64, type="space"),
+                Dimension(name="x", count=64, type="space"),
             ],
             dtype="uint16",
         )
