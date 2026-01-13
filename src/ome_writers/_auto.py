@@ -98,7 +98,7 @@ def convert_array_settings_to_dimensions(
             )
 
         # Convert size_px to size
-        size = dim.size_px
+        size = dim.count
         if size is None:
             # Only first dimension can be unlimited
             if dimensions:  # not the first dimension
@@ -109,7 +109,7 @@ def convert_array_settings_to_dimensions(
             size = 0  # Backend will handle unlimited dimension
 
         # Convert chunk_size_px to chunk_size
-        chunk_size = dim.chunk_size_px
+        chunk_size = dim.chunk_size
 
         # Convert scale + unit to unit tuple, with defaults for standard axes
         unit = None

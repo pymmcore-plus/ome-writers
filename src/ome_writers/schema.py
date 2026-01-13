@@ -1,4 +1,3 @@
-from collections import defaultdict
 from dataclasses import dataclass
 from enum import Enum
 from typing import Literal
@@ -42,9 +41,9 @@ class StandardAxis(str, Enum):
 @dataclass(slots=True, frozen=True)
 class Dimension:
     name: str
-    size_px: int | None  # must be passed, but can be None for unlimited axes
-    chunk_size_px: int | None = None
-    shard_size_chunks: int | None = None
+    count: int | None  # must be passed, but can be None for unlimited axes
+    chunk_size: int | None = None
+    shard_size: int | None = None
     type: DimensionType | None = None
     unit: str | None = None
     scale: float | None = None
@@ -52,11 +51,47 @@ class Dimension:
 
 
 @dataclass(slots=True, frozen=True)
+class Position:
+    """A single acquisition position."""
+
+    name: str
+    row: str | None = None
+    column: str | None = None
+
+
+@dataclass(slots=True)
+class PositionDimension:
+    """Positions (meta-dimension) in acquisition order.
+
+    Unlike Dimension, positions don't become an array axis—they become
+    separate arrays/files (this is currently true for both OME-Zarr and OME-TIFF).
+    The position of PositionDimension in the dimensions list determines when positions
+    are visited during acquisition.
+    """
+
+    positions: list[Position]
+    name: str = "p"
+
+    @property
+    def count(self) -> int:
+        """Number of positions."""
+        return len(self.positions)
+
+    @property
+    def names(self) -> list[str]:
+        """Position names in acquisition order."""
+        return [p.name for p in self.positions]
+
+
+@dataclass(slots=True, frozen=True)
 class ArraySettings:
-    dimensions: list[Dimension]  # validate <5D
+    # PositionDimension can appear anywhere in the list to control acquisition order.
+    # Its location determines when positions are visited relative to other dimensions.
+    dimensions: list[Dimension | PositionDimension]
     dtype: np.dtype
     compression: str | None = None
     position_name: str | None = None
+    storage_order: Literal["acquisition", "ngff"] | list[str] = "acquisition"
     # downsampling: str | None = None
 
     def __post_init__(self) -> None:
@@ -64,16 +99,16 @@ class ArraySettings:
         if len(dim_names) != len(set(dim_names)):
             raise ValueError("Dimension names must be unique within an ArraySettings.")
 
-        # only the first dimension is allowed to have a size_px of None (unlimited)
+        # only the first dimension is allowed to have a count of None (unlimited)
         for dim in self.dimensions[1:]:
-            if dim.size_px is None:
+            if dim.count is None:
                 raise ValueError(
-                    "Only the first dimension may have size_px=None (unlimited)."
+                    "Only the first dimension may have count=None (unlimited)."
                 )
 
     @property
     def shape(self) -> tuple[int | None, ...]:
-        return tuple(dim.size_px for dim in self.dimensions)
+        return tuple(dim.count for dim in self.dimensions)
 
     @classmethod
     def from_standard_axes(
@@ -121,10 +156,10 @@ class ArraySettings:
         dim_list = [
             Dimension(
                 name=axis.value,
-                size_px=sizes[axis.value],
+                count=sizes[axis.value],
                 type=axis.dimension_type(),
                 unit=axis.unit(),
-                chunk_size_px=chunk_shapes[axis],
+                chunk_size=chunk_shapes[axis],
             )
             for axis in std_axes
         ]
@@ -132,44 +167,26 @@ class ArraySettings:
 
 
 @dataclass(slots=True, frozen=True)
-class FOV:
-    row_index: int
-    column_index: int
-    array_settings: ArraySettings
-    acquisition_id: int | None = None
-
-
-@dataclass(slots=True, frozen=True)
-class Well:
-    row_name: str
-    column_name: str
-    images: list[FOV]
-
-
-@dataclass(slots=True, frozen=True)
 class Plate:
+    """Plate structure for OME metadata.
+
+    This defines the plate geometry (rows/columns) for metadata generation.
+    Acquisition order is determined by PositionDimension in ArraySettings,
+    not by this class.
+
+    Parameters
+    ----------
+    row_names
+        Row labels (e.g., ["A", "B", "C", ...]).
+    column_names
+        Column labels (e.g., ["1", "2", "3", ...]).
+    name
+        Optional plate name for metadata.
+    """
+
     row_names: list[str]
     column_names: list[str]
-    # rather than wells: list[Well], and Well.images: list[FOV],
-    # we flatten fields of view here, to allow declaration of exact acquisition order
-    # wells is then a property constructed from images
-    images: list[FOV]
     name: str | None = None
-
-    @property
-    def wells(self) -> list[Well]:
-        well_dict: defaultdict[tuple[int, int], list[FOV]] = defaultdict(list)
-        for fov in self.images:
-            well_dict[(fov.row_index, fov.column_index)].append(fov)
-
-        return [
-            Well(
-                row_name=self.row_names[row_index],
-                column_name=self.column_names[column_index],
-                images=v,
-            )
-            for (row_index, column_index), v in well_dict.items()
-        ]
 
 
 @dataclass(slots=True, frozen=True)
