@@ -87,10 +87,12 @@ Multi-position with position interleaved (time-lapse across positions):
 >>> settings = ArraySettings(
 ...     dimensions=[
 ...         Dimension(name="t", count=2),
-...         PositionDimension(positions=[
-...             Position(name="A1"),
-...             Position(name="B2"),
-...         ]),
+...         PositionDimension(
+...             positions=[
+...                 Position(name="A1"),
+...                 Position(name="B2"),
+...             ]
+...         ),
 ...         Dimension(name="c", count=2),
 ...         Dimension(name="y", count=64),
 ...         Dimension(name="x", count=64),
@@ -116,7 +118,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .schema import ArraySettings, Dimension, PositionDimension
+from .schema_pydantic import ArraySettings, Dimension, PositionDimension
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -195,7 +197,9 @@ class FrameRouter:
         if self._position_axis is not None:
             pos_idx = full_idx[self._position_axis]
             # Remove position from index
-            acq_idx = full_idx[: self._position_axis] + full_idx[self._position_axis + 1 :]
+            acq_idx = (
+                full_idx[: self._position_axis] + full_idx[self._position_axis + 1 :]
+            )
         else:
             pos_idx = 0
             acq_idx = full_idx

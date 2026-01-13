@@ -26,9 +26,10 @@ The core problem ome-writers solves:
 
 ### StorageSchema (`schema.py`)
 
-The schema is the **declarative description** of what to create.  It must fully describe
-the dimensionality of the data and the exact order in which frames will arrive, in addition
-to other storage details such as data types, chunking, compression, and other metadata.
+The schema is the **declarative description** of what to create.  In addition to
+other storage details such as data types, chunking, compression, and other
+metadata, it must fully describe the dimensionality of the data and the exact
+order in which frames will arrive.
 
 > **Explicit non-goal**: `ome-writers` does *not* attempt to handle non-deterministic
 > acquisition patterns (e.g., event-driven acquisitions where data shape is unknown ahead
@@ -83,7 +84,6 @@ Backends receive indices in storage order and don't need to know about acquisiti
 3. **Backends are simple adapters** — receive storage-order indices, write bytes
 4. **Position is a meta-dimension** — appears in iteration but becomes separate arrays/files, not an array axis
 
-
 ## Supported Use Cases
 
 ### Well Supported
@@ -101,4 +101,3 @@ Backends receive indices in storage order and don't need to know about acquisiti
 | **Non-standard dimension names** | Partial | Custom dimensions work but may not have proper OME type/unit inference. |
 | **Sequential backends with reordering** | Constrained | Backends like acquire-zarr write sequentially and cannot reorder. Storage order must match acquisition order. |
 | **Multi-resolution pyramids** | Not in streaming API | yaozarrs supports pyramids, but the streaming API writes single-resolution only. |
-
