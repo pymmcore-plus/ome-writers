@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 from pydantic import ValidationError
@@ -16,6 +16,9 @@ from ome_writers.schema_pydantic import (
     PositionDimension,
     dims_from_standard_axes,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
 
 # ---------------------------------------------------------------------------
 # Test cases as data
@@ -121,7 +124,7 @@ def test_router_iteration(
 
 @pytest.mark.parametrize("sizes,storage_order,expected", STORAGE_ORDER_CASES)
 def test_router_storage_order(
-    sizes: dict[str, int | list[str] | None],
+    sizes: Mapping[str, int | Sequence[str] | None],
     storage_order: Literal["acquisition", "ngff"],
     expected: list[tuple[str, tuple[int, ...]]],
 ) -> None:

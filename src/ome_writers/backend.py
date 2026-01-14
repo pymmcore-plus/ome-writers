@@ -35,7 +35,7 @@ Example Usage
 ... )
 >>>
 >>> backend = SomeConcreteBackend()
->>> if not backend.is_compatible(settings):
+>>> if backend.is_incompatible(settings):
 ...     raise ValueError(backend.compatibility_error(settings))
 >>>
 >>> backend.prepare(settings, router)
@@ -51,7 +51,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from typing import Any
+    from typing import Any, Literal
 
     import numpy as np
 
@@ -78,53 +78,12 @@ class ArrayBackend(ABC):
     # -------------------------------------------------------------------------
 
     @abstractmethod
-    def is_compatible(self, settings: AcquisitionSettings) -> bool:
-        """Check if this backend can handle the given settings.
+    def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
+        """Check compatibility with settings.
 
-        This method validates that the backend supports the requested
-        configuration. Common incompatibilities include:
-
-        - Sequential backends (acquire-zarr, tifffile) cannot reorder storage
-        - TIFF cannot handle unlimited first dimension
-        - Some backends may not support certain compression codecs
-
-        Parameters
-        ----------
-        settings
-            The acquisition settings to validate.
-
-        Returns
-        -------
-        bool
-            True if compatible, False otherwise.
-
-        See Also
-        --------
-        compatibility_error : Get a human-readable explanation of incompatibility.
+        If incompatible, returns a string describing the issue. If compatible,
+        returns False.
         """
-
-    def compatibility_error(self, settings: AcquisitionSettings) -> str | None:
-        """Return a human-readable error if settings are incompatible.
-
-        Parameters
-        ----------
-        settings
-            The acquisition settings to check.
-
-        Returns
-        -------
-        str | None
-            Error message if incompatible, None if compatible.
-
-        Examples
-        --------
-        >>> error = backend.compatibility_error(settings)
-        >>> if error:
-        ...     raise ValueError(f"Backend incompatible: {error}")
-        """
-        if self.is_compatible(settings):
-            return None
-        return "Settings are incompatible with this backend."
 
     # -------------------------------------------------------------------------
     # Lifecycle methods
@@ -222,15 +181,3 @@ class ArrayBackend(ABC):
         acquisition metadata is available (e.g., actual timestamps, stage
         positions recorded during acquisition).
         """
-
-    # -------------------------------------------------------------------------
-    # Context manager support
-    # -------------------------------------------------------------------------
-
-    def __enter__(self) -> ArrayBackend:
-        """Enter context manager."""
-        return self
-
-    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
-        """Exit context manager, calling finalize()."""
-        self.finalize()

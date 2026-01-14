@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from ome_writers.backend import ArrayBackend
 from ome_writers.schema_pydantic import Dimension, PositionDimension
@@ -33,20 +33,14 @@ class ZarrBackend(ArrayBackend):
     # Compatibility
     # -------------------------------------------------------------------------
 
-    def is_compatible(self, settings: AcquisitionSettings) -> bool:
+    def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         """Check compatibility with settings.
 
-        ZarrBackend supports:
-        - Any storage order (random-access writes)
-        - Multi-position data
-        - Unlimited dimensions (count=None) with automatic resizing
+        If incompatible, returns a string describing the issue.
         """
-        return settings.array_settings is not None
-
-    def compatibility_error(self, settings: AcquisitionSettings) -> str | None:
-        if self.is_compatible(settings):
-            return None
-        return "ZarrBackend requires arrays to be set."
+        if not settings.root_path.endswith(".zarr"):
+            return "Root path must end with .zarr for ZarrBackend."
+        return False
 
     # -------------------------------------------------------------------------
     # Lifecycle
@@ -85,7 +79,7 @@ class ZarrBackend(ArrayBackend):
 
         # Create arrays for each position
         if len(position_keys) == 1:
-            _, self._arrays = prepare_image(
+            _, arrays = prepare_image(
                 group_path,
                 image,
                 datasets=[(shape, array_settings.dtype)],
@@ -93,6 +87,8 @@ class ZarrBackend(ArrayBackend):
                 chunks=chunks,
                 writer="zarr",
             )
+            # Map position key to the array (dataset path is "0")
+            self._arrays = {position_keys[0]: arrays["0"]}
         else:
             builder = Bf2RawBuilder(
                 group_path,

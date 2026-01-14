@@ -4,10 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal, TypeAlias
 
-import numpy as np
-
-from ome_writers import schema
-
 from .backends._acquire_zarr import AcquireZarrStream
 from .backends._tifffile import TifffileStream
 from .backends._yaozarrs import TensorStoreZarrStream, ZarrPythonStream
@@ -15,12 +11,16 @@ from .backends._yaozarrs import TensorStoreZarrStream, ZarrPythonStream
 if TYPE_CHECKING:
     from pathlib import Path
 
+    import numpy as np
+
     from ome_writers._dimensions import Dimension
 
-    from . import schema
     from ._stream_base import OMEStream
+    from .backend import ArrayBackend
+    from .router import FrameRouter
+    from .schema_pydantic import AcquisitionSettings, ArraySettings
 
-__all__ = ["create_stream", "init_stream"]
+__all__ = ["Stream", "create_stream", "init_stream"]
 
 BackendName: TypeAlias = Literal["acquire-zarr", "tensorstore", "zarr", "tiff"]
 BACKENDS: dict[BackendName, type[OMEStream]] = {
@@ -34,7 +34,7 @@ BACKENDS: dict[BackendName, type[OMEStream]] = {
 def init_stream(
     path: str | Path,
     *,
-    backend: Literal[BackendName, "auto"] = "auto",
+    backend: BackendName | Literal["auto"] = "auto",
 ) -> OMEStream:
     """Initialize a stream object for `path` using the specified backend.
 
@@ -69,26 +69,40 @@ def init_stream(
     return BACKENDS[backend]()
 
 
-# FIXME
+# FIXME - DEPRECATED: This function is for legacy backends only
 def convert_array_settings_to_dimensions(
-    array_settings: schema.ArraySettings,
-) -> tuple[list[Dimension], np.dtype]:
+    array_settings: ArraySettings,
+) -> tuple[list[Dimension], str]:
     """Convert ArraySettings to old-style dimension list and dtype.
+
+    DEPRECATED: This function is only for legacy backends that don't support
+    the new ArrayBackend protocol. New code should use the new protocol directly.
 
     Parameters
     ----------
-    array_settings : schema.ArraySettings
+    array_settings : ArraySettings
         New schema array settings to convert.
 
     Returns
     -------
-    tuple[list[Dimension], np.dtype]
+    tuple[list[Dimension], str]
         Tuple of (dimensions list, dtype) for passing to backend.
     """
-    from ._dimensions import Dimension
+    from typing import cast
 
-    dimensions = []
+    from ._dimensions import Dimension
+    from .schema_pydantic import Dimension as NewDimension
+    from .schema_pydantic import PositionDimension as NewPositionDimension
+
+    dimensions: list[Dimension] = []
     for dim in array_settings.dimensions:
+        # Skip PositionDimension - old backends handle positions differently
+        if isinstance(dim, NewPositionDimension):
+            continue
+
+        # After isinstance check, dim is guaranteed to be NewDimension
+        dim = cast("NewDimension", dim)
+
         # Convert name to label
         label = dim.name
         if label not in ("x", "y", "z", "t", "c", "p"):
@@ -134,69 +148,141 @@ def convert_array_settings_to_dimensions(
     return dimensions, array_settings.dtype
 
 
+class Stream:
+    """A stream wrapper for writing frames using the router + backend pattern.
+
+    This class manages the iteration through frames in acquisition order and
+    delegates writing to the backend in storage order.
+
+    Usage
+    -----
+    >>> with create_stream(settings) as stream:
+    ...     for frame in acquisition:
+    ...         stream.append(frame)
+    """
+
+    def __init__(
+        self,
+        backend: ArrayBackend,
+        router: FrameRouter,
+    ) -> None:
+        self._backend = backend
+        self._router = router
+        self._iterator = iter(router)
+
+    def append(self, frame: np.ndarray) -> None:
+        """Write the next frame in acquisition order.
+
+        Parameters
+        ----------
+        frame : np.ndarray
+            2D array containing the frame data (Y, X).
+
+        Raises
+        ------
+        StopIteration
+            If all frames have been written (for finite dimensions only).
+            For unlimited dimensions, never raises StopIteration.
+        """
+        pos_key, idx = next(self._iterator)
+        self._backend.write(pos_key, idx, frame)
+
+    def __enter__(self) -> Stream:
+        """Enter context manager."""
+        return self
+
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        """Exit context manager, finalizing the backend."""
+        self._backend.finalize()
+
+
 def create_stream(
-    settings: schema.AcquisitionSettings,
-) -> OMEStream:
+    settings: AcquisitionSettings,
+) -> Stream:
     """Create a stream for writing OME-TIFF or OME-ZARR data.
 
     Parameters
     ----------
-    settings : schema.AcquisitionSettings
+    settings : AcquisitionSettings
         Acquisition settings containing array configuration, path, backend, etc.
 
     Returns
     -------
-    OMEStream
-        A configured stream ready for writing frames.
+    Stream
+        A configured stream ready for writing frames via `append()`.
+
+    Raises
+    ------
+    ValueError
+        If settings are invalid or backend is incompatible.
+    NotImplementedError
+        If requesting unsupported features (e.g., plate mode).
+
+    Examples
+    --------
+    >>> settings = AcquisitionSettings(
+    ...     root_path="output.zarr",
+    ...     array_settings=ArraySettings(
+    ...         dimensions=dims_from_standard_axes(
+    ...             {"t": 10, "c": 2, "y": 512, "x": 512}
+    ...         ),
+    ...         dtype="uint16",
+    ...     ),
+    ...     overwrite=True,
+    ... )
+    >>> with create_stream(settings) as stream:
+    ...     for i in range(20):  # 10 timepoints x 2 channels
+    ...         stream.append(np.zeros((512, 512), dtype=np.uint16))
     """
+    from .backends._zarr import ZarrBackend
+    from .router import FrameRouter
+
     # Validate settings
     if settings.plate is not None:
         raise NotImplementedError(
-            "Plate support not yet implemented. Use settings.arrays instead."
-        )
-    if settings.arrays is None or len(settings.arrays) == 0:
-        raise ValueError("settings.arrays must contain at least one ArraySettings.")
-    if len(settings.arrays) > 1:
-        raise NotImplementedError(
-            "Multi-array support not yet implemented. "
-            "Use a single ArraySettings in settings.arrays."
+            "Plate support not yet implemented. Use array_settings instead."
         )
 
-    # Convert new schema to old schema
-    array_settings = settings.arrays[0]
-    dimensions, dtype = convert_array_settings_to_dimensions(array_settings)
-
-    # Initialize and create stream with converted parameters
-    backend = settings.backend
-    if backend not in {"acquire-zarr", "tensorstore", "zarr", "tiff", "auto"}:
+    # TODO: Support other backends in new protocol
+    backend: ArrayBackend = ZarrBackend()
+    if reason := backend.is_incompatible(settings):
         raise ValueError(
-            f"Invalid backend '{backend}'. "
-            "Choose from 'acquire-zarr', 'tensorstore', 'zarr', 'tiff', or 'auto'."
+            f"Backend '{type(backend).__name__}' is incompatible: {reason}"
         )
-    stream = init_stream(settings.root_path, backend=backend)  # type: ignore
-    return stream.create(
-        str(settings.root_path),
-        np.dtype(dtype),
-        dimensions,
-        overwrite=settings.overwrite,
-    )
+
+    router = FrameRouter(settings.array_settings)
+    backend.prepare(settings, router)
+    return Stream(backend, router)
 
 
 def _autobackend(
     path: str | Path,
 ) -> Literal["acquire-zarr", "tensorstore", "zarr", "tiff"]:
+    """Determine backend from file extension.
+
+    For the new ArrayBackend protocol (used by create_stream), only 'zarr'
+    is currently supported. This returns 'zarr' for .zarr files if zarr-python
+    is available.
+    """
     path = str(path)
     if path.endswith(".zarr"):
+        # For now, prefer zarr-python backend for new protocol
+        try:
+            import zarr  # noqa: F401
+
+            return "zarr"
+        except ImportError:
+            pass
+
+        # Fallback to other zarr implementations (for legacy init_stream)
         if AcquireZarrStream.is_available():
             return "acquire-zarr"
         elif TensorStoreZarrStream.is_available():  # pragma: no cover
             return "tensorstore"
-        elif ZarrPythonStream.is_available():  # pragma: no cover
-            return "zarr"
+
         raise ValueError(  # pragma: no cover
             "Cannot determine backend automatically for .zarr file. "
-            "Neither acquire-zarr, tensorstore, nor zarr-python is installed. "
-            "Please install one of these packages."
+            "zarr-python is not installed. Please install: pip install zarr"
         )
     elif path.endswith(".tiff") or path.endswith(".ome.tiff"):
         if TifffileStream.is_available():

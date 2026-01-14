@@ -20,6 +20,7 @@ from ome_writers.schema_pydantic import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
 zarr = pytest.importorskip("zarr")
@@ -61,7 +62,7 @@ WRITE_CASES = [
 
 @pytest.mark.parametrize("sizes,expected_shapes", WRITE_CASES)
 def test_zarr_backend_write(
-    sizes: dict[str, int | list[str]],
+    sizes: Mapping[str, int | list[str]],
     expected_shapes: dict[str, tuple[int, ...]],
     tmp_path: Path,
 ) -> None:
@@ -115,7 +116,7 @@ def test_zarr_backend_unlimited_dimension(tmp_path: Path) -> None:
     backend = ZarrBackend()
 
     # Verify compatibility
-    assert backend.is_compatible(settings)
+    assert not backend.is_incompatible(settings)
 
     backend.prepare(settings, router)
 

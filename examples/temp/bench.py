@@ -9,7 +9,7 @@ from ome_writers import fake_data_for_sizes
 from ome_writers.backends import _old_tensorstore, _yaozarrs
 
 
-def _run_bench(cls: type) -> None:
+def _run_bench(cls: type) -> float:
     # Generate fake data with specified sizes and chunk sizes
     plane_iter, dims, dtype = fake_data_for_sizes(
         # The order of dimensions is always determines the order in which frames will be

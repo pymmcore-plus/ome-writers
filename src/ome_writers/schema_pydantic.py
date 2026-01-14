@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 from pydantic import AfterValidator, BaseModel, ConfigDict, model_validator
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
 DimensionType = Literal["space", "time", "channel", "other"]
 StandardAxisKey = Literal["x", "y", "z", "c", "t", "p"]
@@ -184,7 +184,7 @@ class AcquisitionSettings(_BaseModel):
 
 
 def dims_from_standard_axes(
-    sizes: Mapping[str, int | list[str | Position]],
+    sizes: Mapping[str, int | Sequence[str | Position] | None],
     chunk_shapes: Mapping[str | StandardAxis, int] | None = None,
 ) -> list[Dimension | PositionDimension]:
     """Create dimensions from standard axis names.

@@ -42,7 +42,10 @@ with create_stream(settings) as stream:
         stream.append(np.full(shape[-2:], i, dtype=dtype))
 
 # Validate the output
-import yaozarrs
+try:
+    import yaozarrs
 
-yaozarrs.validate_zarr_store(settings.root_path)
-print("✓ Zarr store is valid")
+    yaozarrs.validate_zarr_store(settings.root_path)
+    print("✓ Zarr store is valid")
+except ImportError:
+    print("⚠ yaozarrs not installed; skipping validation")
