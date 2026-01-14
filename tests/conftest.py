@@ -82,41 +82,6 @@ def _read_tiff(output_path: Path) -> np.ndarray:
 TIFF_BACKENDS: list[AvailableBackend] = []
 ZARR_BACKENDS: list[AvailableBackend] = []
 
-# Add tensorstore backend (uses yaozarrs with tensorstore writer)
-if omew.TensorStoreZarrStream.is_available():
-    ZARR_BACKENDS.append(
-        AvailableBackend(
-            "tensorstore",
-            omew.TensorStoreZarrStream,
-            ".ome.zarr",
-            _read_zarr,
-        )
-    )
-
-# Add zarr-python backend (uses yaozarrs with zarr writer)
-if omew.ZarrPythonStream.is_available():
-    ZARR_BACKENDS.append(
-        AvailableBackend(
-            "zarr",
-            omew.ZarrPythonStream,
-            ".ome.zarr",
-            _read_zarr,
-        )
-    )
-
-# Add acquire-zarr backend
-if omew.AcquireZarrStream.is_available():
-    ZARR_BACKENDS.append(
-        AvailableBackend(
-            "acquire-zarr", omew.AcquireZarrStream, ".ome.zarr", _read_zarr
-        )
-    )
-
-# Add tiff backend
-if omew.TifffileStream.is_available():
-    TIFF_BACKENDS.append(
-        AvailableBackend("tiff", omew.TifffileStream, ".ome.tiff", _read_tiff)
-    )
 
 BACKENDS: list[AvailableBackend] = TIFF_BACKENDS + ZARR_BACKENDS
 

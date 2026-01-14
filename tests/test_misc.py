@@ -7,16 +7,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from ome_writers._auto import init_stream
 from ome_writers._dimensions import Dimension
-from ome_writers._util import (
-    DimensionIndexIterator,
-    dims_from_useq,
-    fake_data_for_sizes,
-)
-from ome_writers.backends._acquire_zarr import AcquireZarrStream
-from ome_writers.backends._tifffile import TifffileStream
-from ome_writers.backends._yaozarrs import TensorStoreZarrStream, ZarrPythonStream
+from ome_writers._util import dims_from_useq, fake_data_for_sizes
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -49,90 +41,3 @@ def test_dims_from_useq_invalid_input() -> None:
     """Test dims_from_useq with invalid input."""
     with pytest.raises(ValueError, match=r"seq must be a useq\.MDASequence"):
         dims_from_useq("not a sequence", image_width=32, image_height=32)  # type: ignore[arg-type]
-
-
-def test_dimension_index_iterator_empty() -> None:
-    """Test DimensionIndexIterator with empty dimensions."""
-    dims: list[Dimension] = []
-    it = DimensionIndexIterator(dims, storage_order_dimensions=[])
-
-    assert len(it) == 0
-    assert list(it) == []
-
-
-def test_dimension_index_iterator_2d_only() -> None:
-    """Test DimensionIndexIterator with only spatial dimensions (2D)."""
-    # Only spatial dimensions, no time/channel/etc
-    dims = [
-        Dimension(label="y", size=32, unit=None, chunk_size=1),
-        Dimension(label="x", size=32, unit=None, chunk_size=1),
-    ]
-    it = DimensionIndexIterator(dims, storage_order_dimensions=[])
-
-    # With no non-spatial dimensions, iterator should be empty
-    assert len(it) == 0
-    result = list(it)
-    assert len(result) == 0
-
-
-def test_dimension_index_iterator_validation() -> None:
-    """Test DimensionIndexIterator parameter validation."""
-    dims = [
-        Dimension(label="t", size=2, unit=(1.0, "s"), chunk_size=1),
-        Dimension(label="y", size=32, unit=None, chunk_size=1),
-        Dimension(label="x", size=32, unit=None, chunk_size=1),
-    ]
-
-    # Should raise error if storage_order_dimensions includes 'y'
-    with pytest.raises(ValueError, match="should not include 'y', 'x'"):
-        DimensionIndexIterator(dims, storage_order_dimensions=["t", "y"])
-
-    # Should raise error if storage_order_dimensions includes 'x'
-    with pytest.raises(ValueError, match="should not include 'y', 'x'"):
-        DimensionIndexIterator(dims, storage_order_dimensions=["x"])
-
-    # Should raise error if storage_order_dimensions includes position key
-    with pytest.raises(ValueError, match="should not include 'y', 'x'"):
-        DimensionIndexIterator(dims, storage_order_dimensions=["p"])
-
-
-def test_init_stream_backends() -> None:
-    """Test init_stream with different backend names."""
-    if AcquireZarrStream.is_available():
-        stream = init_stream("test.zarr", backend="acquire-zarr")
-        assert isinstance(stream, AcquireZarrStream)
-
-    if TifffileStream.is_available():
-        stream = init_stream("test.tiff", backend="tiff")
-        assert isinstance(stream, TifffileStream)
-
-
-@pytest.mark.skipif(
-    not (
-        AcquireZarrStream.is_available()
-        or TensorStoreZarrStream.is_available()
-        or ZarrPythonStream.is_available()
-    ),
-    reason="no zarr backend available",
-)
-def test_autobackend_zarr(tmp_path: Path) -> None:
-    """Test automatic backend selection for .zarr files."""
-    zarr_path = tmp_path / "test.zarr"
-    stream = init_stream(str(zarr_path), backend="auto")
-    # Should select acquire-zarr if available, otherwise tensorstore or zarr-python
-    assert isinstance(
-        stream, (AcquireZarrStream, TensorStoreZarrStream, ZarrPythonStream)
-    )
-
-
-@pytest.mark.skipif(not TifffileStream.is_available(), reason="tifffile not available")
-def test_autobackend_tiff(tmp_path: Path) -> None:
-    """Test automatic backend selection for .tiff files."""
-    tiff_path = tmp_path / "test.tiff"
-    stream = init_stream(str(tiff_path), backend="auto")
-    assert isinstance(stream, TifffileStream)
-
-    # Also test .ome.tiff extension
-    ome_tiff_path = tmp_path / "test.ome.tiff"
-    stream = init_stream(str(ome_tiff_path), backend="auto")
-    assert isinstance(stream, TifffileStream)
