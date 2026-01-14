@@ -51,12 +51,12 @@ with create_stream(settings) as stream:
 ## High-Level Architecture
 
 ```
-┌─────────────────┐      ┌─────────────────┐      ┌───────────────────────┐
-│  StorageSchema  │─────▶│   FrameRouter   │─────▶│  ArrayBackend         │
-│                 │      │                 │      │                       │
-│  Declarative    │      │  __next__() ->  │      │  write(pos,idx,frame) │
-│  exp definition │      │    (pos, idx)   │      │  finalize()           │
-└─────────────────┘      └─────────────────┘      └───────────────────────┘
+┌─────────────────────┐      ┌─────────────────┐      ┌───────────────────────┐
+│  AcquisitionSchema  │─────▶│   FrameRouter   │─────▶│  ArrayBackend         │
+│                     │      │                 │      │                       │
+│  Declarative        │      │  __next__() ->  │      │  write(pos,idx,frame) │
+│  exp. definition    │      │    (pos, idx)   │      │  finalize()           │
+└─────────────────────┘      └─────────────────┘      └───────────────────────┘
 ```
 
 ### StorageSchema (`schema.py`)
