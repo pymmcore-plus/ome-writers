@@ -39,13 +39,7 @@ def fake_data_for_sizes(
     if not {"y", "x"} <= sizes.keys():  # pragma: no cover
         raise ValueError("sizes must include both 'y' and 'x'")
 
-    _chunk_sizes = dict(chunk_sizes or {})
-    _chunk_sizes.setdefault("y", sizes["y"])
-    _chunk_sizes.setdefault("x", sizes["x"])
-
-    ordered_labels = [z for z in sizes if z not in "yx"]
-    ordered_labels += ["y", "x"]
-    dims = dims_from_standard_axes(sizes=sizes, chunk_shapes=_chunk_sizes)
+    dims = dims_from_standard_axes(sizes=sizes, chunk_shapes=chunk_sizes)
 
     shape = [d.count for d in dims]
     if any(x is None for x in shape):  # pragma: no cover

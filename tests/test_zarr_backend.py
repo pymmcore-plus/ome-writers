@@ -237,14 +237,18 @@ def test_zarr_backend_plate(tmp_path: Path) -> None:
 
 def test_zarr_backend_plate_duplicate_names_in_well_rejected(tmp_path: Path) -> None:
     """Test that duplicate position names within the same well are rejected."""
-    with pytest.raises(ValueError, match="Position names must be unique within each well"):
+    with pytest.raises(
+        ValueError, match="Position names must be unique within each well"
+    ):
         ArraySettings(
             dimensions=[
                 Dimension(name="t", count=2, type="time"),
                 PositionDimension(
                     positions=[
                         Position(name="fov0", row="C", column="4"),
-                        Position(name="fov0", row="C", column="4"),  # Duplicate in same well
+                        Position(
+                            name="fov0", row="C", column="4"
+                        ),  # Duplicate in same well
                     ]
                 ),
                 Dimension(name="y", count=16, type="space"),
@@ -262,7 +266,9 @@ def test_zarr_backend_plate_same_name_different_wells(tmp_path: Path) -> None:
             PositionDimension(
                 positions=[
                     Position(name="fov0", row="A", column="1"),
-                    Position(name="fov0", row="B", column="2"),  # Same name, different well
+                    Position(
+                        name="fov0", row="B", column="2"
+                    ),  # Same name, different well
                 ]
             ),
             Dimension(name="y", count=16, type="space"),

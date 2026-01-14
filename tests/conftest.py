@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
     import numpy as np
 
-    from ome_writers._auto import BackendName
+    from ome_writers._stream import BackendName
 
 
 class AvailableBackend(NamedTuple):

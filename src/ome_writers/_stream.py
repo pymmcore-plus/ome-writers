@@ -2,22 +2,23 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, TypeAlias, get_args
+from curses import meta
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias, get_args
 
 if TYPE_CHECKING:
     import numpy as np
 
-    from .backend import ArrayBackend
+    from ._backend import ArrayBackend
     from .router import FrameRouter
     from .schema import AcquisitionSettings
 
-__all__ = ["Stream", "create_stream"]
+__all__ = ["OMEStream", "create_stream"]
 
 BackendName: TypeAlias = Literal["acquire-zarr", "tensorstore", "zarr", "tiff"]
 VALID_BACKEND_NAMES: set[str] = set(get_args(BackendName)) | {"auto"}
 
 
-class Stream:
+class OMEStream:
     """A stream wrapper for writing frames using the router + backend pattern.
 
     This class manages the iteration through frames in acquisition order and
@@ -56,7 +57,11 @@ class Stream:
         pos_info, idx = next(self._iterator)
         self._backend.write(pos_info, idx, frame)
 
-    def __enter__(self) -> Stream:
+    def update_metadata(self, metadata: Any) -> None:
+        """Update metadata in the backend.  Meaning is format-dependent."""
+        self._backend.update_metadata(metadata)
+
+    def __enter__(self) -> OMEStream:
         """Enter context manager."""
         return self
 
@@ -67,7 +72,7 @@ class Stream:
 
 def create_stream(
     settings: AcquisitionSettings,
-) -> Stream:
+) -> OMEStream:
     """Create a stream for writing OME-TIFF or OME-ZARR data.
 
     Parameters
@@ -109,7 +114,7 @@ def create_stream(
     backend: ArrayBackend = _create_backend(settings)
     router = FrameRouter(settings.array_settings)
     backend.prepare(settings, router)
-    return Stream(backend, router)
+    return OMEStream(backend, router)
 
 
 def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:

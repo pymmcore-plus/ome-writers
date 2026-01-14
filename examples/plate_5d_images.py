@@ -4,14 +4,14 @@ from typing import cast
 
 import numpy as np
 
-from ome_writers import create_stream
-from ome_writers.schema import (
+from ome_writers import (
     AcquisitionSettings,
     ArraySettings,
     Dimension,
     Plate,
     Position,
     PositionDimension,
+    create_stream,
 )
 
 settings = AcquisitionSettings(

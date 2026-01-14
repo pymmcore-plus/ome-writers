@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from ome_writers.backend import ArrayBackend
+from ome_writers._backend import ArrayBackend
 from ome_writers.schema import (
     ArraySettings,
     Dimension,
@@ -136,14 +136,14 @@ class ZarrBackend(ArrayBackend):
 
         # Group positions by (row, column) to identify wells
         # well_positions: {(row, col): [(pos_index, pos), ...]}
-        well_positions: dict[tuple[str, str], list[tuple[int, Position]]] = {}
+        well_positions = {}
         for i, pos in enumerate(positions):
             key = (pos.row, pos.column)  # type: ignore[arg-type]
             well_positions.setdefault(key, []).append((i, pos))
 
         # Build mapping: position_index -> array path using Position.name as FOV path
         # e.g., Position(name="p0", row="A", column="1") -> "A/1/p0"
-        pos_idx_to_path: dict[int, str] = {}
+        pos_idx_to_path = {}
         for (row, col), pos_list in well_positions.items():
             for pos_idx, pos in pos_list:
                 pos_idx_to_path[pos_idx] = f"{row}/{col}/{pos.name}"
