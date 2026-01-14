@@ -147,8 +147,11 @@ But we also:
   - one channel does Z-stacks while another does single planes.  In other words, the
     *outer* array is regular, but some *inner* frames are missing/skipped.
   - different positions have different shapes (nT, nZ, etc), such as is possible when
-    using subsequences in useq-schema.
+    using subsequences in useq-schema. (maybe this is just the responsibility of the
+    user to create multiple streams).
 - Multi-camera setups, particularly with different image shapes or data types.
+  (here too... the caller could just call `append()` in the right order for each buffer)
+- What happens if you want to skip a frame at runtime, maybe `append(None)`?
 
 ## Contributing
 

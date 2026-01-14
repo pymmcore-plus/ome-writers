@@ -69,9 +69,7 @@ class OMEStream:
         self._backend.finalize()
 
 
-def create_stream(
-    settings: AcquisitionSettings,
-) -> OMEStream:
+def create_stream(settings: AcquisitionSettings) -> OMEStream:
     """Create a stream for writing OME-TIFF or OME-ZARR data.
 
     Parameters
