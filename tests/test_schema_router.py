@@ -175,10 +175,12 @@ def test_schema_unlimited_first_only() -> None:
     )
 
     # Second dimension unlimited - error
-    with pytest.raises(ValidationError, match="Only one dimension may be unlimited"):
+    with pytest.raises(
+        ValidationError, match=" Only the first dimension may be unbounded"
+    ):
         ArraySettings(
             dimensions=[
-                Dimension(name="t", count=None),
+                Dimension(name="t", count=10),
                 Dimension(name="c", count=None),
                 Dimension(name="y", count=64, type="space"),
                 Dimension(name="x", count=64, type="space"),

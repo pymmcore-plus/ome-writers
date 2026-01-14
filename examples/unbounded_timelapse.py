@@ -1,34 +1,39 @@
-"""Basic example of using ome_writers to write a single 5D image."""
+"""Example of using ome_writers with unbounded first dimension.
 
-from typing import cast
+This simulates visiting two positions for an "unknown" number of timepoints.
+(e.g. run for an hour, regardless of how long the inter-frame interval ends up being).
+"""
 
 import numpy as np
 
-from ome_writers import AcquisitionSettings, ArraySettings, Dimension, create_stream
+from ome_writers import (
+    AcquisitionSettings,
+    ArraySettings,
+    Dimension,
+    PositionDimension,
+    create_stream,
+)
 
 settings = AcquisitionSettings(
     root_path="example_unbounded.ome.zarr",
     array_settings=ArraySettings(
         dimensions=[
-            Dimension(name="z", count=5, chunk_size=1, type="space"),
             Dimension(name="t", count=None, chunk_size=1, type="time"),  # unbounded
+            PositionDimension(positions=["Pos0", "Pos1"]),
             Dimension(name="y", count=256, chunk_size=64, type="space"),
             Dimension(name="x", count=256, chunk_size=64, type="space"),
         ],
         dtype="uint16",
-        storage_order="ngff",
     ),
     overwrite=True,
     backend="auto",
 )
 
-ntime = 3
-actual_shape = cast("tuple[int, ...]", (ntime, *settings.array_settings.shape[1:]))
+N = 3  # actual count of first dimension (in reality, could be conditional)
+numframes = np.prod(settings.array_settings.shape[1:-2]) * N  # type: ignore
 with create_stream(settings) as stream:
-    for i in range(np.prod(actual_shape[:-2])):
-        stream.append(
-            np.full(actual_shape[-2:], i, dtype=settings.array_settings.dtype)
-        )
+    for i in range(numframes):
+        stream.append(np.full((256, 256), i, dtype=settings.array_settings.dtype))
 
 
 # Validate the output

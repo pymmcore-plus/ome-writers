@@ -110,6 +110,8 @@ But we also:
 ### Challenging Edge Cases
 
 - Jagged arrays: E.g.
-  - one channel does Z-stacks while another does single planes
-  - different positions have different shapes (nT, nZ, etc)
+  - one channel does Z-stacks while another does single planes.  In other words, the
+    *outer* array is regular, but some *inner* frames are missing/skipped.
+  - different positions have different shapes (nT, nZ, etc), such as is possible when
+    using subsequences in useq-schema.
 - Multi-camera setups, particularly with different image shapes or data types.

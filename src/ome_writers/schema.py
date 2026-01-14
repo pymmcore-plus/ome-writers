@@ -111,12 +111,10 @@ def _validate_dims_list(
     if len(dim_names) != len(set(dim_names)):
         raise ValueError("Dimension names must be unique.")
 
-    # no more than one unlimited dimension (count=None):
-    unlimited_dims = [
-        dim for dim in dims if isinstance(dim, Dimension) and dim.count is None
-    ]
-    if len(unlimited_dims) > 1:
-        raise ValueError("Only one dimension may be unlimited (count=None).")
+    # only the first dimension can be unbounded
+    for dim in dims[1:]:
+        if isinstance(dim, Dimension) and dim.count is None:
+            raise ValueError("Only the first dimension may be unbounded (count=None).")
 
     # ensure at least 2 spatial dimensions at the end
     spatial_dims = [d for d in dims if isinstance(d, Dimension) and d.type == "space"]
@@ -172,7 +170,7 @@ class ArraySettings(_BaseModel):
     dtype: str
     compression: str | None = None
     position_name: str | None = None
-    storage_order: Literal["acquisition", "ngff"] | list[str] = "acquisition"
+    storage_order: Literal["acquisition", "ngff"] | list[str] = "ngff"
 
     @property
     def shape(self) -> tuple[int | None, ...]:

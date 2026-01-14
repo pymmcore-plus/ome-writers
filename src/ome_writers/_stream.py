@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from curses import meta
 from typing import TYPE_CHECKING, Any, Literal, TypeAlias, get_args
 
 if TYPE_CHECKING:

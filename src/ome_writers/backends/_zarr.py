@@ -72,7 +72,7 @@ class ZarrBackend(ArrayBackend):
         positions = router.positions
 
         # Build storage dimensions (excluding position, in storage order)
-        storage_dims = _get_storage_dims(array_settings)
+        storage_dims = _get_storage_dims(array_settings, router.storage_dimension_names)
         # For unlimited dimensions (count=None), start with size 1
         shape = tuple(d.count if d.count is not None else 1 for d in storage_dims)
         chunks = _get_chunks(storage_dims)
@@ -223,14 +223,38 @@ class ZarrBackend(ArrayBackend):
 # -----------------------------------------------------------------------------
 
 
-def _get_storage_dims(settings: ArraySettings) -> list[Dimension]:
-    """Extract storage dimensions from settings (excludes PositionDimension)."""
-    dims = []
+def _get_storage_dims(
+    settings: ArraySettings, storage_order: list[str]
+) -> list[Dimension]:
+    """Extract storage dimensions from settings in storage order.
+
+    Parameters
+    ----------
+    settings
+        Array settings containing dimension definitions.
+    storage_order
+        List of dimension names in the desired storage order (from FrameRouter).
+
+    Returns
+    -------
+    list[Dimension]
+        Dimensions reordered according to storage_order, excluding PositionDimension.
+    """
+    # Build a name -> Dimension mapping (excluding PositionDimension and Y/X)
+    dim_by_name: dict[str, Dimension] = {}
+    spatial_dims: list[Dimension] = []
+
     for dim in settings.dimensions:
         if isinstance(dim, PositionDimension):
             continue
-        dims.append(dim)
-    return dims
+        # Y and X are not in storage_order (they're frame dimensions)
+        if dim.name.lower() in ("y", "x"):
+            spatial_dims.append(dim)
+        else:
+            dim_by_name[dim.name] = dim
+
+    # Reorder according to storage_order, then append Y/X
+    return [dim_by_name[name] for name in storage_order] + spatial_dims
 
 
 def _get_chunks(dims: list[Dimension]) -> tuple[int, ...]:
