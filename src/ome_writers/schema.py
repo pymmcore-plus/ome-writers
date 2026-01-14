@@ -79,7 +79,7 @@ class Position(_BaseModel):
     row: str | None = None
     column: str | None = None
     # TODO
-    # These could be used to specify the coordinateTransform.translate for 
+    # These could be used to specify the coordinateTransform.translate for
     # different positions
     # x_translation: float | None = None
     # y_translation: float | None = None
