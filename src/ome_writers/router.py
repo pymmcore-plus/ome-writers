@@ -116,7 +116,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .schema_pydantic import ArraySettings, Dimension, PositionDimension
+from .schema import ArraySettings, Dimension, PositionDimension
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

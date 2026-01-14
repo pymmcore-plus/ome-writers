@@ -10,7 +10,7 @@ import yaozarrs
 
 from ome_writers.backends._zarr import ZarrBackend
 from ome_writers.router import FrameRouter
-from ome_writers.schema_pydantic import (
+from ome_writers.schema import (
     AcquisitionSettings,
     ArraySettings,
     Dimension,

@@ -109,5 +109,7 @@ But we also:
 
 ### Challenging Edge Cases
 
-- Jagged arrays: E.g., channel 0 has Z=1, channel 1 has Z=50. Would require per-channel shapes and more complex iteration.
+- Jagged arrays: E.g.
+  - one channel does Z-stacks while another does single planes
+  - different positions have different shapes (nT, nZ, etc)
 - Multi-camera setups, particularly with different image shapes or data types.

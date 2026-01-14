@@ -56,7 +56,7 @@ if TYPE_CHECKING:
     import numpy as np
 
     from ome_writers.router import FrameRouter
-    from ome_writers.schema_pydantic import AcquisitionSettings
+    from ome_writers.schema import AcquisitionSettings
 
 
 class ArrayBackend(ABC):

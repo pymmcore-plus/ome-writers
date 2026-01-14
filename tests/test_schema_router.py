@@ -8,7 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from ome_writers.router import FrameRouter
-from ome_writers.schema_pydantic import (
+from ome_writers.schema import (
     ArraySettings,
     Dimension,
     Plate,

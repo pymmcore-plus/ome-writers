@@ -6,13 +6,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from ome_writers.backend import ArrayBackend
-from ome_writers.schema_pydantic import Dimension, PositionDimension
+from ome_writers.schema import Dimension, PositionDimension
 
 if TYPE_CHECKING:
     import numpy as np
 
     from ome_writers.router import FrameRouter
-    from ome_writers.schema_pydantic import AcquisitionSettings, ArraySettings
+    from ome_writers.schema import AcquisitionSettings, ArraySettings
 
 
 class ZarrBackend(ArrayBackend):
@@ -40,6 +40,8 @@ class ZarrBackend(ArrayBackend):
         """
         if not settings.root_path.endswith(".zarr"):
             return "Root path must end with .zarr for ZarrBackend."
+        if settings.plate is not None:
+            return "ZarrBackend does not yet support Plate metadata."
         return False
 
     # -------------------------------------------------------------------------
@@ -59,9 +61,6 @@ class ZarrBackend(ArrayBackend):
                 "ZarrBackend requires yaozarrs with write support: "
                 "`pip install yaozarrs[write-zarr]`."
             ) from e
-
-        if settings.array_settings is None:
-            raise ValueError("ZarrBackend requires arrays to be set.")
 
         self._finalized = False
         array_settings = settings.array_settings

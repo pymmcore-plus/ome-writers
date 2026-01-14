@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, TypeAlias
+from typing import TYPE_CHECKING, Literal, TypeAlias, get_args
 
 if TYPE_CHECKING:
     import numpy as np
 
     from .backend import ArrayBackend
     from .router import FrameRouter
-    from .schema_pydantic import AcquisitionSettings
+    from .schema import AcquisitionSettings
 
 __all__ = ["Stream", "create_stream"]
 
 BackendName: TypeAlias = Literal["acquire-zarr", "tensorstore", "zarr", "tiff"]
+VALID_BACKEND_NAMES: set[str] = set(get_args(BackendName)) | {"auto"}
 
 
 class Stream:
@@ -102,22 +103,65 @@ def create_stream(
     ...     for i in range(20):  # 10 timepoints x 2 channels
     ...         stream.append(np.zeros((512, 512), dtype=np.uint16))
     """
-    from .backends._zarr import ZarrBackend
     from .router import FrameRouter
 
-    # Validate settings
-    if settings.plate is not None:
-        raise NotImplementedError(
-            "Plate support not yet implemented. Use array_settings instead."
+    # TODO: Support other backends in new protocol
+    backend: ArrayBackend = _create_backend(settings)
+    router = FrameRouter(settings.array_settings)
+    backend.prepare(settings, router)
+    return Stream(backend, router)
+
+
+def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:
+    """Create and prepare the appropriate backend based on settings.
+
+    Parameters
+    ----------
+    settings : AcquisitionSettings
+        The acquisition settings specifying the desired backend.
+
+    Returns
+    -------
+    ArrayBackend
+        An initialized backend ready for writing.
+
+    Raises
+    ------
+    ValueError
+        If the specified backend is unknown or incompatible.
+    """
+
+    requested_backend = settings.backend.lower()
+    if requested_backend not in VALID_BACKEND_NAMES:
+        raise ValueError(
+            f"Unknown backend requested: '{requested_backend!r}'.  "
+            f"Must be one of {VALID_BACKEND_NAMES}."
         )
 
-    # TODO: Support other backends in new protocol
-    backend: ArrayBackend = ZarrBackend()
+    # TODO:
+    # this needs work...
+    # we need better error handling for incompatibilities, etc...
+
+    backend: ArrayBackend | None = None
+    if requested_backend in ("auto", "zarr"):
+        try:
+            from .backends._zarr import ZarrBackend
+        except ImportError as e:
+            if requested_backend == "zarr":
+                raise ValueError(
+                    "Zarr backend requested but 'zarr' package is not installed."
+                ) from e
+        else:
+            backend = ZarrBackend()
+
+    if backend is None:
+        raise ValueError(
+            f"Could not create backend for requested name: '{requested_backend}'."
+        )
+
     if reason := backend.is_incompatible(settings):
         raise ValueError(
             f"Backend '{type(backend).__name__}' is incompatible: {reason}"
         )
 
-    router = FrameRouter(settings.array_settings)
-    backend.prepare(settings, router)
-    return Stream(backend, router)
+    return backend
