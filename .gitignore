@@ -114,6 +114,4 @@ uv.lock
 example*.zarr
 example*.tiff
 example_*
-src/ome_writers/schema.py
-src/ome_writers/schema.py
 output.ome.zarr
