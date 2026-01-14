@@ -119,7 +119,7 @@ Backends receive indices in storage order and don't need to know about acquisiti
 3. **Backends are simple adapters** — receive storage-order indices, write bytes
 4. **Position is a meta-dimension** — appears in iteration but becomes separate arrays/files, not an array axis
 
-## Why this level of abstraction?
+## Why this layer of abstraction?
 
 The separation of schema, router, and backend allows us to leave the performance-critical
 tasks to C++ libraries (like tensorstore, acquire-zarr), while keeping "fiddly" metadata
@@ -129,20 +129,19 @@ The API of this library is heavily inspired by the acquire-zarr API
 (declare deterministic experiment with schema, append frames with single `append()` calls).
 But we also:
 
-- want to support non-zarr formats (OME-TIFF)
+- want to support both zarr and tiff formats (OME-TIFF)
+- want to support other zarr array libraries, such as tensorstore.
 - want to take advantage of Python for metadata management (e.g. `ome-types` for
   OME-XML generation and `yaozarrs` for OME-Zarr metadata)
-- want to support other zarr array libraries, such as tensorstore.
 
 ## Supported Use Cases
-
-### Well Supported
 
 - **Single 5D image** (TCZYX or any permutation) — the common case
 - **Multi-position acquisition** — separate arrays/files per stage position
 - **Well plates** — hierarchical plate/well/field structure with explicit acquisition order
+- **Unbounded first dimension** — e.g., streaming time-lapse with unknown total frames
 
-### Challenging Edge Cases
+## Currently Unsupported Edge Cases
 
 - Jagged arrays: E.g.
   - one channel does Z-stacks while another does single planes.  In other words, the

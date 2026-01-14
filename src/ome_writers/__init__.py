@@ -18,6 +18,7 @@ from .schema import (
     Plate,
     Position,
     PositionDimension,
+    dims_from_standard_axes,
 )
 
 __all__ = [
@@ -30,5 +31,6 @@ __all__ = [
     "PositionDimension",
     "__version__",
     "create_stream",
+    "dims_from_standard_axes",
     "fake_data_for_sizes",
 ]
