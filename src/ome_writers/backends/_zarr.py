@@ -41,7 +41,7 @@ class ZarrBackend(ArrayBackend):
         - Multi-position data
         - Unlimited dimensions (count=None) with automatic resizing
         """
-        return settings.arrays is not None
+        return settings.array_settings is not None
 
     def compatibility_error(self, settings: AcquisitionSettings) -> str | None:
         if self.is_compatible(settings):
@@ -66,11 +66,11 @@ class ZarrBackend(ArrayBackend):
                 "`pip install yaozarrs[write-zarr]`."
             ) from e
 
-        if settings.arrays is None:
+        if settings.array_settings is None:
             raise ValueError("ZarrBackend requires arrays to be set.")
 
         self._finalized = False
-        array_settings = settings.arrays
+        array_settings = settings.array_settings
         group_path = Path(settings.root_path).expanduser().resolve()
         position_keys = router.position_keys
 

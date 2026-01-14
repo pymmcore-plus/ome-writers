@@ -109,10 +109,5 @@ But we also:
 
 ### Challenging Edge Cases
 
-| Case | Status | Notes |
-| ---- | ------ | ----- |
-| **Unknown first axis size** | Partial | `size_px=None` supported for first dimension only. Requires resizable arrays (Zarr supports this, TIFF does not). |
-| **Jagged arrays** | Not supported | E.g., channel 0 has Z=1, channel 1 has Z=50. Would require per-channel shapes and more complex iteration. |
-| **Non-standard dimension names** | Partial | Custom dimensions work but may not have proper OME type/unit inference. |
-| **Sequential backends with reordering** | Constrained | Backends like acquire-zarr write sequentially and cannot reorder. Storage order must match acquisition order. |
-| **Multi-resolution pyramids** | Not in streaming API | yaozarrs supports pyramids, but the streaming API writes single-resolution only. |
+- Jagged arrays: E.g., channel 0 has Z=1, channel 1 has Z=50. Would require per-channel shapes and more complex iteration.
+- Multi-camera setups, particularly with different image shapes or data types.

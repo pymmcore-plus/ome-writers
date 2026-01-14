@@ -71,7 +71,7 @@ def test_zarr_backend_write(
     )
     settings = AcquisitionSettings(
         root_path=str(tmp_path / "test.zarr"),
-        arrays=array_settings,
+        array_settings=array_settings,
         overwrite=True,
     )
     router = FrameRouter(array_settings)
@@ -108,7 +108,7 @@ def test_zarr_backend_unlimited_dimension(tmp_path: Path) -> None:
     )
     settings = AcquisitionSettings(
         root_path=str(tmp_path / "test.zarr"),
-        arrays=array_settings,
+        array_settings=array_settings,
         overwrite=True,
     )
     router = FrameRouter(array_settings)
@@ -150,7 +150,7 @@ def test_zarr_backend_unlimited_multiposition(tmp_path: Path) -> None:
     )
     settings = AcquisitionSettings(
         root_path=str(tmp_path / "test.zarr"),
-        arrays=array_settings,
+        array_settings=array_settings,
         overwrite=True,
     )
     router = FrameRouter(array_settings)
