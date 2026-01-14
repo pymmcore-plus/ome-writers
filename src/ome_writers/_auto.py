@@ -5,98 +5,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal, TypeAlias
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     import numpy as np
-
-    from ome_writers._dimensions import Dimension
 
     from .backend import ArrayBackend
     from .router import FrameRouter
-    from .schema_pydantic import AcquisitionSettings, ArraySettings
+    from .schema_pydantic import AcquisitionSettings
 
-__all__ = ["Stream", "create_stream", "init_stream"]
+__all__ = ["Stream", "create_stream"]
 
 BackendName: TypeAlias = Literal["acquire-zarr", "tensorstore", "zarr", "tiff"]
-
-
-# FIXME - DEPRECATED: This function is for legacy backends only
-def convert_array_settings_to_dimensions(
-    array_settings: ArraySettings,
-) -> tuple[list[Dimension], str]:
-    """Convert ArraySettings to old-style dimension list and dtype.
-
-    DEPRECATED: This function is only for legacy backends that don't support
-    the new ArrayBackend protocol. New code should use the new protocol directly.
-
-    Parameters
-    ----------
-    array_settings : ArraySettings
-        New schema array settings to convert.
-
-    Returns
-    -------
-    tuple[list[Dimension], str]
-        Tuple of (dimensions list, dtype) for passing to backend.
-    """
-    from typing import cast
-
-    from ._dimensions import Dimension
-    from .schema_pydantic import Dimension as NewDimension
-    from .schema_pydantic import PositionDimension as NewPositionDimension
-
-    dimensions: list[Dimension] = []
-    for dim in array_settings.dimensions:
-        # Skip PositionDimension - old backends handle positions differently
-        if isinstance(dim, NewPositionDimension):
-            continue
-
-        # After isinstance check, dim is guaranteed to be NewDimension
-        dim = cast("NewDimension", dim)
-
-        # Convert name to label
-        label = dim.name
-        if label not in ("x", "y", "z", "t", "c", "p"):
-            raise ValueError(
-                f"Dimension name '{label}' is not a standard axis. "
-                "Must be one of: x, y, z, t, c, p"
-            )
-
-        # Convert size_px to size
-        size = dim.count
-        if size is None:
-            # Only first dimension can be unlimited
-            if dimensions:  # not the first dimension
-                raise ValueError(
-                    f"Only the first dimension may have size_px=None, "
-                    f"but dimension '{label}' (position {len(dimensions)}) has None."
-                )
-            size = 0  # Backend will handle unlimited dimension
-
-        # Convert chunk_size_px to chunk_size
-        chunk_size = dim.chunk_size
-
-        # Convert scale + unit to unit tuple, with defaults for standard axes
-        unit = None
-        if dim.scale is not None and dim.unit is not None:
-            unit = (dim.scale, dim.unit)
-        elif label in ("x", "y", "z"):
-            # Default spatial units to micrometers
-            unit = (1.0, "um")
-        elif label == "t":
-            # Default time units to seconds
-            unit = (1.0, "s")
-
-        dimensions.append(
-            Dimension(
-                label=label,  # type: ignore
-                size=size,
-                unit=unit,
-                chunk_size=chunk_size,
-            )
-        )
-
-    return dimensions, array_settings.dtype
 
 
 class Stream:

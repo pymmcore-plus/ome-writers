@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 import yaozarrs
-from ome_writers.backends._zarr import ZarrBackend
 
+from ome_writers.backends._zarr import ZarrBackend
 from ome_writers.router import FrameRouter
 from ome_writers.schema_pydantic import (
     AcquisitionSettings,

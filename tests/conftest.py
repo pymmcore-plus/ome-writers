@@ -5,8 +5,6 @@ from typing import TYPE_CHECKING, NamedTuple, cast
 import pydantic
 import pytest
 
-import ome_writers as omew
-
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
@@ -18,7 +16,7 @@ if TYPE_CHECKING:
 
 class AvailableBackend(NamedTuple):
     name: BackendName
-    cls: type[omew.OMEStream]
+    cls: type
     file_ext: str
     read_data: Callable[[Path], np.ndarray]
 
