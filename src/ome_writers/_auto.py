@@ -53,8 +53,8 @@ class Stream:
             If all frames have been written (for finite dimensions only).
             For unlimited dimensions, never raises StopIteration.
         """
-        pos_key, idx = next(self._iterator)
-        self._backend.write(pos_key, idx, frame)
+        pos_info, idx = next(self._iterator)
+        self._backend.write(pos_info, idx, frame)
 
     def __enter__(self) -> Stream:
         """Enter context manager."""

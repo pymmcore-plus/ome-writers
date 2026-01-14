@@ -21,10 +21,10 @@ settings = AcquisitionSettings(
             Dimension(name="t", count=10, chunk_size=1, type="time"),
             PositionDimension(
                 positions=[
-                    Position(name="A1_0", row="A", column="1"),
-                    Position(name="A2_0", row="A", column="2"),
-                    Position(name="C4_0", row="C", column="4"),
-                    Position(name="C4_1", row="C", column="4"),  # TWO fov in same well
+                    Position(name="fov0", row="A", column="1"),
+                    Position(name="fov0", row="A", column="2"),
+                    Position(name="fov0", row="C", column="4"),
+                    Position(name="fov1", row="C", column="4"),  # TWO fov in same well
                 ]
             ),
             Dimension(name="c", count=2, chunk_size=1, type="channel"),

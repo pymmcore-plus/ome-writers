@@ -126,7 +126,39 @@ def _validate_dims_list(
     # ensure at most one PositionDimension
     if sum(isinstance(d, PositionDimension) for d in dims) > 1:
         raise ValueError("Only one PositionDimension is allowed.")
+
+    # ensure unique position names within each well (row/column combination)
+    for dim in dims:
+        if isinstance(dim, PositionDimension):
+            _validate_unique_names_per_well(dim.positions)
+            break
+
     return dims
+
+
+def _validate_unique_names_per_well(positions: list[Position]) -> None:
+    """Validate position names are unique within each well.
+
+    For positions with row/column defined, names must be unique within each
+    (row, column) group. This allows the same name across different wells,
+    but not multiple positions with the same name in the same well.
+    """
+    # Group positions by (row, column) - only for positions with both defined
+    wells: dict[tuple[str, str], list[str]] = {}
+    for pos in positions:
+        if pos.row is not None and pos.column is not None:
+            key = (pos.row, pos.column)
+            wells.setdefault(key, []).append(pos.name)
+
+    # Check for duplicates within each well
+    for (row, col), names in wells.items():
+        if len(names) != len(set(names)):
+            seen: set[str] = set()
+            duplicates = [n for n in names if n in seen or seen.add(n)]  # type: ignore[func-returns-value]
+            raise ValueError(
+                f"Position names must be unique within each well. "
+                f"Well ({row}, {col}) has duplicate names: {duplicates}"
+            )
 
 
 class ArraySettings(_BaseModel):

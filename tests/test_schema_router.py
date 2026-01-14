@@ -116,10 +116,12 @@ def test_router_iteration(
     sizes: dict[str, int | list[str] | None],
     expected: list[tuple[str, tuple[int, ...]]],
 ) -> None:
-    """Test router yields correct (position_key, index) sequence."""
+    """Test router yields correct (position_info, index) sequence."""
     settings = ArraySettings(dimensions=dims_from_standard_axes(sizes), dtype="uint16")
     router = FrameRouter(settings)
-    assert list(router) == expected
+    # Extract (pos_name, idx) for comparison with expected
+    results = [(pos.name, idx) for (_, pos), idx in router]
+    assert results == expected
 
 
 @pytest.mark.parametrize("sizes,storage_order,expected", STORAGE_ORDER_CASES)
@@ -134,14 +136,16 @@ def test_router_storage_order(
         dtype="uint16",
         storage_order=storage_order,
     )
-    assert list(FrameRouter(settings)) == expected
+    results = [(pos.name, idx) for (_, pos), idx in FrameRouter(settings)]
+    assert results == expected
 
 
-def test_router_position_keys() -> None:
-    """Test router.position_keys property."""
+def test_router_positions() -> None:
+    """Test router.positions property."""
     sizes = {"t": 2, "p": ["well_A", "well_B", "well_C"], "y": 64, "x": 64}
     settings = ArraySettings(dimensions=dims_from_standard_axes(sizes), dtype="uint16")
-    assert FrameRouter(settings).position_keys == ["well_A", "well_B", "well_C"]
+    positions = FrameRouter(settings).positions
+    assert [p.name for p in positions] == ["well_A", "well_B", "well_C"]
 
 
 def test_schema_unique_dimension_names() -> None:
@@ -226,8 +230,8 @@ def test_router_unlimited_dimension() -> None:
 
     # Iterate manually, collecting first N frames
     results = []
-    for i, (pos_key, idx) in enumerate(router):
-        results.append((pos_key, idx))
+    for i, (pos_info, idx) in enumerate(router):
+        results.append((pos_info[1].name, idx))
         if i >= 9:  # Stop after 10 frames (5 timepoints x 2 channels)
             break
 
@@ -262,8 +266,8 @@ def test_router_unlimited_with_positions() -> None:
 
     # Get first 6 frames
     results = []
-    for i, (pos_key, idx) in enumerate(router):
-        results.append((pos_key, idx))
+    for i, (pos_info, idx) in enumerate(router):
+        results.append((pos_info[1].name, idx))
         if i >= 5:
             break
 
@@ -302,7 +306,8 @@ def test_plate_acquisition_patterns() -> None:
         dimensions=dims_from_standard_axes({"p": wells, "t": 3, "y": 64, "x": 64}),
         dtype="uint16",
     )
-    assert list(FrameRouter(burst)) == [
+    burst_results = [(pos.name, idx) for (_, pos), idx in FrameRouter(burst)]
+    assert burst_results == [
         ("A1", (0,)),
         ("A1", (1,)),
         ("A1", (2,)),
@@ -320,7 +325,8 @@ def test_plate_acquisition_patterns() -> None:
         dimensions=dims_from_standard_axes({"t": 3, "p": wells, "y": 64, "x": 64}),
         dtype="uint16",
     )
-    assert list(FrameRouter(roundrobin)) == [
+    rr_results = [(pos.name, idx) for (_, pos), idx in FrameRouter(roundrobin)]
+    assert rr_results == [
         ("A1", (0,)),
         ("B1", (0,)),
         ("C1", (0,)),

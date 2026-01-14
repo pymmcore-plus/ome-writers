@@ -23,12 +23,13 @@ The router is the *only* component that understands both orderings:
   - "ngff" - canonical NGFF order (time, channel, space)
   - list[str] - explicit axis names
 
-The router yields `(position_key, storage_index)` tuples where:
-- `position_key` identifies which array/file to write to
+The router yields `(position_info, storage_index)` tuples where:
+- `position_info` is a tuple of (position_index, Position) identifying the position
 - `storage_index` is the N-dimensional index in storage order
 
 Backends receive storage-order indices directly and don't need to know about
-acquisition order.
+acquisition order. They can use position_info to access the position index
+(for array lookup) and Position metadata (name, row, column for path building).
 
 Examples
 --------
@@ -46,39 +47,14 @@ Basic iteration with storage order matching acquisition order:
 ...     dtype=np.uint16,
 ... )
 >>> router = FrameRouter(settings)
->>> for pos_key, idx in router:
-...     print(f"pos={pos_key}, idx={idx}")
-pos=0, idx=(0, 0)
-pos=0, idx=(0, 1)
-pos=0, idx=(0, 2)
-pos=0, idx=(1, 0)
-pos=0, idx=(1, 1)
-pos=0, idx=(1, 2)
-
-With reordering (acquisition TZC, storage TCZ for NGFF):
-
->>> settings = ArraySettings(
-...     dimensions=[
-...         Dimension(name="t", count=2),
-...         Dimension(name="z", count=2),
-...         Dimension(name="c", count=2),
-...         Dimension(name="y", count=64),
-...         Dimension(name="x", count=64),
-...     ],
-...     dtype=np.uint16,
-...     storage_order="ngff",
-... )
->>> router = FrameRouter(settings)
->>> for pos_key, idx in router:
-...     print(f"pos={pos_key}, idx={idx}")
-pos=0, idx=(0, 0, 0)
-pos=0, idx=(0, 1, 0)
-pos=0, idx=(0, 0, 1)
-pos=0, idx=(0, 1, 1)
-pos=0, idx=(1, 0, 0)
-pos=0, idx=(1, 1, 0)
-pos=0, idx=(1, 0, 1)
-pos=0, idx=(1, 1, 1)
+>>> for (pos_idx, pos), idx in router:
+...     print(f"pos={pos_idx}:{pos.name}, idx={idx}")
+pos=0:0, idx=(0, 0)
+pos=0:0, idx=(0, 1)
+pos=0:0, idx=(0, 2)
+pos=0:0, idx=(1, 0)
+pos=0:0, idx=(1, 1)
+pos=0:0, idx=(1, 2)
 
 Multi-position with position interleaved (time-lapse across positions):
 
@@ -100,26 +76,29 @@ Multi-position with position interleaved (time-lapse across positions):
 ...     dtype=np.uint16,
 ... )
 >>> router = FrameRouter(settings)
->>> for pos_key, idx in router:
-...     print(f"pos={pos_key}, idx={idx}")
-pos=A1, idx=(0, 0)
-pos=A1, idx=(0, 1)
-pos=B2, idx=(0, 0)
-pos=B2, idx=(0, 1)
-pos=A1, idx=(1, 0)
-pos=A1, idx=(1, 1)
-pos=B2, idx=(1, 0)
-pos=B2, idx=(1, 1)
+>>> for (pos_idx, pos), idx in router:
+...     print(f"pos={pos_idx}:{pos.name}, idx={idx}")
+pos=0:A1, idx=(0, 0)
+pos=0:A1, idx=(0, 1)
+pos=1:B2, idx=(0, 0)
+pos=1:B2, idx=(0, 1)
+pos=0:A1, idx=(1, 0)
+pos=0:A1, idx=(1, 1)
+pos=1:B2, idx=(1, 0)
+pos=1:B2, idx=(1, 1)
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .schema import ArraySettings, Dimension, PositionDimension
+from .schema import ArraySettings, Dimension, Position, PositionDimension
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+# Type alias for position info: (position_index, Position)
+PositionInfo = tuple[int, Position]
 
 
 class FrameRouter:
@@ -132,9 +111,9 @@ class FrameRouter:
 
     Yields
     ------
-    tuple[str, tuple[int, ...]]
-        (position_key, storage_index) for each frame.
-        - position_key: string name identifying the array
+    tuple[PositionInfo, tuple[int, ...]]
+        (position_info, storage_index) for each frame.
+        - position_info: tuple of (position_index, Position) with index and metadata
         - storage_index: N-dimensional index in storage order (excludes Y/X)
     """
 
@@ -146,7 +125,8 @@ class FrameRouter:
         all_sizes: list[int | None] = []
         index_dims: list[Dimension] = []
         position_axis: int | None = None
-        position_names: list[str] = ["0"]  # default single position
+        # Default single position with name "0"
+        positions: list[Position] = [Position(name="0")]
 
         for dim in settings.dimensions:
             if isinstance(dim, PositionDimension):
@@ -154,7 +134,7 @@ class FrameRouter:
                     raise ValueError("Only one PositionDimension is allowed")
                 position_axis = len(all_sizes)
                 all_sizes.append(dim.count)
-                position_names = dim.names
+                positions = dim.positions
             # FIXME!!! don't hardcode names "Y" and "X"
             elif isinstance(dim, Dimension) and dim.name.lower() not in ("y", "x"):
                 all_sizes.append(dim.count)
@@ -162,7 +142,7 @@ class FrameRouter:
 
         self._all_sizes = tuple(all_sizes)
         self._position_axis = position_axis
-        self._position_names = position_names
+        self._positions = positions
         self._index_dim_names = index_dims
 
         # Compute storage order permutation (for non-position dimensions only)
@@ -173,7 +153,7 @@ class FrameRouter:
 
         self.reset()
 
-    def __iter__(self) -> Iterator[tuple[str, tuple[int, ...]]]:
+    def __iter__(self) -> Iterator[tuple[PositionInfo, tuple[int, ...]]]:
         """Return iterator, resetting to first frame."""
         self.reset()
         return self
@@ -182,8 +162,8 @@ class FrameRouter:
         self._dim_indices = [0] * len(self._all_sizes)
         self._finished = False
 
-    def __next__(self) -> tuple[str, tuple[int, ...]]:
-        """Yield next (position_key, storage_index) tuple.
+    def __next__(self) -> tuple[PositionInfo, tuple[int, ...]]:
+        """Yield next (position_info, storage_index) tuple.
 
         For finite dimensions, iteration stops after all frames.
         For unlimited dimensions, iteration never stops - caller must break.
@@ -207,12 +187,12 @@ class FrameRouter:
 
         # Apply permutation: acquisition order → storage order
         storage_idx = tuple(acq_idx[p] for p in self._permutation)
-        pos_key = self._position_names[pos_idx]
+        position_info: PositionInfo = (pos_idx, self._positions[pos_idx])
 
         # Increment indices for next iteration
         self._increment_indices()
 
-        return pos_key, storage_idx
+        return position_info, storage_idx
 
     def _increment_indices(self) -> None:
         """Increment dimension indices like nested loops (rightmost varies fastest).
@@ -240,13 +220,13 @@ class FrameRouter:
         self._finished = True
 
     @property
-    def position_keys(self) -> list[str]:
-        """Position names in acquisition order.
+    def positions(self) -> list[Position]:
+        """Position objects in acquisition order.
 
         Backends use this to create arrays/files for each position before
-        iteration begins.
+        iteration begins. Each Position contains name, row, and column metadata.
         """
-        return list(self._position_names)
+        return list(self._positions)
 
     @property
     def storage_dimension_names(self) -> list[str]:

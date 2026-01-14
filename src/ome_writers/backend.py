@@ -39,9 +39,9 @@ Example Usage
 ...     raise ValueError(backend.compatibility_error(settings))
 >>>
 >>> backend.prepare(settings, router)
->>> for pos_key, idx in router:
+>>> for pos_info, idx in router:
 ...     frame = get_next_frame()
-...     backend.write(pos_key, idx, frame)
+...     backend.write(pos_info, idx, frame)
 >>> backend.finalize()
 """
 
@@ -55,7 +55,7 @@ if TYPE_CHECKING:
 
     import numpy as np
 
-    from ome_writers.router import FrameRouter
+    from ome_writers.router import FrameRouter, PositionInfo
     from ome_writers.schema import AcquisitionSettings
 
 
@@ -108,7 +108,7 @@ class ArrayBackend(ABC):
             settings (dimensions, dtype, chunking, etc.) from this object.
         router
             The FrameRouter that will be used for iteration. Backends can use
-            `router.position_keys` to get the list of positions to create.
+            `router.positions` to get the list of Position objects to create.
 
         Raises
         ------
@@ -121,7 +121,7 @@ class ArrayBackend(ABC):
     @abstractmethod
     def write(
         self,
-        position_key: str,
+        position_info: PositionInfo,
         index: tuple[int, ...],
         frame: np.ndarray,
     ) -> None:
@@ -129,9 +129,10 @@ class ArrayBackend(ABC):
 
         Parameters
         ----------
-        position_key
-            Identifier for the position/array to write to. For single-position
-            data, this is typically "0".
+        position_info
+            Tuple of (position_index, Position) identifying which position to
+            write to. The index provides unique identity for array lookup, while
+            the Position object contains metadata (name, row, column).
         index
             N-dimensional index in storage order (excludes Y/X spatial dims).
             Sequential backends may ignore this parameter.

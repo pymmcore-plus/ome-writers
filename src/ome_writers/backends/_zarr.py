@@ -17,7 +17,7 @@ from ome_writers.schema import (
 if TYPE_CHECKING:
     import numpy as np
 
-    from ome_writers.router import FrameRouter
+    from ome_writers.router import FrameRouter, PositionInfo
     from ome_writers.schema import AcquisitionSettings, ArraySettings
 
 
@@ -32,7 +32,7 @@ class ZarrBackend(ArrayBackend):
     """
 
     def __init__(self) -> None:
-        self._arrays: dict[str, Any] = {}
+        self._arrays: list[Any] = []  # Indexed by position index
         self._finalized = False
 
     # -------------------------------------------------------------------------
@@ -69,7 +69,7 @@ class ZarrBackend(ArrayBackend):
         self._finalized = False
         array_settings = settings.array_settings
         group_path = Path(settings.root_path).expanduser().resolve()
-        position_keys = router.position_keys
+        positions = router.positions
 
         # Build storage dimensions (excluding position, in storage order)
         storage_dims = _get_storage_dims(array_settings)
@@ -82,13 +82,11 @@ class ZarrBackend(ArrayBackend):
 
         # Plate mode: use PlateBuilder for well/field hierarchy
         if settings.plate is not None:
-            self._prepare_plate(
-                settings, group_path, image, shape, chunks, position_keys
-            )
+            self._prepare_plate(settings, group_path, image, shape, chunks, positions)
             return
 
         # Non-plate mode: use simple image or Bf2RawBuilder
-        if len(position_keys) == 1:
+        if len(positions) == 1:
             _, arrays = prepare_image(
                 group_path,
                 image,
@@ -97,8 +95,8 @@ class ZarrBackend(ArrayBackend):
                 chunks=chunks,
                 writer="zarr",
             )
-            # Map position key to the array (dataset path is "0")
-            self._arrays = {position_keys[0]: arrays["0"]}
+            # Single position -> single array at index 0
+            self._arrays = [arrays["0"]]
         else:
             builder = Bf2RawBuilder(
                 group_path,
@@ -106,14 +104,13 @@ class ZarrBackend(ArrayBackend):
                 chunks=chunks,
                 writer="zarr",
             )
-            for pos_key in position_keys:
-                builder.add_series(pos_key, image, [(shape, array_settings.dtype)])
+            for pos in positions:
+                builder.add_series(pos.name, image, [(shape, array_settings.dtype)])
 
             _, all_arrays = builder.prepare()
 
-            # Remap keys: "pos_key/0" -> "pos_key"
-            for pos_key in position_keys:
-                self._arrays[pos_key] = all_arrays[f"{pos_key}/0"]
+            # Build array list indexed by position order
+            self._arrays = [all_arrays[f"{pos.name}/0"] for pos in positions]
 
     def _prepare_plate(
         self,
@@ -122,17 +119,12 @@ class ZarrBackend(ArrayBackend):
         image: Any,
         shape: tuple[int, ...],
         chunks: tuple[int, ...],
-        position_keys: list[str],
+        positions: list[Position],
     ) -> None:
         """Initialize plate structure using PlateBuilder."""
         from yaozarrs.write.v05 import PlateBuilder
 
         array_settings = settings.array_settings
-
-        # Get positions from the PositionDimension
-        positions = _get_positions(array_settings)
-        if positions is None:
-            raise ValueError("Plate mode requires a PositionDimension with positions.")
 
         # Validate all positions have row/column for plate mode
         for i, pos in enumerate(positions):
@@ -142,34 +134,19 @@ class ZarrBackend(ArrayBackend):
                     "defined for plate mode."
                 )
 
-        # Validate position names are unique (required for correct routing)
-        pos_names = [p.name for p in positions]
-        if len(pos_names) != len(set(pos_names)):
-            seen = set()
-            duplicates = []
-            for name in pos_names:
-                if name in seen:
-                    duplicates.append(name)
-                seen.add(name)
-            raise ValueError(
-                f"Position names must be unique for plate mode. "
-                f"Duplicates found: {duplicates}"
-            )
-
-        # Group positions by (row, column) to identify wells and assign FOV indices
+        # Group positions by (row, column) to identify wells
         # well_positions: {(row, col): [(pos_index, pos), ...]}
         well_positions: dict[tuple[str, str], list[tuple[int, Position]]] = {}
         for i, pos in enumerate(positions):
             key = (pos.row, pos.column)  # type: ignore[arg-type]
             well_positions.setdefault(key, []).append((i, pos))
 
-        # Build mapping: position_key -> well/fov path (e.g., "A1" -> "A/1/0")
-        pos_key_to_path: dict[str, str] = {}
+        # Build mapping: position_index -> array path using Position.name as FOV path
+        # e.g., Position(name="p0", row="A", column="1") -> "A/1/p0"
+        pos_idx_to_path: dict[int, str] = {}
         for (row, col), pos_list in well_positions.items():
-            for fov_idx, (pos_idx, _) in enumerate(pos_list):
-                # Use position name as key, map to "row/col/fov" path
-                pos_key = position_keys[pos_idx]
-                pos_key_to_path[pos_key] = f"{row}/{col}/{fov_idx}"
+            for pos_idx, pos in pos_list:
+                pos_idx_to_path[pos_idx] = f"{row}/{col}/{pos.name}"
 
         # Build yaozarrs Plate metadata from settings.plate
         plate_meta = _build_plate_metadata(settings.plate, well_positions)
@@ -184,24 +161,24 @@ class ZarrBackend(ArrayBackend):
         )
 
         for (row, col), pos_list in well_positions.items():
-            # Each position in this well becomes a FOV
+            # Each position in this well becomes a FOV, using Position.name as path
             images_dict = {
-                str(fov_idx): (image, [(shape, array_settings.dtype)])
-                for fov_idx, _ in enumerate(pos_list)
+                pos.name: (image, [(shape, array_settings.dtype)])
+                for _, pos in pos_list
             }
             builder.add_well(row=row, col=col, images=images_dict)
 
         _, all_arrays = builder.prepare()
 
-        # Map position keys to arrays
-        # all_arrays has keys like "A/1/0/0" (row/col/fov/dataset)
-        for pos_key, path in pos_key_to_path.items():
-            # path is "row/col/fov", array key is "row/col/fov/0" (dataset 0)
-            self._arrays[pos_key] = all_arrays[f"{path}/0"]
+        # Build array list indexed by position order
+        # all_arrays has keys like "A/1/p0/0" (row/col/fov_name/dataset)
+        self._arrays = [
+            all_arrays[f"{pos_idx_to_path[i]}/0"] for i in range(len(positions))
+        ]
 
     def write(
         self,
-        position_key: str,
+        position_info: PositionInfo,
         index: tuple[int, ...],
         frame: np.ndarray,
     ) -> None:
@@ -214,7 +191,8 @@ class ZarrBackend(ArrayBackend):
         if not self._arrays:
             raise RuntimeError("Backend not prepared. Call prepare() first.")
 
-        array = self._arrays[position_key]
+        pos_idx, _pos = position_info
+        array = self._arrays[pos_idx]
         current_shape = array.shape
 
         # Check if we need to resize for any dimension (excluding Y, X)
@@ -230,7 +208,7 @@ class ZarrBackend(ArrayBackend):
         if needs_resize:
             array.resize(new_shape)
 
-        self._arrays[position_key][index] = frame
+        self._arrays[pos_idx][index] = frame
 
     def finalize(self) -> None:
         """Flush and release resources."""
@@ -315,14 +293,6 @@ def _dim_to_axis(dim: Dimension) -> Any:
         return v05.SpaceAxis(name=name, unit=unit)
     else:
         return v05.CustomAxis(name=name)
-
-
-def _get_positions(settings: ArraySettings) -> list[Position] | None:
-    """Extract Position list from settings if PositionDimension exists."""
-    for dim in settings.dimensions:
-        if isinstance(dim, PositionDimension):
-            return dim.positions
-    return None
 
 
 def _build_plate_metadata(
