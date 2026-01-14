@@ -4,12 +4,7 @@ from typing import cast
 
 import numpy as np
 
-from ome_writers import (
-    AcquisitionSettings,
-    ArraySettings,
-    Dimension,
-    create_stream,
-)
+from ome_writers import AcquisitionSettings, ArraySettings, Dimension, create_stream
 
 dimensions = [
     Dimension(name="t", count=10, chunk_size=1, type="time"),
