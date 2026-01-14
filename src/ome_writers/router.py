@@ -116,8 +116,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import numpy as np
-
 from .schema_pydantic import ArraySettings, Dimension, PositionDimension
 
 if TYPE_CHECKING:
@@ -145,7 +143,7 @@ class FrameRouter:
 
         # Parse dimensions, tracking where position appears in the order.
         # all_sizes includes position; index_dim_names excludes it.
-        all_sizes: list[int] = []
+        all_sizes: list[int | None] = []
         index_dims: list[Dimension] = []
         position_axis: int | None = None
         position_names: list[str] = ["0"]  # default single position
@@ -167,30 +165,34 @@ class FrameRouter:
         self._position_names = position_names
         self._index_dim_names = index_dims
 
-        # Total frames across all positions
-        self._total_frames = int(np.prod(self._all_sizes)) if self._all_sizes else 1
-
         # Compute storage order permutation (for non-position dimensions only)
         self._storage_dim_names = _resolve_storage_order(
             index_dims, settings.storage_order
         )
         self._permutation = _compute_permutation(index_dims, self._storage_dim_names)
 
-        # Iteration state
-        self._current_frame = 0
+        self.reset()
 
     def __iter__(self) -> Iterator[tuple[str, tuple[int, ...]]]:
         """Return iterator, resetting to first frame."""
-        self._current_frame = 0
+        self.reset()
         return self
 
+    def reset(self) -> None:
+        self._dim_indices = [0] * len(self._all_sizes)
+        self._finished = False
+
     def __next__(self) -> tuple[str, tuple[int, ...]]:
-        """Yield next (position_key, storage_index) tuple."""
-        if self._current_frame >= self._total_frames:
+        """Yield next (position_key, storage_index) tuple.
+
+        For finite dimensions, iteration stops after all frames.
+        For unlimited dimensions, iteration never stops - caller must break.
+        """
+        if self._finished or not self._all_sizes:
             raise StopIteration
 
-        # Compute full N-dimensional index (including position if present)
-        full_idx = self._linear_to_nd(self._current_frame, self._all_sizes)
+        # Use current dimension indices
+        full_idx = tuple(self._dim_indices)
 
         # Extract position and build storage index
         if self._position_axis is not None:
@@ -207,20 +209,35 @@ class FrameRouter:
         storage_idx = tuple(acq_idx[p] for p in self._permutation)
         pos_key = self._position_names[pos_idx]
 
-        self._current_frame += 1
+        # Increment indices for next iteration
+        self._increment_indices()
+
         return pos_key, storage_idx
 
-    @staticmethod
-    def _linear_to_nd(linear_idx: int, sizes: tuple[int, ...]) -> tuple[int, ...]:
-        """Convert linear index to N-dimensional index (row-major order)."""
-        if not sizes:
-            return ()
-        indices: list[int] = []
-        remaining = linear_idx
-        for size in reversed(sizes):
-            indices.append(remaining % size)
-            remaining //= size
-        return tuple(reversed(indices))
+    def _increment_indices(self) -> None:
+        """Increment dimension indices like nested loops (rightmost varies fastest).
+
+        Sets _finished flag when all finite dimensions have been exhausted.
+        For unlimited dimensions, never sets _finished.
+        """
+        # Start from rightmost dimension (varies fastest)
+        for i in range(len(self._dim_indices) - 1, -1, -1):
+            self._dim_indices[i] += 1
+
+            # Check if we've exceeded the limit for this dimension
+            size_limit = self._all_sizes[i]
+            if size_limit is None:
+                # Unlimited dimension - never wraps, iteration continues indefinitely
+                return
+            elif self._dim_indices[i] < size_limit:
+                # Still within bounds for this dimension
+                return
+
+            # Exceeded this dimension's limit - reset and carry to next dimension
+            self._dim_indices[i] = 0
+
+        # Wrapped all dimensions - iteration is complete
+        self._finished = True
 
     @property
     def position_keys(self) -> list[str]:

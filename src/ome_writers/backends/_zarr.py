@@ -39,29 +39,14 @@ class ZarrBackend(ArrayBackend):
         ZarrBackend supports:
         - Any storage order (random-access writes)
         - Multi-position data
-
-        Currently does not support:
-        - Unlimited dimensions (count=None)
+        - Unlimited dimensions (count=None) with automatic resizing
         """
-        if settings.arrays is None:
-            return False
-        for dim in settings.arrays.dimensions:
-            if isinstance(dim, Dimension) and dim.count is None:
-                return False
-        return True
+        return settings.arrays is not None
 
     def compatibility_error(self, settings: AcquisitionSettings) -> str | None:
         if self.is_compatible(settings):
             return None
-        if settings.arrays is None:
-            return "ZarrBackend requires arrays to be set."
-        for dim in settings.arrays.dimensions:
-            if isinstance(dim, Dimension) and dim.count is None:
-                return (
-                    f"ZarrBackend does not yet support unlimited dimensions "
-                    f"(dimension '{dim.name}' has count=None)."
-                )
-        return "Settings are incompatible with ZarrBackend."
+        return "ZarrBackend requires arrays to be set."
 
     # -------------------------------------------------------------------------
     # Lifecycle
@@ -91,7 +76,8 @@ class ZarrBackend(ArrayBackend):
 
         # Build storage dimensions (excluding position, in storage order)
         storage_dims = _get_storage_dims(array_settings)
-        shape = tuple(d.count for d in storage_dims)
+        # For unlimited dimensions (count=None), start with size 1
+        shape = tuple(d.count if d.count is not None else 1 for d in storage_dims)
         chunks = _get_chunks(storage_dims)
 
         # Build yaozarrs Image metadata
@@ -129,11 +115,31 @@ class ZarrBackend(ArrayBackend):
         index: tuple[int, ...],
         frame: np.ndarray,
     ) -> None:
-        """Write frame to the specified location."""
+        """Write frame to the specified location.
+
+        For unlimited dimensions, automatically resizes the array as needed.
+        """
         if self._finalized:
             raise RuntimeError("Cannot write after finalize().")
         if not self._arrays:
             raise RuntimeError("Backend not prepared. Call prepare() first.")
+
+        array = self._arrays[position_key]
+        current_shape = array.shape
+
+        # Check if we need to resize for any dimension (excluding Y, X)
+        new_shape = list(current_shape)
+        needs_resize = False
+
+        for i, idx_val in enumerate(index):
+            if idx_val >= current_shape[i]:
+                # Grow to accommodate this index
+                new_shape[i] = idx_val + 1
+                needs_resize = True
+
+        if needs_resize:
+            array.resize(new_shape)
+
         self._arrays[position_key][index] = frame
 
     def finalize(self) -> None:

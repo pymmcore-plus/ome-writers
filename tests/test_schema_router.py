@@ -208,8 +208,76 @@ def test_position_with_plate_context() -> None:
     assert pos_dim.positions[2].column == "2"
 
 
+def test_router_unlimited_dimension() -> None:
+    """Test router with unlimited dimension doesn't auto-stop."""
+    settings = ArraySettings(
+        dimensions=[
+            Dimension(name="t", count=None, type="time"),  # Unlimited
+            Dimension(name="c", count=2, type="channel"),
+            Dimension(name="y", count=64, type="space"),
+            Dimension(name="x", count=64, type="space"),
+        ],
+        dtype="uint16",
+    )
+    router = FrameRouter(settings)
+
+    # Iterate manually, collecting first N frames
+    results = []
+    for i, (pos_key, idx) in enumerate(router):
+        results.append((pos_key, idx))
+        if i >= 9:  # Stop after 10 frames (5 timepoints x 2 channels)
+            break
+
+    # Should get frames for t=0..4, c=0..1 (rightmost varies fastest)
+    expected = [
+        ("0", (0, 0)),
+        ("0", (0, 1)),
+        ("0", (1, 0)),
+        ("0", (1, 1)),
+        ("0", (2, 0)),
+        ("0", (2, 1)),
+        ("0", (3, 0)),
+        ("0", (3, 1)),
+        ("0", (4, 0)),
+        ("0", (4, 1)),
+    ]
+    assert results == expected
+
+
+def test_router_unlimited_with_positions() -> None:
+    """Test router with unlimited dimension and positions."""
+    settings = ArraySettings(
+        dimensions=[
+            Dimension(name="t", count=None, type="time"),
+            PositionDimension(positions=[Position(name="A1"), Position(name="B2")]),
+            Dimension(name="y", count=16, type="space"),
+            Dimension(name="x", count=16, type="space"),
+        ],
+        dtype="uint16",
+    )
+    router = FrameRouter(settings)
+
+    # Get first 6 frames
+    results = []
+    for i, (pos_key, idx) in enumerate(router):
+        results.append((pos_key, idx))
+        if i >= 5:
+            break
+
+    # t varies slowest, positions vary fastest (rightmost)
+    expected = [
+        ("A1", (0,)),
+        ("B2", (0,)),
+        ("A1", (1,)),
+        ("B2", (1,)),
+        ("A1", (2,)),
+        ("B2", (2,)),
+    ]
+    assert results == expected
+
+
 def test_plate_acquisition_patterns() -> None:
-    """Same shape (3 wells × 3 timepoints), different acquisition orders.
+    """Same shape (3 wells x 3 timepoints), different acquisition orders.
 
     Pattern 1 - Burst timelapse per well:
         Complete a 3-frame timelapse at each well before moving to the next.

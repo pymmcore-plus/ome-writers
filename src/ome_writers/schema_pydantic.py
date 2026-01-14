@@ -122,6 +122,10 @@ def _validate_dims_list(
     spatial_dims = [d for d in dims if isinstance(d, Dimension) and d.type == "space"]
     if len(spatial_dims) < 2 or dims[-2:] != spatial_dims[-2:]:
         raise ValueError("The last two dimensions must be spatial (Y and X).")
+
+    # ensure at most one PositionDimension
+    if sum(isinstance(d, PositionDimension) for d in dims) > 1:
+        raise ValueError("Only one PositionDimension is allowed.")
     return dims
 
 
