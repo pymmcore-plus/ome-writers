@@ -1,31 +1,15 @@
 from __future__ import annotations
 
 from itertools import product
-from typing import TYPE_CHECKING, cast, get_args
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import numpy.typing as npt
 
-from ._dimensions import Dimension, DimensionLabel
+from .schema_pydantic import Dimension, dims_from_standard_axes
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping, Sequence
-
-    import useq
-
-    from ._dimensions import UnitTuple
-
-
-VALID_LABELS = get_args(DimensionLabel)
-DEFAULT_UNITS: Mapping[DimensionLabel, UnitTuple | None] = {
-    "t": (1.0, "s"),
-    "z": (1.0, "um"),
-    "y": (1.0, "um"),
-    "x": (1.0, "um"),
-    "c": None,
-    "p": None,
-}
-OME_NGFF_ORDER = {"t": 0, "c": 1, "z": 2, "y": 3, "x": 4}
+    from collections.abc import Iterator, Mapping
 
 
 def fake_data_for_sizes(
@@ -54,10 +38,6 @@ def fake_data_for_sizes(
     """
     if not {"y", "x"} <= sizes.keys():  # pragma: no cover
         raise ValueError("sizes must include both 'y' and 'x'")
-    if not all(k in VALID_LABELS for k in sizes):  # pragma: no cover
-        raise ValueError(
-            f"Invalid dimension labels in sizes: {sizes.keys() - set(VALID_LABELS)}"
-        )
 
     _chunk_sizes = dict(chunk_sizes or {})
     _chunk_sizes.setdefault("y", sizes["y"])
@@ -65,17 +45,9 @@ def fake_data_for_sizes(
 
     ordered_labels = [z for z in sizes if z not in "yx"]
     ordered_labels += ["y", "x"]
-    dims = [
-        Dimension(
-            label=lbl,
-            size=sizes[lbl],
-            unit=DEFAULT_UNITS.get(lbl, None),
-            chunk_size=_chunk_sizes.get(lbl, 1),
-        )
-        for lbl in cast("list[DimensionLabel]", ordered_labels)
-    ]
+    dims = dims_from_standard_axes(sizes=sizes, chunk_shapes=_chunk_sizes)
 
-    shape = [d.size for d in dims]
+    shape = [d.count for d in dims]
     dtype = np.dtype(dtype)
     if not np.issubdtype(dtype, np.integer):  # pragma: no cover
         raise ValueError(f"Unsupported dtype: {dtype}.  Must be an integer type.")
@@ -95,76 +67,3 @@ def fake_data_for_sizes(
                 i += 1
 
     return _build_plane_generator(), dims, dtype
-
-
-def dims_from_useq(
-    seq: useq.MDASequence,
-    image_width: int,
-    image_height: int,
-    units: Mapping[str, UnitTuple | None] | None = None,
-) -> list[Dimension]:
-    """Convert a useq.MDASequence to a list of Dimensions for ome-writers.
-
-    Parameters
-    ----------
-    seq : useq.MDASequence
-        The `useq.MDASequence` to convert.
-    image_width : int
-        The expected width of the images in the stream.
-    image_height : int
-        The expected height of the images in the stream.
-    units : Mapping[str, UnitTuple | None] | None, optional
-        An optional mapping of dimension labels to their units. If `None`, defaults to
-        - "t" -> (1.0, "s")
-        - "z" -> (1.0, "um")
-        - "y" -> (1.0, "um")
-        - "x" -> (1.0, "um")
-
-    Examples
-    --------
-    A typical usage of ome-writers with useq-schema might look like this:
-
-    ```python
-    from ome_writers import create_stream, dims_from_useq
-
-    width, height = however_you_get_expected_image_dimensions()
-    dims = dims_from_useq(seq, image_width=width, image_height=height)
-
-    with create_stream(
-        path=...,
-        dimensions=dims,
-        dtype=np.uint16,
-        backend=...,
-    ) as stream:
-        for frame in whatever_generates_your_data():
-            stream.append(frame)
-    ```
-    """
-    try:
-        from useq import MDASequence
-    except ImportError:
-        # if we can't import MDASequence, then seq must not be a MDASequence
-        raise ValueError("seq must be a useq.MDASequence") from None
-    else:
-        if not isinstance(seq, MDASequence):
-            raise ValueError("seq must be a useq.MDASequence")
-
-    _units: Mapping[str, UnitTuple | None] = {
-        **DEFAULT_UNITS,  # type: ignore[dict-item]
-        **(units or {}),
-    }
-
-    dims: list[Dimension] = []
-    for ax, size in seq.sizes.items():
-        if size:
-            # all of the useq axes are the same as the ones used here.
-            dim_label = cast("DimensionLabel", str(ax))
-            if dim_label not in _units:
-                raise ValueError(f"Unsupported axis for OME: {ax}")
-            dims.append(Dimension(label=dim_label, size=size, unit=_units[dim_label]))
-
-    return [
-        *dims,
-        Dimension(label="y", size=image_height, unit=_units["y"]),
-        Dimension(label="x", size=image_width, unit=_units["x"]),
-    ]

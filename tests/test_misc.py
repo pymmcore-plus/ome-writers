@@ -2,42 +2,24 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import numpy as np
-import pytest
 
-from ome_writers._dimensions import Dimension
-from ome_writers._util import dims_from_useq, fake_data_for_sizes
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from ome_writers._util import fake_data_for_sizes
 
 
-def test_fake_data_2d_only() -> None:
+def test_fake_data() -> None:
     """Test fake_data_for_sizes with 2D-only image."""
+    # 2d only
     data_gen, _dims, dtype = fake_data_for_sizes(sizes={"y": 32, "x": 32})
-
     frames = list(data_gen)
     assert len(frames) == 1
     assert frames[0].shape == (32, 32)
     assert dtype == np.uint16
 
-
-def test_dims_from_useq_unsupported_axis() -> None:
-    """Test dims_from_useq with unsupported axis type."""
-    pytest.importorskip("useq")
-    from useq import MDASequence
-
-    # This should work fine with standard axes
-    seq = MDASequence(
-        time_plan={"interval": 0.1, "loops": 2},  # type: ignore[arg-type]
-    )
-    dims = dims_from_useq(seq, image_width=32, image_height=32)
-    assert len(dims) == 3  # t, y, x
-
-
-def test_dims_from_useq_invalid_input() -> None:
-    """Test dims_from_useq with invalid input."""
-    with pytest.raises(ValueError, match=r"seq must be a useq\.MDASequence"):
-        dims_from_useq("not a sequence", image_width=32, image_height=32)  # type: ignore[arg-type]
+    # Complex 6d
+    sizes = {"p": 2, "t": 3, "c": 4, "z": 5, "y": 16, "x": 16}
+    data_gen, _dims, dtype = fake_data_for_sizes(sizes=sizes, dtype=np.uint8)
+    frames = list(data_gen)
+    assert len(frames) == 2 * 3 * 4 * 5
+    assert frames[0].shape == (16, 16)
+    assert dtype == np.uint8
