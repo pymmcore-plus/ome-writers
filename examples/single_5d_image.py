@@ -9,9 +9,9 @@ from ome_writers import AcquisitionSettings, ArraySettings, Dimension, create_st
 dimensions = [
     Dimension(name="t", count=10, chunk_size=1, type="time"),
     Dimension(name="c", count=2, chunk_size=1, type="channel"),
-    Dimension(name="z", count=5, chunk_size=1, type="space"),
-    Dimension(name="y", count=256, chunk_size=64, type="space"),
-    Dimension(name="x", count=256, chunk_size=64, type="space"),
+    Dimension(name="z", count=5, chunk_size=1, type="space", scale=5),
+    Dimension(name="y", count=256, chunk_size=64, type="space", scale=0.1),
+    Dimension(name="x", count=256, chunk_size=64, type="space", scale=0.1),
 ]
 
 # or... with the helper function:

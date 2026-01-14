@@ -25,6 +25,13 @@ class _BaseModel(BaseModel):
 
 
 class StandardAxis(str, Enum):
+    """Standard axis names.
+
+    Dimension names are fundamentally arbitrary strings, but these standard
+    names are commonly used and have well-defined meanings in terms of dimension
+    type and units.  This is used in `dims_from_standard_axes` helper function.
+    """
+
     X = "x"
     Y = "y"
     Z = "z"
@@ -71,6 +78,11 @@ class Position(_BaseModel):
     name: str
     row: str | None = None
     column: str | None = None
+    # TODO
+    # These could be used to specify the coordinateTransform.translate for 
+    # different positions
+    # x_translation: float | None = None
+    # y_translation: float | None = None
 
     @model_validator(mode="before")
     @classmethod
