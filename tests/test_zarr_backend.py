@@ -14,6 +14,7 @@ from ome_writers.schema import (
     AcquisitionSettings,
     ArraySettings,
     Dimension,
+    Plate,
     Position,
     PositionDimension,
     dims_from_standard_axes,
@@ -173,3 +174,118 @@ def test_zarr_backend_unlimited_multiposition(tmp_path: Path) -> None:
     store = zarr.open(settings.root_path, mode="r")
     assert store["A1/0"].shape == (3, 16, 16)
     assert store["B2/0"].shape == (3, 16, 16)
+
+
+def test_zarr_backend_plate(tmp_path: Path) -> None:
+    """Test backend creates plate structure with wells and FOVs."""
+    array_settings = ArraySettings(
+        dimensions=[
+            Dimension(name="t", count=2, type="time"),
+            PositionDimension(
+                positions=[
+                    Position(name="A1", row="A", column="1"),
+                    Position(name="A2", row="A", column="2"),
+                    Position(name="C4_0", row="C", column="4"),
+                    Position(name="C4_1", row="C", column="4"),  # 2 FOVs in same well
+                ]
+            ),
+            Dimension(name="c", count=2, type="channel"),
+            Dimension(name="y", count=16, type="space"),
+            Dimension(name="x", count=16, type="space"),
+        ],
+        dtype="uint16",
+    )
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "plate.ome.zarr"),
+        array_settings=array_settings,
+        plate=Plate(
+            name="Test Plate",
+            row_names=["A", "B", "C"],
+            column_names=["1", "2", "3", "4"],
+        ),
+        overwrite=True,
+    )
+    router = FrameRouter(array_settings)
+    backend = ZarrBackend()
+
+    assert not backend.is_incompatible(settings)
+    backend.prepare(settings, router)
+
+    # Write all frames
+    for pos_key, idx in router:
+        backend.write(pos_key, idx, np.zeros((16, 16), dtype=np.uint16))
+
+    backend.finalize()
+
+    # Verify plate structure
+    store = zarr.open(settings.root_path, mode="r")
+
+    # Check well A/1 has 1 FOV
+    assert store["A/1/0/0"].shape == (2, 2, 16, 16)
+
+    # Check well A/2 has 1 FOV
+    assert store["A/2/0/0"].shape == (2, 2, 16, 16)
+
+    # Check well C/4 has 2 FOVs
+    assert store["C/4/0/0"].shape == (2, 2, 16, 16)
+    assert store["C/4/1/0"].shape == (2, 2, 16, 16)
+
+    # Validate the zarr store
+    yaozarrs.validate_zarr_store(settings.root_path)
+
+
+def test_zarr_backend_plate_requires_unique_names(tmp_path: Path) -> None:
+    """Test that plate mode requires unique position names."""
+    array_settings = ArraySettings(
+        dimensions=[
+            Dimension(name="t", count=2, type="time"),
+            PositionDimension(
+                positions=[
+                    Position(name="C4", row="C", column="4"),
+                    Position(name="C4", row="C", column="4"),  # Duplicate name!
+                ]
+            ),
+            Dimension(name="y", count=16, type="space"),
+            Dimension(name="x", count=16, type="space"),
+        ],
+        dtype="uint16",
+    )
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "plate.ome.zarr"),
+        array_settings=array_settings,
+        plate=Plate(row_names=["C"], column_names=["4"]),
+        overwrite=True,
+    )
+    router = FrameRouter(array_settings)
+    backend = ZarrBackend()
+
+    with pytest.raises(ValueError, match="Position names must be unique"):
+        backend.prepare(settings, router)
+
+
+def test_zarr_backend_plate_requires_row_column(tmp_path: Path) -> None:
+    """Test that plate mode requires row/column on positions."""
+    array_settings = ArraySettings(
+        dimensions=[
+            Dimension(name="t", count=2, type="time"),
+            PositionDimension(
+                positions=[
+                    Position(name="A1"),  # Missing row/column
+                ]
+            ),
+            Dimension(name="y", count=16, type="space"),
+            Dimension(name="x", count=16, type="space"),
+        ],
+        dtype="uint16",
+    )
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "plate.ome.zarr"),
+        array_settings=array_settings,
+        plate=Plate(row_names=["A"], column_names=["1"]),
+        overwrite=True,
+    )
+    router = FrameRouter(array_settings)
+    backend = ZarrBackend()
+
+    with pytest.raises(ValueError, match="must have row and column"):
+        backend.prepare(settings, router)
