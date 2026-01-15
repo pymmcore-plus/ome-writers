@@ -20,7 +20,6 @@ from ome_writers import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    import tensorstore
 
 # NOTES:
 # - All root_paths will be replaced with temporary directories during testing.
@@ -62,7 +61,20 @@ CASES = [
         array_settings=ArraySettings(
             dimensions=[
                 PositionDimension(positions=["Pos0", "Pos1"]),
-                D(name="MyZ", count=4, type="space"),
+                D(name="MyZ", count=3, type="space"),
+                D(name="MyY", count=128, chunk_size=64, type="space", scale=0.1),
+                D(name="MyX", count=128, chunk_size=64, type="space", scale=0.1),
+            ],
+            dtype="uint16",
+        ),
+    ),
+    # position interleaved with other dimensions
+    AcquisitionSettings(
+        root_path="tmp",
+        array_settings=ArraySettings(
+            dimensions=[
+                D(name="t", count=3, type="time"),
+                PositionDimension(positions=["Pos0", "Pos1"]),
                 D(name="MyY", count=128, chunk_size=64, type="space", scale=0.1),
                 D(name="MyX", count=128, chunk_size=64, type="space", scale=0.1),
             ],
@@ -128,6 +140,11 @@ def _validate_images(
         assert isinstance(image, v05.Image), (
             f"Expected Image group at {image_path}, got {type(image)}"
         )
+
+        # NOTE:
+        # we're validating on disk data with tensorstore rather than zarr-python
+        # due to zarr-python's dropped support for python versions that are still
+        # before EOL (i.e. SPEC-0)
         try:
             import tensorstore
         except ImportError:
@@ -136,21 +153,19 @@ def _validate_images(
 
         array0 = group["0"].to_tensorstore()  # type: ignore[possibly-unbound-attribute]
         assert isinstance(array0, tensorstore.TensorStore)
-        assert array0.dtype == np.dtype(dtype)
+
+        # check on disk shape, dtype, dimension order and labels
         assert array0.shape == tuple(d.count for d in storage_dims)
-        assert [d.label for d in array0.domain] == [d.name for d in storage_dims]  # type: ignore
+        assert array0.dtype == np.dtype(dtype)
+        expected_dim_order = [d.name for d in storage_dims]
+        assert [d.label for d in array0.domain] == expected_dim_order  # type: ignore
 
         # validate chunking
-        _validate_chunks(array0, storage_dims)
+        expected_chunk_shape = tuple(d.chunk_size or 1 for d in storage_dims)
+        actual_chunk_shape = array0.chunk_layout.read_chunk.shape
+        assert actual_chunk_shape == expected_chunk_shape, (
+            f"expected {expected_chunk_shape}, got {actual_chunk_shape}"
+        )
 
         # validate sharding
         # TODO
-
-
-def _validate_chunks(array: tensorstore.TensorStore, storage_dims: list[D]) -> None:
-    # TODO: this expectation should be codified somewhere central, maybe in the router
-    expected_chunk_shape = tuple(d.chunk_size or 1 for d in storage_dims)
-    actual_chunk_shape = array.chunk_layout.read_chunk.shape
-    assert actual_chunk_shape == expected_chunk_shape, (
-        f"expected {expected_chunk_shape}, got {actual_chunk_shape}"
-    )

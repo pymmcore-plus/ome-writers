@@ -167,19 +167,23 @@ def _validate_unique_names_per_well(positions: list[Position]) -> None:
     # Group positions by (row, column) - only for positions with both defined
     wells: dict[tuple[str, str], list[str]] = {}
     for pos in positions:
-        if pos.row is not None and pos.column is not None:
-            key = (pos.row, pos.column)
-            wells.setdefault(key, []).append(pos.name)
+        key = (pos.row, pos.column)
+        wells.setdefault(key, []).append(pos.name)
 
     # Check for duplicates within each well
     for (row, col), names in wells.items():
         if len(names) != len(set(names)):
             seen: set[str] = set()
             duplicates = [n for n in names if n in seen or seen.add(n)]  # type: ignore[func-returns-value]
-            raise ValueError(
-                f"Position names must be unique within each well. "
-                f"Well ({row}, {col}) has duplicate names: {duplicates}"
-            )
+            if row is None and col is None:
+                raise ValueError(
+                    "All positions without row/column must have unique names."
+                )
+            else:
+                raise ValueError(
+                    f"Position names must be unique within each well. "
+                    f"Well ({row}, {col}) has duplicate names: {duplicates}"
+                )
 
 
 class ArraySettings(_BaseModel):
@@ -222,6 +226,32 @@ class AcquisitionSettings(_BaseModel):
     plate: Plate | None = None
     overwrite: bool = False
     backend: str = "auto"
+
+    @model_validator(mode="after")
+    def _validate_plate_positions(self) -> AcquisitionSettings:
+        """Validate plate mode requirements."""
+        if self.plate is not None:
+            # Ensure there is a PositionDimension
+            # and that all positions have row/column assigned
+            for dim in self.array_settings.dimensions:
+                if isinstance(dim, PositionDimension):
+                    missing = [
+                        pos.name
+                        for pos in dim.positions
+                        if pos.row is None or pos.column is None
+                    ]
+                    if missing:
+                        raise ValueError(
+                            f"All positions must have row and column for plate mode. "
+                            f"Missing row/column for positions: {missing}"
+                        )
+                    break
+            else:
+                raise ValueError(
+                    "Plate mode requires a PositionDimension in array settings."
+                )
+
+        return self
 
 
 # ---------------------------------------------------------------------------

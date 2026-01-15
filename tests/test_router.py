@@ -5,13 +5,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 import pytest
-from pydantic import ValidationError
 
 from ome_writers._router import FrameRouter
 from ome_writers.schema import (
     ArraySettings,
     Dimension,
-    Plate,
     Position,
     PositionDimension,
     dims_from_standard_axes,
@@ -146,75 +144,6 @@ def test_router_positions() -> None:
     settings = ArraySettings(dimensions=dims_from_standard_axes(sizes), dtype="uint16")
     positions = FrameRouter(settings).positions
     assert [p.name for p in positions] == ["well_A", "well_B", "well_C"]
-
-
-def test_schema_unique_dimension_names() -> None:
-    """Test that duplicate dimension names raise ValueError."""
-    with pytest.raises(ValidationError, match="unique"):
-        ArraySettings(
-            dimensions=[
-                Dimension(name="t", count=10),
-                Dimension(name="t", count=5),
-                Dimension(name="y", count=64, type="space"),
-                Dimension(name="x", count=64, type="space"),
-            ],
-            dtype="uint16",
-        )
-
-
-def test_schema_unlimited_first_only() -> None:
-    """Test that only first dimension can be unlimited (count=None)."""
-    # First dimension unlimited - OK
-    ArraySettings(
-        dimensions=[
-            Dimension(name="t", count=None),
-            Dimension(name="y", count=64, type="space"),
-            Dimension(name="x", count=64, type="space"),
-        ],
-        dtype="uint16",
-    )
-
-    # Second dimension unlimited - error
-    with pytest.raises(
-        ValidationError, match=" Only the first dimension may be unbounded"
-    ):
-        ArraySettings(
-            dimensions=[
-                Dimension(name="t", count=10),
-                Dimension(name="c", count=None),
-                Dimension(name="y", count=64, type="space"),
-                Dimension(name="x", count=64, type="space"),
-            ],
-            dtype="uint16",
-        )
-
-
-def test_plate_metadata() -> None:
-    """Test Plate is structural metadata only."""
-    plate = Plate(
-        row_names=["A", "B", "C", "D"],
-        column_names=["1", "2", "3"],
-        name="MyPlate",
-    )
-    assert len(plate.row_names) == 4
-    assert len(plate.column_names) == 3
-    assert plate.name == "MyPlate"
-
-
-def test_position_with_plate_context() -> None:
-    """Test Position can carry plate row/column info."""
-    pos_dim = PositionDimension(
-        positions=[
-            Position(name="A1/0", row="A", column="1"),
-            Position(name="A1/1", row="A", column="1"),
-            Position(name="B2/0", row="B", column="2"),
-        ]
-    )
-
-    assert pos_dim.count == 3
-    assert pos_dim.names == ["A1/0", "A1/1", "B2/0"]
-    assert pos_dim.positions[0].row == "A"
-    assert pos_dim.positions[2].column == "2"
 
 
 def test_router_unlimited_dimension() -> None:

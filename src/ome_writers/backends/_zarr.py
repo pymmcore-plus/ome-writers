@@ -55,14 +55,6 @@ class YaozarrsBackend(ArrayBackend):
 
         # Plate mode
         if settings.plate is not None:
-            # Validate and group positions
-            for i, pos in enumerate(positions):
-                if pos.row is None or pos.column is None:
-                    raise ValueError(
-                        f"Position '{pos.name}' (index {i}) must have row and "
-                        "column for plate mode."
-                    )
-
             # mapping of {(row, column): [(position_index, Position), ...]}
             well_positions: dict[tuple[str, str], list[PositionInfo]] = {}
             for i, pos in enumerate(positions):
