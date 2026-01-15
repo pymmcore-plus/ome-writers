@@ -174,6 +174,17 @@ def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:
             ) from e
         else:
             backend = TiffBackend()
+    elif requested_backend == "acquire-zarr":
+        try:
+            from .backends._acquire_zarr import AcquireZarrBackend
+        except ImportError as e:
+            raise ValueError(
+                "AcquireZarr backend requested but 'acquire-zarr' package is "
+                "not installed. "
+                "Install with: pip install acquire-zarr"
+            ) from e
+        else:
+            backend = AcquireZarrBackend()
 
     if backend is None:
         raise ValueError(
