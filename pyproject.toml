@@ -31,7 +31,7 @@ dependencies = ["numpy>=2", "typing-extensions>=4.10.0", "yaozarrs>=0.2.0"]
 [project.optional-dependencies]
 tensorstore = ["yaozarrs[write-tensorstore]>=0.2.0"]
 zarr = ["yaozarrs[write-zarr]>=0.2.0"]
-acquire-zarr = ["acquire-zarr>=0.5.2"]
+acquire-zarr = ["acquire-zarr>=0.6.0"]
 tifffile = ["tifffile>=2024.8.30", "ome-types>=0.6.1", "pydantic>=2.8"]
 all = ["ome-writers[tensorstore,zarr,acquire-zarr,tifffile]"]
 
