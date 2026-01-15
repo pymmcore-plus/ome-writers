@@ -83,16 +83,22 @@ class AcquireZarrBackend(ArrayBackend):
                 )
             shutil.rmtree(self._root_path)
 
-        self._is_hcs = False
-        if settings.plate is not None:
-            self._is_hcs = True
-            raise NotImplementedError(
-                "AcquireZarrBackend does not yet support HCS (plates)."
-            )
-
         # Convert to az dimensions
         az_dims = [_to_acquire_dim(dim) for dim in storage_dims]
 
+        # Check if this is a plate
+        self._is_hcs = settings.plate is not None
+        if self._is_hcs:
+            # HCS Plate mode
+            self._prepare_plate(settings, positions, az_dims)
+        else:
+            # Non-plate mode (single position or multi-position)
+            self._prepare_non_plate(settings, positions, az_dims)
+
+    def _prepare_non_plate(
+        self, settings: AcquisitionSettings, positions: tuple, az_dims: list
+    ) -> None:
+        """Prepare acquire-zarr stream for non-plate acquisitions."""
         # Create ArraySettings for each position
         self._az_pos_keys = []
         az_arrays = []
@@ -116,6 +122,74 @@ class AcquireZarrBackend(ArrayBackend):
         # Create StreamSettings and ZarrStream
         stream_settings = az.StreamSettings(
             arrays=az_arrays,
+            store_path=str(self._root_path),
+            version=az.ZarrVersion.V3,
+        )
+        self._stream = az.ZarrStream(stream_settings)
+
+    def _prepare_plate(
+        self, settings: AcquisitionSettings, positions: tuple, az_dims: list
+    ) -> None:
+        """Prepare acquire-zarr stream for HCS plate acquisitions."""
+        # Group positions by (row, column) to create wells
+        # wells_map: {(row, col): [(pos_idx, Position), ...]}
+        wells_map: dict[tuple[str, str], list[tuple[int, object]]] = {}
+        for idx, pos in enumerate(positions):
+            if pos.row is None or pos.column is None:
+                raise ValueError(
+                    f"Position {pos.name!r} must have row and column for plate mode. "
+                    f"Got row={pos.row!r}, column={pos.column!r}"
+                )
+            key = (pos.row, pos.column)
+            wells_map.setdefault(key, []).append((idx, pos))
+
+        # Create output keys for each position: "row/column/fov_name"
+        # Use empty plate_path so the plate is at the root, not in a subdirectory
+        self._az_pos_keys = []
+        for pos in positions:
+            az_key = f"{pos.row}/{pos.column}/{pos.name}"
+            self._az_pos_keys.append(az_key)
+
+        # Create Wells with FieldOfViews
+        az_wells = []
+        for (row, col), pos_list in wells_map.items():
+            fovs = []
+            for _pos_idx, pos in pos_list:
+                # Create ArraySettings for this FOV
+                # Note: output_key should just be the FOV name since the well
+                # structure already defines row/column
+                # Use downsampling to create a multiscales group structure
+                array_settings = az.ArraySettings(
+                    output_key=pos.name,
+                    dimensions=az_dims,
+                    data_type=settings.array_settings.dtype,
+                    downsampling_method=az.DownsamplingMethod.MEAN,
+                )
+                # Create FieldOfView for each position in this well
+                fov = az.FieldOfView(
+                    path=pos.name,
+                    acquisition_id=0,  # Default acquisition ID
+                    array_settings=array_settings,
+                )
+                fovs.append(fov)
+
+            # Create Well
+            well = az.Well(row_name=row, column_name=col, images=fovs)
+            az_wells.append(well)
+
+        # Create Plate
+        az_plate = az.Plate(
+            path="",  # empty path so the plate is at the root of the store
+            name=settings.plate.name,
+            row_names=settings.plate.row_names,
+            column_names=settings.plate.column_names,
+            wells=az_wells,
+            acquisitions=[az.Acquisition(id=0, name="default")],
+        )
+
+        # Create StreamSettings with plate
+        stream_settings = az.StreamSettings(
+            hcs_plates=[az_plate],
             store_path=str(self._root_path),
             version=az.ZarrVersion.V3,
         )

@@ -10,7 +10,7 @@ import numpy as np
 AXIS_ORDER = ["t", "c", "z", "y", "x"]
 SIZES = {"t": 10, "c": 2, "z": 5, "y": 512, "x": 512}
 CHUNK_SHAPES = {"t": 1, "c": 1, "z": 1, "y": 64, "x": 64}
-PLATE_FOVS = [("A", "2", "a"), ("B", "1", "0")]  # [(row_name, col_name, fov_path), ...]
+PLATE_FOVS = [("A", "2", "0"), ("B", "1", "0")]  # [(row_name, col_name, fov_path), ...]
 DTYPE = np.uint16
 
 # --------------------------------------------------
@@ -40,6 +40,7 @@ wells = [
             az.FieldOfView(
                 path=fov_path,
                 array_settings=az.ArraySettings(
+                    output_key=fov_path,
                     dimensions=array_dimensions,
                     data_type=DTYPE,
                 ),
@@ -51,7 +52,7 @@ wells = [
 ]
 
 plate = az.Plate(
-    path="plate",
+    path="",
     name="My HCS Experiment",
     row_names=["A", "B", "C", "D"],
     column_names=["1", "2", "3", "4", "5", "6", "7", "8"],
@@ -70,7 +71,8 @@ i = 0
 for well in wells:
     for fov in well.images:
         for _ in np.ndindex(SHAPE[:-2]):
-            key = "/".join([plate.path, well.row_name, well.column_name, fov.path])
+            # Key must include full path: row/column/fov_name
+            key = f"{well.row_name}/{well.column_name}/{fov.path}"
             frame = np.full(shape=SHAPE[-2:], fill_value=i, dtype=DTYPE)
             stream.append(frame, key=key)
 stream.close()
