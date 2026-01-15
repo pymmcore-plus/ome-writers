@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 from typing import TYPE_CHECKING, cast
 
 import numpy as np
@@ -22,6 +23,13 @@ from ome_writers import (
 if TYPE_CHECKING:
     from pathlib import Path
 
+AVAILABLE_BACKENDS = []
+if importlib.util.find_spec("tensorstore") is not None:
+    AVAILABLE_BACKENDS.append("tensorstore")
+if importlib.util.find_spec("zarr") is not None:
+    AVAILABLE_BACKENDS.append("zarr")
+if importlib.util.find_spec("acquire_zarr") is not None:
+    AVAILABLE_BACKENDS.append("acquire-zarr")
 
 # NOTES:
 # - All root_paths will be replaced with temporary directories during testing.
@@ -121,7 +129,7 @@ def _name_case(case: AcquisitionSettings) -> str:
 
 
 @pytest.mark.parametrize("case", CASES, ids=_name_case)
-@pytest.mark.parametrize("backend", ["zarr", "tensorstore", "acquire-zarr"])
+@pytest.mark.parametrize("backend", AVAILABLE_BACKENDS)
 def test_cases_as_zarr(case: AcquisitionSettings, backend: str, tmp_path: Path) -> None:
     case.root_path = root = tmp_path / "output.zarr"
     case.backend = backend
@@ -181,27 +189,56 @@ def _validate_images(
         # we're validating on disk data with tensorstore rather than zarr-python
         # due to zarr-python's dropped support for python versions that are still
         # before EOL (i.e. SPEC-0)
-        try:
-            import tensorstore
-        except ImportError:
-            print("tensorstore not installed; skipping tensorstore-specific checks")
-            return
+        if importlib.util.find_spec("tensorstore") is not None:
+            _validate_array_tensorstore(group, storage_dims, dtype)
+        else:
+            _validate_array_zarr(group, storage_dims, dtype)
 
-        array0 = group["0"].to_tensorstore()  # type: ignore[possibly-unbound-attribute]
-        assert isinstance(array0, tensorstore.TensorStore)
 
-        # check on disk shape, dtype, dimension order and labels
-        assert array0.shape == tuple(d.count for d in storage_dims)
-        assert array0.dtype == np.dtype(dtype)
-        expected_dim_order = [d.name for d in storage_dims]
-        assert [d.label for d in array0.domain] == expected_dim_order  # type: ignore
+def _validate_array_tensorstore(
+    group: yaozarrs.ZarrGroup, storage_dims: list[D], dtype: str
+) -> None:
+    """Validate an array stored on disk using tensorstore."""
+    import tensorstore
 
-        # validate chunking
-        expected_chunk_shape = tuple(d.chunk_size or 1 for d in storage_dims)
-        actual_chunk_shape = array0.chunk_layout.read_chunk.shape
-        assert actual_chunk_shape == expected_chunk_shape, (
-            f"expected {expected_chunk_shape}, got {actual_chunk_shape}"
-        )
+    array0 = group["0"].to_tensorstore()  # type: ignore[possibly-unbound-attribute]
+    assert isinstance(array0, tensorstore.TensorStore)
 
-        # validate sharding
-        # TODO
+    # check on disk shape, dtype, dimension order and labels
+    assert array0.shape == tuple(d.count for d in storage_dims)
+    assert array0.dtype == np.dtype(dtype)
+    expected_dim_order = [d.name for d in storage_dims]
+    assert [d.label for d in array0.domain] == expected_dim_order  # type: ignore
+
+    # validate chunking
+    expected_chunk_shape = tuple(d.chunk_size or 1 for d in storage_dims)
+    actual_chunk_shape = array0.chunk_layout.read_chunk.shape
+    assert actual_chunk_shape == expected_chunk_shape, (
+        f"expected {expected_chunk_shape}, got {actual_chunk_shape}"
+    )
+
+    # validate sharding
+    # TODO
+
+
+def _validate_array_zarr(
+    group: yaozarrs.ZarrGroup, storage_dims: list[D], dtype: str
+) -> None:
+    """Validate an array stored on disk using zarr-python."""
+    import zarr
+
+    array0 = group["0"].to_zarr_python()  # type: ignore[possibly-unbound-attribute]
+    assert isinstance(array0, zarr.Array)
+
+    # check on disk shape, dtype
+    assert array0.shape == tuple(d.count for d in storage_dims)
+    assert str(array0.dtype) == dtype
+
+    # validate chunking
+    expected_chunk_shape = tuple(d.chunk_size or 1 for d in storage_dims)
+    assert array0.chunks == expected_chunk_shape, (
+        f"expected {expected_chunk_shape}, got {array0.chunks}"
+    )
+
+    # validate sharding
+    # TODO
