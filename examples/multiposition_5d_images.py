@@ -1,5 +1,6 @@
 """Basic example of using ome_writers to write a single 5D image."""
 
+import sys
 from typing import cast
 
 import numpy as np
@@ -11,6 +12,10 @@ from ome_writers import (
     PositionDimension,
     create_stream,
 )
+
+# "tiff", "zarr", "tensorstore", "auto"
+BACKEND = "auto" if len(sys.argv) < 2 else sys.argv[1]
+
 
 dimensions = [
     Dimension(name="t", count=10, chunk_size=1, type="time"),
@@ -28,11 +33,12 @@ dimensions = [
 #     chunk_shapes={"y": 64, "x": 64},
 # )
 
+suffix = ".ome.tiff" if BACKEND == "tiff" else ".ome.zarr"
 settings = AcquisitionSettings(
-    root_path="example_5d_series.ome.zarr",
+    root_path=f"example_5d_series{suffix}",
     array_settings=ArraySettings(dimensions=dimensions, dtype="uint16"),
     overwrite=True,
-    backend="auto",
+    backend=BACKEND,
 )
 
 shape = cast("tuple[int, ...]", settings.array_settings.shape)
@@ -41,11 +47,12 @@ with create_stream(settings) as stream:
         stream.append(np.full(shape[-2:], i, dtype=settings.array_settings.dtype))
 
 
-# Validate the output
-try:
-    import yaozarrs
+if BACKEND != "tiff":
+    # Validate the output
+    try:
+        import yaozarrs
 
-    yaozarrs.validate_zarr_store(settings.root_path)
-    print("✓ Zarr store is valid")
-except ImportError:
-    print("⚠ yaozarrs not installed; skipping validation")
+        yaozarrs.validate_zarr_store(settings.root_path)
+        print("✓ Zarr store is valid")
+    except ImportError:
+        print("⚠ yaozarrs not installed; skipping validation")

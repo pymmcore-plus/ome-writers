@@ -164,6 +164,16 @@ def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:
             ) from e
         else:
             backend = TensorstoreBackend()
+    elif requested_backend == "tiff":
+        try:
+            from .backends._tifffile import TiffBackend
+        except ImportError as e:
+            raise ValueError(
+                "TIFF backend requested but required packages are not installed. "
+                "Install with: pip install ome-writers[tifffile]"
+            ) from e
+        else:
+            backend = TiffBackend()
 
     if backend is None:
         raise ValueError(
