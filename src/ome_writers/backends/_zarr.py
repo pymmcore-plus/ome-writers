@@ -1,4 +1,4 @@
-"""Zarr-python backend using yaozarrs for OME-Zarr v0.5 structure."""
+"""Yaozarrs-based backends for OME-Zarr v0.5."""
 
 from __future__ import annotations
 
@@ -6,175 +6,113 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from ome_writers._backend import ArrayBackend
-from ome_writers.schema import (
-    ArraySettings,
-    Dimension,
-    Plate,
-    Position,
-    PositionDimension,
-)
 
 if TYPE_CHECKING:
     import numpy as np
 
     from ome_writers.router import FrameRouter, PositionInfo
-    from ome_writers.schema import AcquisitionSettings, ArraySettings
+    from ome_writers.schema import AcquisitionSettings, Dimension, Plate, Position
+
+try:
+    from yaozarrs import DimSpec, v05
+    from yaozarrs.write.v05 import Bf2RawBuilder, PlateBuilder, prepare_image
+except ImportError as e:
+    raise ImportError(
+        f"{__name__} requires yaozarrs with write support: "
+        "`pip install yaozarrs[write-zarr]`."
+    ) from e
 
 
-class ZarrBackend(ArrayBackend):
-    """OME-Zarr writer using zarr-python via yaozarrs.
+class YaozarrsBackend(ArrayBackend):
+    """Base backend using yaozarrs for OME-Zarr v0.5 structure.
 
-    This backend creates OME-Zarr v0.5 compatible stores using zarr-python for
-    array I/O. The yaozarrs library handles the OME-NGFF metadata structure.
-
-    For multi-position data, uses the bioformats2raw layout where each position
-    is a separate Image in the hierarchy.
+    Subclasses must define the `writer` class attribute to specify which
+    yaozarrs writer to use (e.g., "zarr", "tensorstore").
     """
 
+    writer: Literal["zarr", "tensorstore"]
+
     def __init__(self) -> None:
-        self._arrays: list[Any] = []  # Indexed by position index
+        self._arrays: list[Any] = []
         self._finalized = False
 
-    # -------------------------------------------------------------------------
-    # Compatibility
-    # -------------------------------------------------------------------------
-
-    def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
-        """Check compatibility with settings.
-
-        If incompatible, returns a string describing the issue.
-        """
-        if not settings.root_path.endswith(".zarr"):
-            return "Root path must end with .zarr for ZarrBackend."
-        return False
-
-    # -------------------------------------------------------------------------
-    # Lifecycle
-    # -------------------------------------------------------------------------
-
-    def prepare(
-        self,
-        settings: AcquisitionSettings,
-        router: FrameRouter,
-    ) -> None:
+    def prepare(self, settings: AcquisitionSettings, router: FrameRouter) -> None:
         """Initialize OME-Zarr storage structure."""
-        try:
-            from yaozarrs.write.v05 import Bf2RawBuilder, prepare_image
-        except ImportError as e:
-            raise ImportError(
-                "ZarrBackend requires yaozarrs with write support: "
-                "`pip install yaozarrs[write-zarr]`."
-            ) from e
 
         self._finalized = False
         array_settings = settings.array_settings
-        group_path = Path(settings.root_path).expanduser().resolve()
+        root = Path(settings.root_path).expanduser().resolve()
         positions = router.positions
 
-        # Build storage dimensions (excluding position, in storage order)
-        storage_dims = _get_storage_dims(array_settings, router.storage_dimension_names)
-        # For unlimited dimensions (count=None), start with size 1
+        # Build storage metadata
+        storage_dims = router.storage_dimensions
         shape = tuple(d.count if d.count is not None else 1 for d in storage_dims)
         chunks = _get_chunks(storage_dims)
-
-        # Build yaozarrs Image metadata
         image = _build_image_metadata(storage_dims)
 
-        # Plate mode: use PlateBuilder for well/field hierarchy
+        # Plate mode
         if settings.plate is not None:
-            self._prepare_plate(settings, group_path, image, shape, chunks, positions)
-            return
+            # Validate and group positions
+            for i, pos in enumerate(positions):
+                if pos.row is None or pos.column is None:
+                    raise ValueError(
+                        f"Position '{pos.name}' (index {i}) must have row and "
+                        "column for plate mode."
+                    )
 
-        # Non-plate mode: use simple image or Bf2RawBuilder
-        if len(positions) == 1:
-            _, arrays = prepare_image(
-                group_path,
+            # mapping of {(row, column): [(position_index, Position), ...]}
+            well_positions: dict[tuple[str, str], list[PositionInfo]] = {}
+            for i, pos in enumerate(positions):
+                key = (pos.row, pos.column)
+                well_positions.setdefault(key, []).append((i, pos))
+
+            # Build plate metadata and arrays
+            builder = PlateBuilder(
+                root,
+                plate=_build_plate_metadata(settings.plate, well_positions),
+                overwrite=settings.overwrite,
+                chunks=chunks,
+                writer=self.writer,
+            )
+
+            for (row, col), pos_list in well_positions.items():
+                images_dict = {
+                    pos.name: (image, [(shape, array_settings.dtype)])
+                    for _idx, pos in pos_list
+                }
+                builder.add_well(row=row, col=col, images=images_dict)
+
+            _, all_arrays = builder.prepare()
+            # Map position index to array path: row/col/name/0
+            self._arrays = [
+                all_arrays[f"{pos.row}/{pos.column}/{pos.name}/0"] for pos in positions
+            ]
+
+        # Single position
+        elif len(positions) == 1:
+            _, all_arrays = prepare_image(
+                root,
                 image,
                 datasets=[(shape, array_settings.dtype)],
                 overwrite=settings.overwrite,
                 chunks=chunks,
-                writer="zarr",
+                writer=self.writer,
             )
-            # Single position -> single array at index 0
-            self._arrays = [arrays["0"]]
+            self._arrays = [all_arrays["0"]]
+
+        # Multi-position (bf2raw layout)
         else:
             builder = Bf2RawBuilder(
-                group_path,
+                root,
                 overwrite=settings.overwrite,
                 chunks=chunks,
-                writer="zarr",
+                writer=self.writer,
             )
             for pos in positions:
                 builder.add_series(pos.name, image, [(shape, array_settings.dtype)])
 
             _, all_arrays = builder.prepare()
-
-            # Build array list indexed by position order
             self._arrays = [all_arrays[f"{pos.name}/0"] for pos in positions]
-
-    def _prepare_plate(
-        self,
-        settings: AcquisitionSettings,
-        group_path: Path,
-        image: Any,
-        shape: tuple[int, ...],
-        chunks: tuple[int, ...],
-        positions: list[Position],
-    ) -> None:
-        """Initialize plate structure using PlateBuilder."""
-        from yaozarrs.write.v05 import PlateBuilder
-
-        array_settings = settings.array_settings
-
-        # Validate all positions have row/column for plate mode
-        for i, pos in enumerate(positions):
-            if pos.row is None or pos.column is None:
-                raise ValueError(
-                    f"Position '{pos.name}' (index {i}) must have row and column "
-                    "defined for plate mode."
-                )
-
-        # Group positions by (row, column) to identify wells
-        # well_positions: {(row, col): [(pos_index, pos), ...]}
-        well_positions = {}
-        for i, pos in enumerate(positions):
-            key = (pos.row, pos.column)  # type: ignore[arg-type]
-            well_positions.setdefault(key, []).append((i, pos))
-
-        # Build mapping: position_index -> array path using Position.name as FOV path
-        # e.g., Position(name="p0", row="A", column="1") -> "A/1/p0"
-        pos_idx_to_path = {}
-        for (row, col), pos_list in well_positions.items():
-            for pos_idx, pos in pos_list:
-                pos_idx_to_path[pos_idx] = f"{row}/{col}/{pos.name}"
-
-        # Build yaozarrs Plate metadata from settings.plate
-        plate_meta = _build_plate_metadata(settings.plate, well_positions)
-
-        # Create PlateBuilder and add wells
-        builder = PlateBuilder(
-            group_path,
-            plate=plate_meta,
-            overwrite=settings.overwrite,
-            chunks=chunks,
-            writer="zarr",
-        )
-
-        for (row, col), pos_list in well_positions.items():
-            # Each position in this well becomes a FOV, using Position.name as path
-            images_dict = {
-                pos.name: (image, [(shape, array_settings.dtype)])
-                for _, pos in pos_list
-            }
-            builder.add_well(row=row, col=col, images=images_dict)
-
-        _, all_arrays = builder.prepare()
-
-        # Build array list indexed by position order
-        # all_arrays has keys like "A/1/p0/0" (row/col/fov_name/dataset)
-        self._arrays = [
-            all_arrays[f"{pos_idx_to_path[i]}/0"] for i in range(len(positions))
-        ]
 
     def write(
         self,
@@ -182,79 +120,56 @@ class ZarrBackend(ArrayBackend):
         index: tuple[int, ...],
         frame: np.ndarray,
     ) -> None:
-        """Write frame to the specified location.
-
-        For unlimited dimensions, automatically resizes the array as needed.
-        """
+        """Write frame to specified location with auto-resize for unlimited dims."""
         if self._finalized:
             raise RuntimeError("Cannot write after finalize().")
         if not self._arrays:
             raise RuntimeError("Backend not prepared. Call prepare() first.")
 
-        pos_idx, _pos = position_info
-        array = self._arrays[pos_idx]
-        current_shape = array.shape
+        array = self._arrays[position_info[0]]
 
-        # Check if we need to resize for any dimension (excluding Y, X)
-        new_shape = list(current_shape)
-        needs_resize = False
-
+        # Resize if needed (index may be shorter than shape due to spatial dims)
+        new_shape = list(array.shape)
         for i, idx_val in enumerate(index):
-            if idx_val >= current_shape[i]:
-                # Grow to accommodate this index
-                new_shape[i] = idx_val + 1
-                needs_resize = True
+            new_shape[i] = max(new_shape[i], idx_val + 1)
 
-        if needs_resize:
+        if new_shape != list(array.shape):
             array.resize(new_shape)
 
-        self._arrays[pos_idx][index] = frame
+        array[index] = frame
 
     def finalize(self) -> None:
         """Flush and release resources."""
-        if self._finalized:
-            return
-        self._arrays.clear()
-        self._finalized = True
+        if not self._finalized:
+            self._arrays.clear()
+            self._finalized = True
+
+
+class ZarrBackend(YaozarrsBackend):
+    """OME-Zarr writer using zarr-python via yaozarrs."""
+
+    writer = "zarr"
+
+    def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
+        if not settings.root_path.endswith(".zarr"):
+            return "Root path must end with .zarr for ZarrBackend."
+        return False
+
+
+class TensorstoreBackend(YaozarrsBackend):
+    """OME-Zarr writer using tensorstore via yaozarrs."""
+
+    writer = "tensorstore"
+
+    def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
+        if not settings.root_path.endswith(".zarr"):
+            return "Root path must end with .zarr for TensorstoreBackend."
+        return False
 
 
 # -----------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------
-
-
-def _get_storage_dims(
-    settings: ArraySettings, storage_order: list[str]
-) -> list[Dimension]:
-    """Extract storage dimensions from settings in storage order.
-
-    Parameters
-    ----------
-    settings
-        Array settings containing dimension definitions.
-    storage_order
-        List of dimension names in the desired storage order (from FrameRouter).
-
-    Returns
-    -------
-    list[Dimension]
-        Dimensions reordered according to storage_order, excluding PositionDimension.
-    """
-    # Build a name -> Dimension mapping (excluding PositionDimension and Y/X)
-    dim_by_name: dict[str, Dimension] = {}
-    spatial_dims: list[Dimension] = []
-
-    for dim in settings.dimensions:
-        if isinstance(dim, PositionDimension):
-            continue
-        # Y and X are not in storage_order (they're frame dimensions)
-        if dim.name.lower() in ("y", "x"):
-            spatial_dims.append(dim)
-        else:
-            dim_by_name[dim.name] = dim
-
-    # Reorder according to storage_order, then append Y/X
-    return [dim_by_name[name] for name in storage_order] + spatial_dims
 
 
 def _get_chunks(dims: list[Dimension]) -> tuple[int, ...]:
@@ -267,7 +182,7 @@ def _get_chunks(dims: list[Dimension]) -> tuple[int, ...]:
     for i, dim in enumerate(dims):
         if dim.chunk_size is not None:
             chunks.append(dim.chunk_size)
-        elif i >= n - 2:  # Last 2 dims (spatial)
+        elif i >= n - 2:  # Last 2 dims  # FIXME:  MAGIC NUMBER
             chunks.append(dim.count or 1)
         else:
             chunks.append(1)
@@ -275,87 +190,38 @@ def _get_chunks(dims: list[Dimension]) -> tuple[int, ...]:
 
 
 def _build_image_metadata(dims: list[Dimension]) -> Any:
-    """Build yaozarrs v05 Image metadata from Dimension objects."""
-    from yaozarrs import v05
+    """Build yaozarrs v05 Image metadata from Dimensions."""
 
-    axes = []
-    scales = []
-
-    for dim in dims:
-        axes.append(_dim_to_axis(dim))
-        scales.append(dim.scale if dim.scale is not None else 1.0)
-
-    return v05.Image(
-        multiscales=[
-            v05.Multiscale(
-                axes=axes,
-                datasets=[
-                    v05.Dataset(
-                        path="0",
-                        coordinateTransformations=[
-                            v05.ScaleTransformation(scale=scales)
-                        ],
-                    )
-                ],
-            )
-        ],
-    )
-
-
-def _dim_to_axis(dim: Dimension) -> Any:
-    """Convert a schema Dimension to a yaozarrs v05 Axis."""
-    from yaozarrs import v05
-
-    name = dim.name
-    unit = dim.unit
-
-    if dim.type == "time" or name == "t":
-        return v05.TimeAxis(name=name, unit=unit)
-    elif dim.type == "channel" or name == "c":
-        return v05.ChannelAxis(name=name)
-    elif dim.type == "space" or name in ("x", "y", "z"):
-        return v05.SpaceAxis(name=name, unit=unit)
-    else:
-        return v05.CustomAxis(name=name)
+    dim_specs = [
+        DimSpec(
+            name=dim.name,
+            size=dim.count,
+            type=dim.type,
+            unit=dim.unit,
+            scale=1.0 if dim.scale is None else dim.scale,
+            translation=dim.translation,
+        )
+        for dim in dims
+    ]
+    return v05.Image(multiscales=[v05.Multiscale.from_dims(dim_specs)])
 
 
 def _build_plate_metadata(
-    plate: Plate,
-    well_positions: dict[tuple[str, str], list[tuple[int, Position]]],
+    plate: Plate, well_positions: dict[tuple[str, str], list[tuple[int, Position]]]
 ) -> Any:
-    """Build yaozarrs v05 Plate metadata from ome-writers Plate schema.
-
-    Parameters
-    ----------
-    plate
-        The ome-writers Plate schema with row_names, column_names, and name.
-    well_positions
-        Mapping of (row, col) to list of (position_index, Position) tuples.
-    """
-    from yaozarrs import v05
-
-    # Build row and column lists from the plate schema
-    rows = [v05.Row(name=name) for name in plate.row_names]
-    columns = [v05.Column(name=name) for name in plate.column_names]
-
-    # Build wells list from the positions that were added
-    wells = []
-    for row_name, col_name in well_positions:
-        row_idx = plate.row_names.index(row_name)
-        col_idx = plate.column_names.index(col_name)
-        wells.append(
-            v05.PlateWell(
-                path=f"{row_name}/{col_name}",
-                rowIndex=row_idx,
-                columnIndex=col_idx,
-            )
-        )
-
+    """Build yaozarrs v05 Plate metadata from ome-writers Plate schema."""
     return v05.Plate(
         plate=v05.PlateDef(
-            rows=rows,
-            columns=columns,
-            wells=wells,
             name=plate.name,
+            rows=[v05.Row(name=name) for name in plate.row_names],
+            columns=[v05.Column(name=name) for name in plate.column_names],
+            wells=[
+                v05.PlateWell(
+                    path=f"{row}/{col}",
+                    rowIndex=plate.row_names.index(row),
+                    columnIndex=plate.column_names.index(col),
+                )
+                for row, col in well_positions
+            ],
         )
     )

@@ -155,6 +155,15 @@ def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:
                 ) from e
         else:
             backend = ZarrBackend()
+    elif requested_backend == "tensorstore":
+        try:
+            from .backends._zarr import TensorstoreBackend
+        except ImportError as e:
+            raise ValueError(
+                "Tensorstore backend requested but required packages are not installed."
+            ) from e
+        else:
+            backend = TensorstoreBackend()
 
     if backend is None:
         raise ValueError(

@@ -124,6 +124,7 @@ class FrameRouter:
         # all_sizes includes position; index_dim_names excludes it.
         all_sizes: list[int | None] = []
         index_dims: list[Dimension] = []
+        spatial_dims: list[Dimension] = []
         position_axis: int | None = None
         # Default single position with name "0"
         positions: list[Position] = [Position(name="0")]
@@ -136,7 +137,9 @@ class FrameRouter:
                 all_sizes.append(dim.count)
                 positions = dim.positions
             # FIXME!!! don't hardcode names "Y" and "X"
-            elif isinstance(dim, Dimension) and dim.name.lower() not in ("y", "x"):
+            elif isinstance(dim, Dimension) and dim.name.lower() in ("y", "x"):
+                spatial_dims.append(dim)
+            else:
                 all_sizes.append(dim.count)
                 index_dims.append(dim)
 
@@ -144,6 +147,7 @@ class FrameRouter:
         self._position_axis = position_axis
         self._positions = positions
         self._index_dim_names = index_dims
+        self._spatial_dims = spatial_dims
 
         # Compute storage order permutation (for non-position dimensions only)
         self._storage_dim_names = _resolve_storage_order(
@@ -232,6 +236,18 @@ class FrameRouter:
     def storage_dimension_names(self) -> list[str]:
         """Dimension names in storage order (excluding frame dims like XY)."""
         return list(self._storage_dim_names)
+
+    @property
+    def storage_dimensions(self) -> list[Dimension]:
+        """Dimension objects in storage order, including spatial dims (Y, X) at end.
+
+        Returns the full Dimension objects with all metadata (count, scale, type, etc.)
+        reordered according to storage_order, with spatial dimensions appended.
+        Backends use this to build arrays with the correct shape and metadata.
+        """
+        dim_by_name = {dim.name: dim for dim in self._index_dim_names}
+        storage_dims = [dim_by_name[name] for name in self._storage_dim_names]
+        return storage_dims + self._spatial_dims
 
 
 def _ngff_sort_key(dim: Dimension) -> tuple[int, int]:
