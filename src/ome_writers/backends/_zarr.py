@@ -10,7 +10,7 @@ from ome_writers._backend import ArrayBackend
 if TYPE_CHECKING:
     import numpy as np
 
-    from ome_writers.router import FrameRouter, PositionInfo
+    from ome_writers._router import FrameRouter, PositionInfo
     from ome_writers.schema import AcquisitionSettings, Dimension, Plate, Position
 
 try:
@@ -40,15 +40,18 @@ class YaozarrsBackend(ArrayBackend):
         """Initialize OME-Zarr storage structure."""
 
         self._finalized = False
-        array_settings = settings.array_settings
         root = Path(settings.root_path).expanduser().resolve()
         positions = router.positions
 
         # Build storage metadata
-        storage_dims = router.storage_dimensions
+        storage_dims = router.array_storage_dimensions
         shape = tuple(d.count if d.count is not None else 1 for d in storage_dims)
-        chunks = _get_chunks(storage_dims)
-        image = _build_image_metadata(storage_dims)
+        dtype = settings.array_settings.dtype
+        chunks, shards = _get_chunks_and_shards(storage_dims)
+        # this single image model is reused for all positions
+        # (the underlying assumption is that we currently don't support inhomogeneous
+        # shapes/dtypes across positions)
+        image = _build_yaozarrs_image_model(storage_dims)
 
         # Plate mode
         if settings.plate is not None:
@@ -69,16 +72,16 @@ class YaozarrsBackend(ArrayBackend):
             # Build plate metadata and arrays
             builder = PlateBuilder(
                 root,
-                plate=_build_plate_metadata(settings.plate, well_positions),
+                plate=_build_yaozarrs_plate_model(settings.plate, well_positions),
                 overwrite=settings.overwrite,
                 chunks=chunks,
+                shards=shards,
                 writer=self.writer,
             )
 
             for (row, col), pos_list in well_positions.items():
                 images_dict = {
-                    pos.name: (image, [(shape, array_settings.dtype)])
-                    for _idx, pos in pos_list
+                    pos.name: (image, [(shape, dtype)]) for _idx, pos in pos_list
                 }
                 builder.add_well(row=row, col=col, images=images_dict)
 
@@ -93,9 +96,10 @@ class YaozarrsBackend(ArrayBackend):
             _, all_arrays = prepare_image(
                 root,
                 image,
-                datasets=[(shape, array_settings.dtype)],
+                datasets=[(shape, dtype)],
                 overwrite=settings.overwrite,
                 chunks=chunks,
+                shards=shards,
                 writer=self.writer,
             )
             self._arrays = [all_arrays["0"]]
@@ -106,10 +110,11 @@ class YaozarrsBackend(ArrayBackend):
                 root,
                 overwrite=settings.overwrite,
                 chunks=chunks,
+                shards=shards,
                 writer=self.writer,
             )
             for pos in positions:
-                builder.add_series(pos.name, image, [(shape, array_settings.dtype)])
+                builder.add_series(pos.name, image, [(shape, dtype)])
 
             _, all_arrays = builder.prepare()
             self._arrays = [all_arrays[f"{pos.name}/0"] for pos in positions]
@@ -172,26 +177,36 @@ class TensorstoreBackend(YaozarrsBackend):
 # -----------------------------------------------------------------------------
 
 
-def _get_chunks(dims: list[Dimension]) -> tuple[int, ...]:
-    """Compute chunk sizes from dimensions.
-
-    Defaults: full size for Y/X (last 2 dims), 1 for others.
-    """
+def _get_chunks_and_shards(
+    dims: list[Dimension],
+) -> tuple[tuple[int, ...], tuple[int, ...] | None]:
+    """Compute chunk and shard sizes from dimensions."""
     chunks = []
+    shards = []
+    has_shards = False
     n = len(dims)
+
     for i, dim in enumerate(dims):
+        # Chunks
         if dim.chunk_size is not None:
             chunks.append(dim.chunk_size)
-        elif i >= n - 2:  # Last 2 dims  # FIXME:  MAGIC NUMBER
+        elif i >= n - 2:  # Last 2 dims (spatial)
             chunks.append(dim.count or 1)
         else:
             chunks.append(1)
-    return tuple(chunks)
+
+        # Shards
+        if dim.shard_size is not None:
+            shards.append(dim.shard_size)
+            has_shards = True
+        else:
+            shards.append(chunks[-1])  # Default to chunk size
+
+    return tuple(chunks), tuple(shards) if has_shards else None
 
 
-def _build_image_metadata(dims: list[Dimension]) -> Any:
+def _build_yaozarrs_image_model(dims: list[Dimension]) -> v05.Image:
     """Build yaozarrs v05 Image metadata from Dimensions."""
-
     dim_specs = [
         DimSpec(
             name=dim.name,
@@ -206,9 +221,9 @@ def _build_image_metadata(dims: list[Dimension]) -> Any:
     return v05.Image(multiscales=[v05.Multiscale.from_dims(dim_specs)])
 
 
-def _build_plate_metadata(
+def _build_yaozarrs_plate_model(
     plate: Plate, well_positions: dict[tuple[str, str], list[tuple[int, Position]]]
-) -> Any:
+) -> v05.Plate:
     """Build yaozarrs v05 Plate metadata from ome-writers Plate schema."""
     return v05.Plate(
         plate=v05.PlateDef(

@@ -5,7 +5,13 @@ from __future__ import annotations
 from enum import Enum
 from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    model_validator,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -131,17 +137,22 @@ def _validate_dims_list(
     # ensure at least 2 spatial dimensions at the end
     spatial_dims = [d for d in dims if isinstance(d, Dimension) and d.type == "space"]
     if len(spatial_dims) < 2 or dims[-2:] != spatial_dims[-2:]:
-        raise ValueError("The last two dimensions must be spatial (Y and X).")
+        # TODO: Consider whether this is the best way to express this.
+        # should dimension take another parameter indicating image dims?
+        # (to distinguish from other spatial dims like Z?)
+        raise ValueError(
+            "The last two dimensions must have `type='space'` (e.g. Y and X)."
+        )
 
-    # ensure at most one PositionDimension
-    if sum(isinstance(d, PositionDimension) for d in dims) > 1:
-        raise ValueError("Only one PositionDimension is allowed.")
-
+    # ensure at most one PositionDimension and
     # ensure unique position names within each well (row/column combination)
+    has_pos = False
     for dim in dims:
         if isinstance(dim, PositionDimension):
+            if has_pos:
+                raise ValueError("Only one PositionDimension is allowed.")
             _validate_unique_names_per_well(dim.positions)
-            break
+            has_pos = True
 
     return dims
 
@@ -206,7 +217,7 @@ class Plate(_BaseModel):
 class AcquisitionSettings(_BaseModel):
     """Top-level acquisition settings."""
 
-    root_path: str
+    root_path: Annotated[str, BeforeValidator(str)]
     array_settings: ArraySettings
     plate: Plate | None = None
     overwrite: bool = False

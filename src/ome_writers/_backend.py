@@ -55,7 +55,7 @@ if TYPE_CHECKING:
 
     import numpy as np
 
-    from ome_writers.router import FrameRouter, PositionInfo
+    from ome_writers._router import FrameRouter, PositionInfo
     from ome_writers.schema import AcquisitionSettings
 
 

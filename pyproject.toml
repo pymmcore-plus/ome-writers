@@ -141,7 +141,8 @@ pretty = true
 include = ["src"]
 pythonVersion = "3.10"
 enableExperimentalFeatures = true
-reportArgumentType = false        # tough with pydantic type casting.
+reportArgumentType = false         # tough with pydantic type casting.
+reportAttributeAccessIssue = false # tough with pydantic 
 
 # https://docs.pytest.org/
 [tool.pytest.ini_options]

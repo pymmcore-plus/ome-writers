@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Literal
 import pytest
 from pydantic import ValidationError
 
-from ome_writers.router import FrameRouter
+from ome_writers._router import FrameRouter
 from ome_writers.schema import (
     ArraySettings,
     Dimension,

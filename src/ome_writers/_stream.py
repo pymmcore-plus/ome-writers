@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     import numpy as np
 
     from ._backend import ArrayBackend
-    from .router import FrameRouter
+    from ._router import FrameRouter
     from .schema import AcquisitionSettings
 
 __all__ = ["OMEStream", "create_stream"]
@@ -105,7 +105,7 @@ def create_stream(settings: AcquisitionSettings) -> OMEStream:
     ...     for i in range(20):  # 10 timepoints x 2 channels
     ...         stream.append(np.zeros((512, 512), dtype=np.uint16))
     """
-    from .router import FrameRouter
+    from ._router import FrameRouter
 
     # TODO: Support other backends in new protocol
     backend: ArrayBackend = _create_backend(settings)

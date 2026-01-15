@@ -1,0 +1,4 @@
+# TODO
+
+- explicitly mention any/all magic
+- figure out magic defaults for chunking (i.e. if chunk_size is None, do we pick 1, or pick based on if it's in frame?)
