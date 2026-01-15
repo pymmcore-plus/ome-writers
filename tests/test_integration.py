@@ -13,6 +13,8 @@ from ome_writers import (
     AcquisitionSettings,
     ArraySettings,
     Dimension,
+    Plate,
+    Position,
     PositionDimension,
     create_stream,
 )
@@ -61,9 +63,9 @@ CASES = [
         array_settings=ArraySettings(
             dimensions=[
                 PositionDimension(positions=["Pos0", "Pos1"]),
-                D(name="MyZ", count=3, type="space"),
-                D(name="MyY", count=128, chunk_size=64, type="space", scale=0.1),
-                D(name="MyX", count=128, chunk_size=64, type="space", scale=0.1),
+                D(name="z", count=3, type="space"),
+                D(name="y", count=128, chunk_size=64, type="space", scale=0.1),
+                D(name="x", count=128, chunk_size=64, type="space", scale=0.1),
             ],
             dtype="uint16",
         ),
@@ -75,17 +77,51 @@ CASES = [
             dimensions=[
                 D(name="t", count=3, type="time"),
                 PositionDimension(positions=["Pos0", "Pos1"]),
-                D(name="MyY", count=128, chunk_size=64, type="space", scale=0.1),
-                D(name="MyX", count=128, chunk_size=64, type="space", scale=0.1),
+                D(name="y", count=128, chunk_size=64, type="space", scale=0.1),
+                D(name="x", count=128, chunk_size=64, type="space", scale=0.1),
             ],
             dtype="uint16",
+        ),
+    ),
+    # Plate case
+    AcquisitionSettings(
+        root_path="tmp",
+        array_settings=ArraySettings(
+            dimensions=[
+                D(name="t", count=10, chunk_size=1, type="time"),
+                PositionDimension(
+                    positions=[
+                        Position(name="fov0", row="A", column="1"),
+                        Position(name="fov0", row="A", column="2"),
+                        Position(name="fov0", row="C", column="4"),
+                        Position(name="fov1", row="C", column="4"),
+                    ]
+                ),
+                D(name="c", count=2, chunk_size=1, type="channel"),
+                D(name="z", count=5, chunk_size=1, type="space"),
+                D(name="y", count=256, chunk_size=64, type="space"),
+                D(name="x", count=256, chunk_size=64, type="space"),
+            ],
+            dtype="uint16",
+        ),
+        plate=Plate(
+            name="Example Plate",
+            row_names=["A", "B", "C", "D"],
+            column_names=["1", "2", "3", "4", "5", "6", "7", "8"],
         ),
     ),
 ]
 
 
-@pytest.mark.parametrize("case", CASES)
-@pytest.mark.parametrize("backend", ["zarr", "tensorstore"])
+def _name_case(case: AcquisitionSettings) -> str:
+    dims = case.array_settings.dimensions
+    dim_names = "_".join(f"{d.name}{d.count}" for d in dims)
+    plate_str = "plate-" if case.plate is not None else ""
+    return f"{plate_str}{dim_names}-{case.array_settings.dtype}"
+
+
+@pytest.mark.parametrize("case", CASES, ids=_name_case)
+@pytest.mark.parametrize("backend", ["zarr", "tensorstore", "acquire-zarr"])
 def test_cases_as_zarr(case: AcquisitionSettings, backend: str, tmp_path: Path) -> None:
     case.root_path = root = tmp_path / "output.zarr"
     case.backend = backend
@@ -114,6 +150,7 @@ def test_cases_as_zarr(case: AcquisitionSettings, backend: str, tmp_path: Path) 
     # Plate
     if case.plate is not None:
         assert isinstance(ome_meta, v05.Plate)
+        image_paths = [root / p.row / p.column / p.name for p in router.positions]
     # Single image
     elif num_positions == 1:
         assert isinstance(ome_meta, v05.Image)
@@ -122,9 +159,8 @@ def test_cases_as_zarr(case: AcquisitionSettings, backend: str, tmp_path: Path) 
     else:
         assert isinstance(ome_meta, v05.Bf2Raw)
         ome_group = yaozarrs.validate_ome_uri(root / "OME")
-        ome_meta = ome_group.attributes.ome
-        assert isinstance(ome_meta, v05.Series)
-        image_paths = [(root / path) for path in ome_meta.series]
+        assert isinstance(ome_group.attributes.ome, v05.Series)
+        image_paths = [root / pos.name for pos in router.positions]
 
     assert len(image_paths) == num_positions
     _validate_images(stored_array_dims, image_paths, dtype)
