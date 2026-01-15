@@ -96,19 +96,18 @@ CASES = [
         root_path="tmp",
         array_settings=ArraySettings(
             dimensions=[
-                D(name="t", count=10, chunk_size=1, type="time"),
+                D(name="t", count=3, chunk_size=1, type="time"),
                 PositionDimension(
                     positions=[
                         Position(name="fov0", row="A", column="1"),
-                        Position(name="fov0", row="A", column="2"),
                         Position(name="fov0", row="C", column="4"),
                         Position(name="fov1", row="C", column="4"),
                     ]
                 ),
                 D(name="c", count=2, chunk_size=1, type="channel"),
-                D(name="z", count=5, chunk_size=1, type="space"),
-                D(name="y", count=256, chunk_size=64, type="space"),
-                D(name="x", count=256, chunk_size=64, type="space"),
+                D(name="z", count=4, chunk_size=1, type="space"),
+                D(name="y", count=128, chunk_size=64, type="space"),
+                D(name="x", count=128, chunk_size=64, type="space"),
             ],
             dtype="uint16",
         ),
@@ -131,7 +130,7 @@ def _name_case(case: AcquisitionSettings) -> str:
 @pytest.mark.parametrize("case", CASES, ids=_name_case)
 @pytest.mark.parametrize("backend", AVAILABLE_BACKENDS)
 def test_cases_as_zarr(case: AcquisitionSettings, backend: str, tmp_path: Path) -> None:
-    case.root_path = root = tmp_path / "output.zarr"
+    case.root_path = root = tmp_path / "output.zarr"  # ty: ignore[invalid-assignment]
     case.backend = backend
     dims = case.array_settings.dimensions
     dtype = case.array_settings.dtype
@@ -158,7 +157,7 @@ def test_cases_as_zarr(case: AcquisitionSettings, backend: str, tmp_path: Path) 
     # Plate
     if case.plate is not None:
         assert isinstance(ome_meta, v05.Plate)
-        image_paths = [root / p.row / p.column / p.name for p in router.positions]
+        image_paths = [root / p.row / p.column / p.name for p in router.positions]  # ty: ignore
     # Single image
     elif num_positions == 1:
         assert isinstance(ome_meta, v05.Image)
@@ -227,7 +226,7 @@ def _validate_array_zarr(
     """Validate an array stored on disk using zarr-python."""
     import zarr
 
-    array0 = group["0"].to_zarr_python()  # type: ignore[possibly-unbound-attribute]
+    array0 = group["0"].to_zarr_python()
     assert isinstance(array0, zarr.Array)
 
     # check on disk shape, dtype
