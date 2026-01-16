@@ -7,7 +7,6 @@ import numpy as np
 
 from ome_writers import (
     AcquisitionSettings,
-    ArraySettings,
     Dimension,
     Plate,
     Position,
@@ -23,24 +22,22 @@ BACKEND = "auto" if len(sys.argv) < 2 else sys.argv[1]
 suffix = ".ome.tiff" if BACKEND == "tiff" else ".ome.zarr"
 settings = AcquisitionSettings(
     root_path=f"example_5d_plate{suffix}",
-    array_settings=ArraySettings(
-        dimensions=[
-            Dimension(name="t", count=10, chunk_size=1, type="time"),
-            PositionDimension(
-                positions=[
-                    Position(name="fov0", row="A", column="1"),
-                    Position(name="fov0", row="A", column="2"),
-                    Position(name="fov0", row="C", column="4"),
-                    Position(name="fov1", row="C", column="4"),  # TWO fov in same well
-                ]
-            ),
-            Dimension(name="c", count=2, chunk_size=1, type="channel"),
-            Dimension(name="z", count=5, chunk_size=1, type="space"),
-            Dimension(name="y", count=256, chunk_size=64, type="space"),
-            Dimension(name="x", count=256, chunk_size=64, type="space"),
-        ],
-        dtype="uint16",
-    ),
+    dimensions=[
+        Dimension(name="t", count=2, chunk_size=1, type="time"),
+        PositionDimension(
+            positions=[
+                Position(name="fov0", row="A", column="1"),
+                Position(name="fov0", row="A", column="2"),
+                Position(name="fov0", row="C", column="4"),
+                Position(name="fov1", row="C", column="4"),  # TWO fov in same well
+            ]
+        ),
+        Dimension(name="c", count=3, chunk_size=1, type="channel"),
+        Dimension(name="z", count=4, chunk_size=1, type="space"),
+        Dimension(name="y", count=256, chunk_size=64, type="space"),
+        Dimension(name="x", count=256, chunk_size=64, type="space"),
+    ],
+    dtype="uint16",
     plate=Plate(
         name="Example Plate",
         row_names=["A", "B", "C", "D"],
@@ -50,10 +47,10 @@ settings = AcquisitionSettings(
     backend=BACKEND,
 )
 
-shape = cast("tuple[int, ...]", settings.array_settings.shape)
+shape = cast("tuple[int, ...]", settings.shape)
 with create_stream(settings) as stream:
     for i in range(np.prod(shape[:-2])):
-        stream.append(np.full(shape[-2:], i, dtype=settings.array_settings.dtype))
+        stream.append(np.full(shape[-2:], i, dtype=settings.dtype))
 
 
 if BACKEND != "tiff":

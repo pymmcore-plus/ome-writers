@@ -187,9 +187,23 @@ def _validate_unique_names_per_well(positions: list[Position]) -> None:
                 )
 
 
-class ArraySettings(_BaseModel):
-    """Settings for a single array/image."""
+class Plate(_BaseModel):
+    """Plate structure for OME metadata.
 
+    This defines the plate geometry (rows/columns) for metadata generation.
+    Acquisition order is determined by PositionDimension in AcquisitionSettings,
+    not by this class.
+    """
+
+    row_names: list[str]
+    column_names: list[str]
+    name: str | None = None
+
+
+class AcquisitionSettings(_BaseModel):
+    """Top-level acquisition settings."""
+
+    root_path: Annotated[str, BeforeValidator(str)]
     # PositionDimension can appear anywhere in the list to control acquisition order.
     # Its location determines when positions are visited relative to other dimensions.
     dimensions: Annotated[
@@ -203,6 +217,9 @@ class ArraySettings(_BaseModel):
     # version, and backends may have different restrictions.  So 'ngff' is probably
     # too narrow of a term.
     storage_order: Literal["acquisition", "ngff"] | list[str] = "ngff"
+    plate: Plate | None = None
+    overwrite: bool = False
+    backend: str = "auto"
 
     @property
     def shape(self) -> tuple[int | None, ...]:
@@ -236,36 +253,13 @@ class ArraySettings(_BaseModel):
             dim for dim in self.dimensions if not isinstance(dim, PositionDimension)
         )
 
-
-class Plate(_BaseModel):
-    """Plate structure for OME metadata.
-
-    This defines the plate geometry (rows/columns) for metadata generation.
-    Acquisition order is determined by PositionDimension in ArraySettings,
-    not by this class.
-    """
-
-    row_names: list[str]
-    column_names: list[str]
-    name: str | None = None
-
-
-class AcquisitionSettings(_BaseModel):
-    """Top-level acquisition settings."""
-
-    root_path: Annotated[str, BeforeValidator(str)]
-    array_settings: ArraySettings
-    plate: Plate | None = None
-    overwrite: bool = False
-    backend: str = "auto"
-
     @model_validator(mode="after")
     def _validate_plate_positions(self) -> AcquisitionSettings:
         """Validate plate mode requirements."""
         if self.plate is not None:
             # Ensure there is a PositionDimension
             # and that all positions have row/column assigned
-            for dim in self.array_settings.dimensions:
+            for dim in self.dimensions:
                 if isinstance(dim, PositionDimension):
                     missing = [
                         pos.name
@@ -280,7 +274,7 @@ class AcquisitionSettings(_BaseModel):
                     break
             else:
                 raise ValueError(
-                    "Plate mode requires a PositionDimension in array settings."
+                    "Plate mode requires a PositionDimension in dimensions."
                 )
 
         return self

@@ -46,7 +46,7 @@ class YaozarrsBackend(ArrayBackend):
         # Build storage metadata
         storage_dims = router.array_storage_dimensions
         shape = tuple(d.count if d.count is not None else 1 for d in storage_dims)
-        dtype = settings.array_settings.dtype
+        dtype = settings.dtype
         chunks, shards = _get_chunks_and_shards(storage_dims)
         # this single image model is reused for all positions
         # (the underlying assumption is that we currently don't support inhomogeneous

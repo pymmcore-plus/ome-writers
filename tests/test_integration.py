@@ -12,7 +12,6 @@ from yaozarrs import v05
 
 from ome_writers import (
     AcquisitionSettings,
-    ArraySettings,
     Dimension,
     Plate,
     Position,
@@ -23,13 +22,6 @@ from ome_writers import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-AVAILABLE_BACKENDS = []
-if importlib.util.find_spec("tensorstore") is not None:
-    AVAILABLE_BACKENDS.append("tensorstore")
-if importlib.util.find_spec("zarr") is not None:
-    AVAILABLE_BACKENDS.append("zarr")
-if importlib.util.find_spec("acquire_zarr") is not None:
-    AVAILABLE_BACKENDS.append("acquire-zarr")
 
 # NOTES:
 # - All root_paths will be replaced with temporary directories during testing.
@@ -37,16 +29,14 @@ D = Dimension  # alias, for brevity
 CASES = [
     AcquisitionSettings(
         root_path="tmp",
-        array_settings=ArraySettings(
-            dimensions=[
-                D(name="t", count=2, type="time"),
-                D(name="c", count=3, type="channel"),
-                D(name="z", count=4, type="space", scale=5),
-                D(name="y", count=128, chunk_size=64, type="space", scale=0.1),
-                D(name="x", count=128, chunk_size=64, type="space", scale=0.1),
-            ],
-            dtype="uint16",
-        ),
+        dimensions=[
+            D(name="t", count=2, type="time"),
+            D(name="c", count=3, type="channel"),
+            D(name="z", count=4, type="space", scale=5),
+            D(name="y", count=128, chunk_size=64, type="space", scale=0.1),
+            D(name="x", count=128, chunk_size=64, type="space", scale=0.1),
+        ],
+        dtype="uint16",
     ),
     # transpose z and c ...
     # because we always write out valid OME-Zarr by default (i.e. TCZYX as of v0.5)
@@ -54,63 +44,55 @@ CASES = [
     # validation is ensured by yaozarrs.validate_zarr_store()
     AcquisitionSettings(
         root_path="tmp",
-        array_settings=ArraySettings(
-            dimensions=[
-                D(name="t", count=2, type="time"),
-                D(name="z", count=4, type="space", scale=5),
-                D(name="c", count=3, type="channel"),
-                D(name="y", count=128, chunk_size=64, type="space", scale=0.1),
-                D(name="x", count=128, chunk_size=64, type="space", scale=0.1),
-            ],
-            dtype="uint16",
-        ),
+        dimensions=[
+            D(name="t", count=2, type="time"),
+            D(name="z", count=4, type="space", scale=5),
+            D(name="c", count=3, type="channel"),
+            D(name="y", count=128, chunk_size=64, type="space", scale=0.1),
+            D(name="x", count=128, chunk_size=64, type="space", scale=0.1),
+        ],
+        dtype="uint16",
     ),
     # Multi-position case
     AcquisitionSettings(
         root_path="tmp",
-        array_settings=ArraySettings(
-            dimensions=[
-                PositionDimension(positions=["Pos0", "Pos1"]),
-                D(name="z", count=3, type="space"),
-                D(name="y", count=128, chunk_size=64, type="space", scale=0.1),
-                D(name="x", count=128, chunk_size=64, type="space", scale=0.1),
-            ],
-            dtype="uint16",
-        ),
+        dimensions=[
+            PositionDimension(positions=["Pos0", "Pos1"]),
+            D(name="z", count=3, type="space"),
+            D(name="y", count=128, chunk_size=64, type="space", scale=0.1),
+            D(name="x", count=128, chunk_size=64, type="space", scale=0.1),
+        ],
+        dtype="uint16",
     ),
     # position interleaved with other dimensions
     AcquisitionSettings(
         root_path="tmp",
-        array_settings=ArraySettings(
-            dimensions=[
-                D(name="t", count=3, type="time"),
-                PositionDimension(positions=["Pos0", "Pos1"]),
-                D(name="y", count=128, chunk_size=64, type="space", scale=0.1),
-                D(name="x", count=128, chunk_size=64, type="space", scale=0.1),
-            ],
-            dtype="uint16",
-        ),
+        dimensions=[
+            D(name="t", count=3, type="time"),
+            PositionDimension(positions=["Pos0", "Pos1"]),
+            D(name="y", count=128, chunk_size=64, type="space", scale=0.1),
+            D(name="x", count=128, chunk_size=64, type="space", scale=0.1),
+        ],
+        dtype="uint16",
     ),
     # Plate case
     AcquisitionSettings(
         root_path="tmp",
-        array_settings=ArraySettings(
-            dimensions=[
-                D(name="t", count=3, chunk_size=1, type="time"),
-                PositionDimension(
-                    positions=[
-                        Position(name="fov0", row="A", column="1"),
-                        Position(name="fov0", row="C", column="4"),
-                        Position(name="fov1", row="C", column="4"),
-                    ]
-                ),
-                D(name="c", count=2, chunk_size=1, type="channel"),
-                D(name="z", count=4, chunk_size=1, type="space"),
-                D(name="y", count=128, chunk_size=64, type="space"),
-                D(name="x", count=128, chunk_size=64, type="space"),
-            ],
-            dtype="uint16",
-        ),
+        dimensions=[
+            D(name="t", count=3, chunk_size=1, type="time"),
+            PositionDimension(
+                positions=[
+                    Position(name="fov0", row="A", column="1"),
+                    Position(name="fov0", row="C", column="4"),
+                    Position(name="fov1", row="C", column="4"),
+                ]
+            ),
+            D(name="c", count=2, chunk_size=1, type="channel"),
+            D(name="z", count=4, chunk_size=1, type="space"),
+            D(name="y", count=128, chunk_size=64, type="space"),
+            D(name="x", count=128, chunk_size=64, type="space"),
+        ],
+        dtype="uint16",
         plate=Plate(
             name="Example Plate",
             row_names=["A", "B", "C", "D"],
@@ -121,19 +103,20 @@ CASES = [
 
 
 def _name_case(case: AcquisitionSettings) -> str:
-    dims = case.array_settings.dimensions
+    dims = case.dimensions
     dim_names = "_".join(f"{d.name}{d.count}" for d in dims)
     plate_str = "plate-" if case.plate is not None else ""
-    return f"{plate_str}{dim_names}-{case.array_settings.dtype}"
+    return f"{plate_str}{dim_names}-{case.dtype}"
 
 
 @pytest.mark.parametrize("case", CASES, ids=_name_case)
-@pytest.mark.parametrize("backend", AVAILABLE_BACKENDS)
-def test_cases_as_zarr(case: AcquisitionSettings, backend: str, tmp_path: Path) -> None:
+def test_cases_as_zarr(
+    case: AcquisitionSettings, zarr_backend: str, tmp_path: Path
+) -> None:
     case.root_path = root = tmp_path / "output.zarr"  # ty: ignore[invalid-assignment]
-    case.backend = backend
-    dims = case.array_settings.dimensions
-    dtype = case.array_settings.dtype
+    case.backend = zarr_backend
+    dims = case.dimensions
+    dtype = case.dtype
     # currently, we enforce that the last 2 dimensions are the frame dimensions
     frame_shape = cast("tuple[int, ...]", tuple(d.count for d in dims[-2:]))
 

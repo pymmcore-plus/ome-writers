@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING, Any, Literal, TypeAlias, get_args
 
 if TYPE_CHECKING:
@@ -93,12 +94,8 @@ def create_stream(settings: AcquisitionSettings) -> OMEStream:
     --------
     >>> settings = AcquisitionSettings(
     ...     root_path="output.zarr",
-    ...     array_settings=ArraySettings(
-    ...         dimensions=dims_from_standard_axes(
-    ...             {"t": 10, "c": 2, "y": 512, "x": 512}
-    ...         ),
-    ...         dtype="uint16",
-    ...     ),
+    ...     dimensions=dims_from_standard_axes({"t": 10, "c": 2, "y": 512, "x": 512}),
+    ...     dtype="uint16",
     ...     overwrite=True,
     ... )
     >>> with create_stream(settings) as stream:
@@ -109,7 +106,7 @@ def create_stream(settings: AcquisitionSettings) -> OMEStream:
 
     # TODO: Support other backends in new protocol
     backend: ArrayBackend = _create_backend(settings)
-    router = FrameRouter(settings.array_settings)
+    router = FrameRouter(settings)
     backend.prepare(settings, router)
     return OMEStream(backend, router)
 
@@ -145,43 +142,48 @@ def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:
     # we need better error handling for incompatibilities, etc...
 
     backend: ArrayBackend | None = None
-    if requested_backend in ("auto", "zarr"):
+    if requested_backend == "zarr" or (
+        requested_backend == "auto" and sys.version_info >= (3, 11)
+    ):
         try:
             from .backends._zarr import ZarrBackend
         except ImportError as e:
             if requested_backend == "zarr":
                 raise ValueError(
                     "Zarr backend requested but 'zarr' package is not installed."
+                    " Install with: pip install ome-writers[zarr]"
                 ) from e
         else:
             backend = ZarrBackend()
-    elif requested_backend == "tensorstore":
+    elif requested_backend in ("tensorstore", "auto"):
         try:
             from .backends._zarr import TensorstoreBackend
         except ImportError as e:
-            raise ValueError(
-                "Tensorstore backend requested but required packages are not installed."
-            ) from e
+            if requested_backend == "tensorstore":
+                raise ValueError(
+                    "Tensorstore backend requested but 'tensorstore' package is not "
+                    "installed. Install with: pip install ome-writers[tensorstore]"
+                ) from e
         else:
             backend = TensorstoreBackend()
-    elif requested_backend == "tiff":
+    elif requested_backend in ("tiff", "auto"):
         try:
             from .backends._tifffile import TiffBackend
         except ImportError as e:
-            raise ValueError(
-                "TIFF backend requested but required packages are not installed. "
-                "Install with: pip install ome-writers[tifffile]"
-            ) from e
+            if requested_backend == "tiff":
+                raise ValueError(
+                    "TIFF backend requested but 'tifffile' package is not installed. "
+                    "Install with: pip install ome-writers[tifffile]"
+                ) from e
         else:
             backend = TiffBackend()
-    elif requested_backend == "acquire-zarr":
+    elif requested_backend in ("acquire-zarr", "auto"):
         try:
             from .backends._acquire_zarr import AcquireZarrBackend
         except ImportError as e:
             raise ValueError(
-                "AcquireZarr backend requested but 'acquire-zarr' package is "
-                "not installed. "
-                "Install with: pip install acquire-zarr"
+                "Acquire-Zarr backend requested but 'acquire-zarr' package is not "
+                "installed. Install with: pip install ome-writers[acquire-zarr]"
             ) from e
         else:
             backend = AcquireZarrBackend()

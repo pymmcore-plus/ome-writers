@@ -13,7 +13,6 @@ from ._stream import BackendName, create_stream
 from ._util import fake_data_for_sizes
 from .schema import (
     AcquisitionSettings,
-    ArraySettings,
     Dimension,
     Plate,
     Position,
@@ -23,7 +22,6 @@ from .schema import (
 
 __all__ = [
     "AcquisitionSettings",
-    "ArraySettings",
     "BackendName",
     "Dimension",
     "Plate",

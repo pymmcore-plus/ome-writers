@@ -55,11 +55,11 @@ class AcquireZarrBackend(ArrayBackend):
 
         # TODO
         # # Acquire-zarr only supports sequential writes in acquisition order
-        # if settings.array_settings.storage_order != "acquisition":
+        # if settings.storage_order != "acquisition":
         #     return (
         #         'AcquireZarrBackend requires storage_order="acquisition" '
         #         "(sequential writes only). "
-        #         f"Got: {settings.array_settings.storage_order!r}"
+        #         f"Got: {settings.storage_order!r}"
         #     )
 
         return False
@@ -114,7 +114,7 @@ class AcquireZarrBackend(ArrayBackend):
                 az.ArraySettings(
                     output_key=az_key,
                     dimensions=az_dims,
-                    data_type=settings.array_settings.dtype,
+                    data_type=settings.dtype,
                     downsampling_method=downsample,
                 )
             )
@@ -165,7 +165,7 @@ class AcquireZarrBackend(ArrayBackend):
                 array_settings = az.ArraySettings(
                     output_key=pos.name,
                     dimensions=az_dims,
-                    data_type=settings.array_settings.dtype,
+                    data_type=settings.dtype,
                     downsampling_method=az.DownsamplingMethod.MEAN,
                 )
                 # Create FieldOfView for each position in this well

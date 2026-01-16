@@ -8,7 +8,7 @@ import pytest
 
 from ome_writers._router import FrameRouter
 from ome_writers.schema import (
-    ArraySettings,
+    AcquisitionSettings,
     Dimension,
     Position,
     PositionDimension,
@@ -115,7 +115,11 @@ def test_router_iteration(
     expected: list[tuple[str, tuple[int, ...]]],
 ) -> None:
     """Test router yields correct (position_info, index) sequence."""
-    settings = ArraySettings(dimensions=dims_from_standard_axes(sizes), dtype="uint16")
+    settings = AcquisitionSettings(
+        root_path="test.zarr",
+        dimensions=dims_from_standard_axes(sizes),
+        dtype="uint16",
+    )
     router = FrameRouter(settings)
     # Extract (pos_name, idx) for comparison with expected
     results = [(pos.name, idx) for (_, pos), idx in router]
@@ -129,7 +133,8 @@ def test_router_storage_order(
     expected: list[tuple[str, tuple[int, ...]]],
 ) -> None:
     """Test router applies storage order permutation correctly."""
-    settings = ArraySettings(
+    settings = AcquisitionSettings(
+        root_path="test.zarr",
         dimensions=dims_from_standard_axes(sizes),
         dtype="uint16",
         storage_order=storage_order,
@@ -141,14 +146,19 @@ def test_router_storage_order(
 def test_router_positions() -> None:
     """Test router.positions property."""
     sizes = {"t": 2, "p": ["well_A", "well_B", "well_C"], "y": 64, "x": 64}
-    settings = ArraySettings(dimensions=dims_from_standard_axes(sizes), dtype="uint16")
+    settings = AcquisitionSettings(
+        root_path="test.zarr",
+        dimensions=dims_from_standard_axes(sizes),
+        dtype="uint16",
+    )
     positions = FrameRouter(settings).positions
     assert [p.name for p in positions] == ["well_A", "well_B", "well_C"]
 
 
 def test_router_unlimited_dimension() -> None:
     """Test router with unlimited dimension doesn't auto-stop."""
-    settings = ArraySettings(
+    settings = AcquisitionSettings(
+        root_path="test.zarr",
         dimensions=[
             Dimension(name="t", count=None, type="time"),  # Unlimited
             Dimension(name="c", count=2, type="channel"),
@@ -184,7 +194,8 @@ def test_router_unlimited_dimension() -> None:
 
 def test_router_unlimited_with_positions() -> None:
     """Test router with unlimited dimension and positions."""
-    settings = ArraySettings(
+    settings = AcquisitionSettings(
+        root_path="test.zarr",
         dimensions=[
             Dimension(name="t", count=None, type="time"),
             PositionDimension(positions=[Position(name="A1"), Position(name="B2")]),
@@ -233,7 +244,8 @@ def test_plate_acquisition_patterns() -> None:
 
     # Pattern 1: Burst timelapse at each well (P outermost)
     # Acquire: A1(t0,t1,t2), B1(t0,t1,t2), C1(t0,t1,t2)
-    burst = ArraySettings(
+    burst = AcquisitionSettings(
+        root_path="test.zarr",
         dimensions=dims_from_standard_axes({"p": wells, "t": 3, "y": 64, "x": 64}),
         dtype="uint16",
     )
@@ -252,7 +264,8 @@ def test_plate_acquisition_patterns() -> None:
 
     # Pattern 2: Round-robin across wells (T outermost)
     # Acquire: A1(t0), B1(t0), C1(t0), A1(t1), B1(t1), C1(t1), ...
-    roundrobin = ArraySettings(
+    roundrobin = AcquisitionSettings(
+        root_path="test.zarr",
         dimensions=dims_from_standard_axes({"t": 3, "p": wells, "y": 64, "x": 64}),
         dtype="uint16",
     )

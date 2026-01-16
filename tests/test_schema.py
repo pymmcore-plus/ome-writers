@@ -5,7 +5,6 @@ from pydantic import ValidationError
 
 from ome_writers.schema import (
     AcquisitionSettings,
-    ArraySettings,
     Dimension,
     Plate,
     Position,
@@ -16,7 +15,8 @@ from ome_writers.schema import (
 def test_schema_unique_dimension_names() -> None:
     """Test that duplicate dimension names raise ValueError."""
     with pytest.raises(ValidationError, match="unique"):
-        ArraySettings(
+        AcquisitionSettings(
+            root_path="test.zarr",
             dimensions=[
                 Dimension(name="t", count=10),
                 Dimension(name="t", count=5),
@@ -30,7 +30,8 @@ def test_schema_unique_dimension_names() -> None:
 def test_schema_unlimited_first_only() -> None:
     """Test that only first dimension can be unlimited (count=None)."""
     # First dimension unlimited - OK
-    ArraySettings(
+    AcquisitionSettings(
+        root_path="test.zarr",
         dimensions=[
             Dimension(name="t", count=None),
             Dimension(name="y", count=64, type="space"),
@@ -43,7 +44,8 @@ def test_schema_unlimited_first_only() -> None:
     with pytest.raises(
         ValidationError, match=" Only the first dimension may be unbounded"
     ):
-        ArraySettings(
+        AcquisitionSettings(
+            root_path="test.zarr",
             dimensions=[
                 Dimension(name="t", count=10),
                 Dimension(name="c", count=None),
@@ -84,25 +86,21 @@ def test_position_with_plate_context() -> None:
 
 def test_plate_requires_row_column() -> None:
     """Test that plate mode requires row/column on positions."""
-    array_settings = ArraySettings(
-        dimensions=[
-            Dimension(name="t", count=2, type="time"),
-            PositionDimension(
-                # Missing row/column
-                positions=[Position(name="A1")]
-            ),
-            Dimension(name="y", count=16, type="space"),
-            Dimension(name="x", count=16, type="space"),
-        ],
-        dtype="uint16",
-    )
-
     with pytest.raises(
         ValueError, match="All positions must have row and column for plate mode"
     ):
         AcquisitionSettings(
             root_path="plate.ome.zarr",
-            array_settings=array_settings,
+            dimensions=[
+                Dimension(name="t", count=2, type="time"),
+                PositionDimension(
+                    # Missing row/column
+                    positions=[Position(name="A1")]
+                ),
+                Dimension(name="y", count=16, type="space"),
+                Dimension(name="x", count=16, type="space"),
+            ],
+            dtype="uint16",
             plate=Plate(row_names=["A"], column_names=["1"]),
             overwrite=True,
         )
@@ -113,7 +111,8 @@ def test_duplicate_names_rejected() -> None:
     with pytest.raises(
         ValueError, match="Position names must be unique within each well"
     ):
-        ArraySettings(
+        AcquisitionSettings(
+            root_path="test.zarr",
             dimensions=[
                 PositionDimension(
                     positions=[
@@ -130,7 +129,8 @@ def test_duplicate_names_rejected() -> None:
     with pytest.raises(
         ValueError, match="positions without row/column must have unique names"
     ):
-        ArraySettings(
+        AcquisitionSettings(
+            root_path="test.zarr",
             dimensions=[
                 PositionDimension(
                     positions=[

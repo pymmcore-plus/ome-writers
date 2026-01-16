@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -12,13 +13,15 @@ from ome_writers._router import FrameRouter
 from ome_writers.backends._zarr import ZarrBackend
 from ome_writers.schema import (
     AcquisitionSettings,
-    ArraySettings,
     dims_from_standard_axes,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
+
+if sys.version_info < (3, 11):
+    pytest.skip("zarr backend Requires Python 3.11+", allow_module_level=True)
 
 zarr = pytest.importorskip("zarr")
 pytest.importorskip("yaozarrs")
@@ -64,15 +67,13 @@ def test_zarr_backend_write(
     tmp_path: Path,
 ) -> None:
     """Test backend writes correct shapes for various configurations."""
-    array_settings = ArraySettings(
-        dimensions=dims_from_standard_axes(sizes), dtype="uint16"
-    )
     settings = AcquisitionSettings(
         root_path=str(tmp_path / "test.zarr"),
-        array_settings=array_settings,
+        dimensions=dims_from_standard_axes(sizes),
+        dtype="uint16",
         overwrite=True,
     )
-    router = FrameRouter(array_settings)
+    router = FrameRouter(settings)
     backend = ZarrBackend()
 
     backend.prepare(settings, router)

@@ -9,6 +9,8 @@ from pathlib import Path
 from queue import Queue
 from typing import TYPE_CHECKING, Literal
 
+from ome_writers._backend import ArrayBackend
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -17,7 +19,6 @@ if TYPE_CHECKING:
     from ome_writers._router import FrameRouter, PositionInfo
     from ome_writers.schema import AcquisitionSettings, Dimension
 
-from ome_writers._backend import ArrayBackend
 
 try:
     import ome_types.model as ome
@@ -64,7 +65,7 @@ class TiffBackend(ArrayBackend):
 
         # Compute shape from storage dimensions
         shape = tuple(d.count if d.count is not None else 1 for d in storage_dims)
-        dtype = settings.array_settings.dtype
+        dtype = settings.dtype
 
         # Prepare file paths
         fnames = self._prepare_files(root, len(positions), settings.overwrite)

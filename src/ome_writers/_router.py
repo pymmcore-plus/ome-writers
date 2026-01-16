@@ -14,11 +14,12 @@ Design Notes
 ------------
 The router is the *only* component that understands both orderings:
 
-- **Acquisition order**: The order dimensions appear in `ArraySettings.dimensions`.
-  This is how frames arrive from the microscope. For dimensions [T, Z, C, Y, X],
-  frames arrive in nested-loop order where the last dimension varies fastest.
+- **Acquisition order**: The order dimensions appear in
+  `AcquisitionSettings.dimensions`. This is how frames arrive from the microscope. For
+  dimensions [T, Z, C, Y, X], frames arrive in nested-loop order where the last
+  dimension varies fastest.
 
-- **Storage order**: Controlled by `ArraySettings.storage_order`. Can be:
+- **Storage order**: Controlled by `AcquisitionSettings.storage_order`. Can be:
   - "acquisition" - same as acquisition order
   - "ngff" - canonical NGFF order (time, channel, space)
   - list[str] - explicit axis names
@@ -35,9 +36,10 @@ Examples
 --------
 Basic iteration with storage order matching acquisition order:
 
->>> from ome_writers import ArraySettings, Dimension
+>>> from ome_writers import AcquisitionSettings, Dimension
 >>> from ome_writers._router import FrameRouter
->>> settings = ArraySettings(
+>>> settings = AcquisitionSettings(
+...     root_path="test.zarr",
 ...     dimensions=[
 ...         Dimension(name="t", count=2),
 ...         Dimension(name="c", count=3),
@@ -58,9 +60,10 @@ pos=(0, Position(name='0', row=None, column=None)), idx=(1, 2)
 
 Multi-position with position interleaved (time-lapse across positions):
 
->>> from ome_writers import Position, PositionDimension, ArraySettings, Dimension
+>>> from ome_writers import Position, PositionDimension, AcquisitionSettings, Dimension
 >>> from ome_writers._router import FrameRouter
->>> settings = ArraySettings(
+>>> settings = AcquisitionSettings(
+...     root_path="test.zarr",
 ...     dimensions=[
 ...         Dimension(name="t", count=2),
 ...         PositionDimension(
@@ -92,7 +95,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from .schema import ArraySettings, Dimension, Position, PositionDimension
+from .schema import AcquisitionSettings, Dimension, Position, PositionDimension
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -119,7 +122,7 @@ class FrameRouter:
 
     Parameters
     ----------
-    settings : ArraySettings
+    settings : AcquisitionSettings
         Schema describing dimensions, dtype, and storage order.
 
     Yields
@@ -130,7 +133,7 @@ class FrameRouter:
         - storage_index: N-dimensional index in storage order (excludes Y/X)
     """
 
-    def __init__(self, settings: ArraySettings) -> None:
+    def __init__(self, settings: AcquisitionSettings) -> None:
         dims = settings.dimensions
 
         # we have already validated that last two dims are spatial in
