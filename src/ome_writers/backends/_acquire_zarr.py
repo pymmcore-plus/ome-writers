@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     import numpy as np
     from pydantic import BaseModel
 
-    from ome_writers._router import FrameRouter, PositionInfo
+    from ome_writers._router import FrameRouter, Position, PositionInfo
     from ome_writers.schema import AcquisitionSettings, Dimension
 
 try:
@@ -39,7 +39,7 @@ class AcquireZarrBackend(ArrayBackend):
         self._stream: az.ZarrStream | None = None
         self._finalized = False
         self._root_path: Path | None = None
-        self._storage_dims: list[Dimension] = []
+        self._storage_dims: tuple[Dimension, ...] = ()
         self._num_positions: int = 0
         self._is_hcs: bool = False
 
@@ -131,9 +131,12 @@ class AcquireZarrBackend(ArrayBackend):
         self, settings: AcquisitionSettings, positions: tuple, az_dims: list
     ) -> None:
         """Prepare acquire-zarr stream for HCS plate acquisitions."""
+        plate = settings.plate
+        assert plate is not None
+
         # Group positions by (row, column) to create wells
         # wells_map: {(row, col): [(pos_idx, Position), ...]}
-        wells_map: dict[tuple[str, str], list[tuple[int, object]]] = {}
+        wells_map: dict[tuple[str, str], list[tuple[int, Position]]] = {}
         for idx, pos in enumerate(positions):
             if pos.row is None or pos.column is None:
                 raise ValueError(
@@ -180,9 +183,9 @@ class AcquireZarrBackend(ArrayBackend):
         # Create Plate
         az_plate = az.Plate(
             path="",  # empty path so the plate is at the root of the store
-            name=settings.plate.name,
-            row_names=settings.plate.row_names,
-            column_names=settings.plate.column_names,
+            name=plate.name,
+            row_names=plate.row_names,
+            column_names=plate.column_names,
             wells=az_wells,
             acquisitions=[az.Acquisition(id=0, name="default")],
         )
@@ -241,7 +244,9 @@ class AcquireZarrBackend(ArrayBackend):
         elif self._num_positions > 1:
             # create valid bioformats2raw series group
             # Create root zarr.json with bioformats2raw.layout
-            _create_zarr3_group(self._root_path, v05.Bf2Raw(bioformats2raw_layout=3))
+            _create_zarr3_group(
+                self._root_path, v05.Bf2Raw.model_validate({"bioformats2raw.layout": 3})
+            )
 
             # Create OME/zarr.json with series list
             ome_path = self._root_path / "OME"

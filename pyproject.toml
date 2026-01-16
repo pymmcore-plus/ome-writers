@@ -169,3 +169,4 @@ python = "./.venv"
 
 [tool.ty.rules]
 invalid-argument-type = "ignore" # tough with pydantic
+possibly-missing-attribute = "ignore"

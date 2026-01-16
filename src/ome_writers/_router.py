@@ -187,7 +187,7 @@ class FrameRouter:
         reordered according to storage_order, with spatial dimensions appended.
         Backends use this to build arrays with the correct shape and metadata.
         """
-        return tuple(self._storage_index_dims + self._frame_dims)
+        return tuple(self._storage_index_dims) + tuple(self._frame_dims)
 
     @property
     def num_frames(self) -> int | None:

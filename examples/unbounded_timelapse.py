@@ -30,7 +30,7 @@ settings = AcquisitionSettings(
 )
 
 N = 3  # actual count of first dimension (in reality, could be conditional)
-numframes = np.prod(settings.array_settings.shape[1:-2]) * N  # type: ignore
+numframes = np.prod(settings.array_settings.shape[1:-2]) * N
 with create_stream(settings) as stream:
     for i in range(numframes):
         stream.append(np.full((256, 256), i, dtype=settings.array_settings.dtype))

@@ -200,7 +200,7 @@ def _validate_array_tensorstore(
     """Validate an array stored on disk using tensorstore."""
     import tensorstore
 
-    array0 = group["0"].to_tensorstore()  # type: ignore[possibly-unbound-attribute]
+    array0 = group["0"].to_tensorstore()
     assert isinstance(array0, tensorstore.TensorStore)
 
     # check on disk shape, dtype, dimension order and labels

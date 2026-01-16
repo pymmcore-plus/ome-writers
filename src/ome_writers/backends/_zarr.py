@@ -56,7 +56,7 @@ class YaozarrsBackend(ArrayBackend):
         # Plate mode
         if settings.plate is not None:
             # mapping of {(row, column): [(position_index, Position), ...]}
-            well_positions: dict[tuple[str, str], list[PositionInfo]] = {}
+            well_positions = {}
             for i, pos in enumerate(positions):
                 key = (pos.row, pos.column)
                 well_positions.setdefault(key, []).append((i, pos))

@@ -123,8 +123,8 @@ class PositionDimension(_BaseModel):
 
 
 def _validate_dims_list(
-    dims: list[Dimension | PositionDimension],
-) -> list[Dimension | PositionDimension]:
+    dims: tuple[Dimension | PositionDimension, ...],
+) -> tuple[Dimension | PositionDimension, ...]:
     dim_names = [dim.name for dim in dims]
     if len(dim_names) != len(set(dim_names)):
         raise ValueError("Dimension names must be unique.")
@@ -136,10 +136,11 @@ def _validate_dims_list(
 
     # ensure at least 2 spatial dimensions at the end
     spatial_dims = [d for d in dims if isinstance(d, Dimension) and d.type == "space"]
-    if len(spatial_dims) < 2 or dims[-2:] != spatial_dims[-2:]:
+    if len(spatial_dims) < 2 or dims[-2:] != tuple(spatial_dims[-2:]):
         # TODO: Consider whether this is the best way to express this.
         # should dimension take another parameter indicating image dims?
         # (to distinguish from other spatial dims like Z?)
+        breakpoint()
         raise ValueError(
             "The last two dimensions must have `type='space'` (e.g. Y and X)."
         )
@@ -154,7 +155,7 @@ def _validate_dims_list(
             _validate_unique_names_per_well(dim.positions)
             has_pos = True
 
-    return dims
+    return tuple(dims)
 
 
 def _validate_unique_names_per_well(positions: list[Position]) -> None:
@@ -165,7 +166,7 @@ def _validate_unique_names_per_well(positions: list[Position]) -> None:
     but not multiple positions with the same name in the same well.
     """
     # Group positions by (row, column) - only for positions with both defined
-    wells: dict[tuple[str, str], list[str]] = {}
+    wells = {}
     for pos in positions:
         key = (pos.row, pos.column)
         wells.setdefault(key, []).append(pos.name)
@@ -174,7 +175,7 @@ def _validate_unique_names_per_well(positions: list[Position]) -> None:
     for (row, col), names in wells.items():
         if len(names) != len(set(names)):
             seen: set[str] = set()
-            duplicates = [n for n in names if n in seen or seen.add(n)]  # type: ignore[func-returns-value]
+            duplicates = [n for n in names if n in seen or seen.add(n)]
             if row is None and col is None:
                 raise ValueError(
                     "All positions without row/column must have unique names."
@@ -192,17 +193,48 @@ class ArraySettings(_BaseModel):
     # PositionDimension can appear anywhere in the list to control acquisition order.
     # Its location determines when positions are visited relative to other dimensions.
     dimensions: Annotated[
-        list[Dimension | PositionDimension], AfterValidator(_validate_dims_list)
+        tuple[Dimension | PositionDimension, ...], AfterValidator(_validate_dims_list)
     ]
     dtype: str
     compression: str | None = None
-    position_name: str | None = None
+    # FIXME:
+    # "ngff" is intended to be a placeholder for "spec-compliant" storage order.
+    # It MAY depend on the output format (e.g. OME-Zarr vs OME-TIFF) and
+    # version, and backends may have different restrictions.  So 'ngff' is probably
+    # too narrow of a term.
     storage_order: Literal["acquisition", "ngff"] | list[str] = "ngff"
 
     @property
     def shape(self) -> tuple[int | None, ...]:
         """Shape of the array (count for each dimension)."""
         return tuple(dim.count for dim in self.dimensions)
+
+    @property
+    def positions(self) -> tuple[Position, ...]:
+        """Position objects in acquisition order.
+
+        Backends use this to create arrays/files for each position before
+        iteration begins. Each Position contains name, row, and column metadata.
+        """
+        for dim in self.dimensions[:-2]:  # last 2 dims may never be positions
+            if isinstance(dim, PositionDimension):
+                return tuple(dim.positions)
+        return (Position(name="0"),)  # single default position
+
+    @property
+    def position_dimension_index(self) -> int | None:
+        """Index of PositionDimension in dimensions, or None if not present."""
+        for i, dim in enumerate(self.dimensions[:-2]):
+            if isinstance(dim, PositionDimension):
+                return i
+        return None
+
+    @property
+    def array_dimensions(self) -> tuple[Dimension, ...]:
+        """All Dimensions excluding PositionDimension dimensions."""
+        return tuple(
+            dim for dim in self.dimensions if not isinstance(dim, PositionDimension)
+        )
 
 
 class Plate(_BaseModel):

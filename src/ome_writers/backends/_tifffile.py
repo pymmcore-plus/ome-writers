@@ -75,7 +75,7 @@ class TiffBackend(ArrayBackend):
             ome_xml = self._generate_ome_xml(storage_dims, dtype, Path(fname).name)
 
             self._file_paths[p_idx] = fname
-            self._queues[p_idx] = q = Queue()  # type: ignore[var-annotated]
+            self._queues[p_idx] = q = Queue()
             self._threads[p_idx] = thread = WriterThread(
                 path=fname,
                 shape=shape,
