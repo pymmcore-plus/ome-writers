@@ -146,7 +146,7 @@ def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:
         requested_backend == "auto" and sys.version_info >= (3, 11)
     ):
         try:
-            from .backends._zarr import ZarrBackend
+            from .backends._yaozarrs import ZarrBackend
         except ImportError as e:
             if requested_backend == "zarr":
                 raise ValueError(
@@ -157,7 +157,7 @@ def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:
             backend = ZarrBackend()
     elif requested_backend in ("tensorstore", "auto"):
         try:
-            from .backends._zarr import TensorstoreBackend
+            from .backends._yaozarrs import TensorstoreBackend
         except ImportError as e:
             if requested_backend == "tensorstore":
                 raise ValueError(
