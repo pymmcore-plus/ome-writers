@@ -29,9 +29,12 @@ classifiers = [
 dependencies = ["numpy>=2", "typing-extensions>=4.10.0", "yaozarrs>=0.2.0"]
 
 [project.optional-dependencies]
-tensorstore = ["yaozarrs[write-tensorstore]>=0.2.0"]
+tensorstore = [
+    "yaozarrs[write-tensorstore]>=0.2.0",
+    "tensorstore>=0.1.80; python_version > '3.10'",
+]
 zarr = ["yaozarrs[write-zarr]>=0.2.0"]
-acquire-zarr = ["acquire-zarr>=0.6.0"]
+acquire-zarr = ["acquire-zarr>=0.6.0; python_version < '3.14'"]
 tifffile = ["tifffile>=2024.8.30", "ome-types>=0.6.1", "pydantic>=2.8"]
 all = ["ome-writers[tensorstore,zarr,acquire-zarr,tifffile]"]
 
@@ -168,5 +171,5 @@ extend-ignore-identifiers-re = ["(?i)nd2?.*", "(?i)ome", "FOV"]
 python = "./.venv"
 
 [tool.ty.rules]
-invalid-argument-type = "ignore" # tough with pydantic
+invalid-argument-type = "ignore"      # tough with pydantic
 possibly-missing-attribute = "ignore"
