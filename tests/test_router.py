@@ -143,15 +143,15 @@ def test_router_storage_order(
     assert results == expected
 
 
-def test_router_positions() -> None:
-    """Test router.positions property."""
+def test_settings_positions() -> None:
+    """Test settings.positions property."""
     sizes = {"t": 2, "p": ["well_A", "well_B", "well_C"], "y": 64, "x": 64}
     settings = AcquisitionSettings(
         root_path="test.zarr",
         dimensions=dims_from_standard_axes(sizes),
         dtype="uint16",
     )
-    positions = FrameRouter(settings).positions
+    positions = settings.positions
     assert [p.name for p in positions] == ["well_A", "well_B", "well_C"]
 
 

@@ -93,9 +93,9 @@ pos=1:B2, idx=(1, 1)
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
-from .schema import AcquisitionSettings, Dimension, Position, PositionDimension
+from .schema import AcquisitionSettings, Dimension, Position
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -134,68 +134,35 @@ class FrameRouter:
     """
 
     def __init__(self, settings: AcquisitionSettings) -> None:
-        dims = settings.dimensions
-
-        # we have already validated that last two dims are spatial in
-        # schema._validate_dims_list
-        self._frame_dims = cast("list[Dimension]", dims[-2:])
-
-        non_frame_dims = dims[:-2]
-
-        # sizes of all non-frame dimensions, *including* position dimension if present
-        self._non_frame_sizes: tuple[int | None, ...] = tuple(
-            d.count for d in non_frame_dims
-        )
-
-        # Index Dimensions (all non-frame dims excluding PositionDimension)
-        self._index_dims: list[Dimension] = []
-
-        # Positions list from the PositionDimension
-        # Defaults single position with name "0"
-        self._positions: list[Position] = [Position(name="0")]
-        # index of PositionDimension in dimensions, if present
-        self._position_index: int | None = None
-
-        for idx, dim in enumerate(non_frame_dims):
-            if isinstance(dim, PositionDimension):
-                self._position_index = idx
-                self._positions = dim.positions
-            else:
-                self._index_dims.append(dim)
+        self._positions = settings.positions
+        self._position_index: int | None = settings.position_dimension_index
+        self._non_frame_sizes = tuple(d.count for d in settings.dimensions[:-2])
+        self._num_non_frame_dims = len(self._non_frame_sizes)
 
         # Compute storage order permutation (for non-position "index" dimensions only)
-        self._storage_index_dims = _sort_dims_to_storage_order(
-            self._index_dims, settings.storage_order
-        )
         self._permutation = _compute_permutation(
-            self._index_dims, self._storage_index_dims
+            settings.index_dimensions, settings.storage_index_dimensions
         )
+        self._is_permuted = self._permutation != tuple(range(len(self._permutation)))
+
+        # Precompute which indices to extract for acq_idx (all except position)
+        if self._position_index is not None:
+            self._acq_idx_positions = tuple(
+                i for i in range(self._num_non_frame_dims) if i != self._position_index
+            )
+        else:
+            self._acq_idx_positions = tuple(range(self._num_non_frame_dims))
 
         self._reset()
-
-    @property
-    def positions(self) -> tuple[Position, ...]:
-        """Position objects in acquisition order.
-
-        Backends use this to create arrays/files for each position before
-        iteration begins. Each Position contains name, row, and column metadata.
-        """
-        return tuple(self._positions)
-
-    @property
-    def array_storage_dimensions(self) -> tuple[Dimension, ...]:
-        """Full array dims in storage order, including spatial dims (Y, X) at end.
-
-        Returns the full Dimension objects with all metadata (count, scale, type, etc.)
-        reordered according to storage_order, with spatial dimensions appended.
-        Backends use this to build arrays with the correct shape and metadata.
-        """
-        return tuple(self._storage_index_dims) + tuple(self._frame_dims)
 
     def __iter__(self) -> Iterator[tuple[PositionInfo, tuple[int, ...]]]:
         """Return iterator, resetting to first frame."""
         self._reset()
         return self
+
+    def _reset(self) -> None:
+        self._dim_indices = [0] * self._num_non_frame_dims
+        self._finished = False
 
     def __next__(self) -> tuple[PositionInfo, tuple[int, ...]]:
         """Yield next (position_info, storage_index) tuple.
@@ -206,35 +173,23 @@ class FrameRouter:
         For finite dimensions, iteration stops after all frames.
         For unlimited dimensions, iteration never stops - caller must break.
         """
-        if self._finished or not self._non_frame_sizes:
+        if self._finished:
             raise StopIteration
 
-        # Use current dimension indices
-        full_idx = tuple(self._dim_indices)
-
-        # Extract position and build storage index
+        # Extract position index directly from current indices
         if self._position_index is not None:
-            pos_idx = full_idx[self._position_index]
-            # Remove position from index
-            acq_idx = (
-                full_idx[: self._position_index] + full_idx[self._position_index + 1 :]
-            )
+            pos_idx = self._dim_indices[self._position_index]
         else:
             pos_idx = 0
-            acq_idx = full_idx
 
-        # Apply permutation: acquisition order → storage order
-        storage_idx = tuple(acq_idx[p] for p in self._permutation)
-        position_info: PositionInfo = (pos_idx, self._positions[pos_idx])
+        # Build storage index by extracting relevant indices and applying permutation
+        storage_idx = tuple(self._dim_indices[i] for i in self._acq_idx_positions)
+        if self._is_permuted:
+            storage_idx = tuple(storage_idx[p] for p in self._permutation)
 
         # Increment indices for next iteration
         self._increment_indices()
-
-        return position_info, storage_idx
-
-    def _reset(self) -> None:
-        self._dim_indices = [0] * len(self._non_frame_sizes)
-        self._finished = False
+        return (pos_idx, self._positions[pos_idx]), storage_idx
 
     def _increment_indices(self) -> None:
         """Increment dimension indices like nested loops (rightmost varies fastest).
@@ -242,59 +197,38 @@ class FrameRouter:
         Sets _finished flag when all finite dimensions have been exhausted.
         For unlimited dimensions, never sets _finished.
         """
-        # Start from rightmost dimension (varies fastest)
-        for i in range(len(self._dim_indices) - 1, -1, -1):
+        if not self._num_non_frame_dims:
+            self._finished = True
+            return
+
+        # Fast path: increment rightmost dimension (99%+ of calls)
+        last_idx = self._num_non_frame_dims - 1
+        self._dim_indices[last_idx] += 1
+
+        size_limit = self._non_frame_sizes[last_idx]
+        if size_limit is None:
+            return  # Unlimited dimension
+        if self._dim_indices[last_idx] < size_limit:
+            return  # Still within bounds - common case
+
+        # Slow path: wrap rightmost and carry to other dimensions (rare)
+        self._dim_indices[last_idx] = 0
+
+        # Handle remaining dimensions (only when wrapping occurs)
+        for i in range(last_idx - 1, -1, -1):
             self._dim_indices[i] += 1
 
-            # Check if we've exceeded the limit for this dimension
             size_limit = self._non_frame_sizes[i]
             if size_limit is None:
-                # Unlimited dimension - never wraps, iteration continues indefinitely
-                return
+                return  # Unlimited dimension
             elif self._dim_indices[i] < size_limit:
-                # Still within bounds for this dimension
-                return
+                return  # Still within bounds
 
             # Exceeded this dimension's limit - reset and carry to next dimension
             self._dim_indices[i] = 0
 
         # Wrapped all dimensions - iteration is complete
         self._finished = True
-
-
-def _ngff_sort_key(dim: Dimension) -> tuple[int, int]:
-    """Sort key for NGFF canonical order: time, channel, space (z, y, x)."""
-    if dim.type == "time":
-        return (0, 0)
-    if dim.type == "channel":
-        return (1, 0)
-    if dim.type == "space":
-        return (2, {"z": 0, "y": 1, "x": 2}.get(dim.name, -1))
-    return (3, 0)
-
-
-def _sort_dims_to_storage_order(
-    acq_dims: list[Dimension],
-    storage_order: str | list[str],
-) -> list[Dimension]:
-    """Resolve storage_order setting to explicit list of dimension names."""
-    if storage_order == "acquisition":
-        return list(acq_dims)
-    elif storage_order == "ngff":
-        return sorted(acq_dims, key=_ngff_sort_key)
-    elif isinstance(storage_order, list):
-        dims_map = {dim.name: dim for dim in acq_dims}
-        if set(storage_order) != set(dims_map):
-            raise ValueError(
-                f"storage_order names {storage_order!r} don't match "
-                f"acquisition dimension names {list(dims_map)}"
-            )
-        return [dims_map[name] for name in storage_order]
-    else:
-        raise ValueError(
-            f"Invalid storage_order: {storage_order!r}. Must be 'acquisition', 'ngff', "
-            "or list of names."
-        )
 
 
 def _compute_permutation(

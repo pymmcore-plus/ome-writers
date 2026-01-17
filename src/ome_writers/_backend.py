@@ -108,7 +108,7 @@ class ArrayBackend(ABC):
             settings (dimensions, dtype, chunking, etc.) from this object.
         router
             The FrameRouter that will be used for iteration. Backends can use
-            `router.positions` to get the list of Position objects to create.
+            `settings.positions` to get the list of Position objects to create.
 
         Raises
         ------

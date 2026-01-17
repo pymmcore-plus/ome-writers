@@ -28,6 +28,14 @@ CASES = [
     AcquisitionSettings(
         root_path="tmp",
         dimensions=[
+            D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
+            D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
+        ],
+        dtype="uint16",
+    ),
+    AcquisitionSettings(
+        root_path="tmp",
+        dimensions=[
             D(name="c", count=3, type="channel"),
             D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
             D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
@@ -137,8 +145,8 @@ def test_cases_as_zarr(
 ) -> None:
     is_tiff = any_backend == "tiff"
     ext = ".ome.tiff" if is_tiff else ".ome.zarr"
-    case.root_path = tmp_path / f"output{ext}"  # ty: ignore[invalid-assignment]
-    case.backend = any_backend
+    object.__setattr__(case, "root_path", str(tmp_path / f"output{ext}"))
+    object.__setattr__(case, "backend", any_backend)
     dims = case.dimensions
     # currently, we enforce that the last 2 dimensions are the frame dimensions
     frame_shape = cast("tuple[int, ...]", tuple(d.count for d in dims[-2:]))
@@ -149,10 +157,9 @@ def test_cases_as_zarr(
         # unbounded, use a fixed number for testing
         num_frames = math.prod((d.count or UNBOUNDED_FRAME_COUNT) for d in dims[:-2])
 
+    stored_array_dims = [d.model_copy() for d in case.array_storage_dimensions]
     with create_stream(case) as stream:
-        router = stream._router
         # Create deep copies to avoid mutating the original Dimension objects
-        stored_array_dims = [d.model_copy() for d in router.array_storage_dimensions]
         for f in range(num_frames):
             frame_data = np.full(frame_shape, f, dtype=case.dtype)
             stream.append(frame_data)

@@ -61,8 +61,8 @@ class TiffBackend(ArrayBackend):
         """Initialize OME-TIFF files and writer threads."""
         self._finalized = False
         root = Path(settings.root_path).expanduser().resolve()
-        positions = router.positions
-        storage_dims = router.array_storage_dimensions
+        positions = settings.positions
+        storage_dims = settings.array_storage_dimensions
         self._storage_dims = storage_dims  # Store for metadata updates
         self._dtype = settings.dtype
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from functools import cached_property
 from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 from pydantic import (
@@ -203,6 +204,8 @@ class Plate(_BaseModel):
 class AcquisitionSettings(_BaseModel):
     """Top-level acquisition settings."""
 
+    model_config = ConfigDict(frozen=True, validate_default=True)
+
     root_path: Annotated[str, BeforeValidator(str)]
     # PositionDimension can appear anywhere in the list to control acquisition order.
     # Its location determines when positions are visited relative to other dimensions.
@@ -221,17 +224,17 @@ class AcquisitionSettings(_BaseModel):
     overwrite: bool = False
     backend: str = "auto"
 
-    @property
+    @cached_property
     def shape(self) -> tuple[int | None, ...]:
         """Shape of the array (count for each dimension)."""
         return tuple(dim.count for dim in self.dimensions)
 
-    @property
+    @cached_property
     def is_unbounded(self) -> bool:
         """Whether the acquisition has an unbounded (None) dimension."""
         return any(dim.count is None for dim in self.dimensions)
 
-    @property
+    @cached_property
     def num_frames(self) -> int | None:
         """Return total number of frames, or None if unlimited dimension present."""
         _non_frame_sizes = tuple(d.count for d in self.dimensions[:-2])
@@ -242,19 +245,15 @@ class AcquisitionSettings(_BaseModel):
             total *= size
         return total
 
-    @property
+    @cached_property
     def positions(self) -> tuple[Position, ...]:
-        """Position objects in acquisition order.
-
-        Backends use this to create arrays/files for each position before
-        iteration begins. Each Position contains name, row, and column metadata.
-        """
+        """Position objects in acquisition order."""
         for dim in self.dimensions[:-2]:  # last 2 dims may never be positions
             if isinstance(dim, PositionDimension):
                 return tuple(dim.positions)
         return (Position(name="0"),)  # single default position
 
-    @property
+    @cached_property
     def position_dimension_index(self) -> int | None:
         """Index of PositionDimension in dimensions, or None if not present."""
         for i, dim in enumerate(self.dimensions[:-2]):
@@ -262,12 +261,32 @@ class AcquisitionSettings(_BaseModel):
                 return i
         return None
 
-    @property
+    @cached_property
+    def frame_dimensions(self) -> tuple[Dimension, ...]:
+        """In-frame dimensions, currently always last two dims (usually (Y,X))."""
+        return cast("tuple[Dimension, ...]", self.dimensions[-2:])
+
+    @cached_property
+    def index_dimensions(self) -> tuple[Dimension, ...]:
+        """All NON-frame Dimensions, excluding PositionDimension dimensions."""
+        return tuple(dim for dim in self.dimensions[:-2] if isinstance(dim, Dimension))
+
+    @cached_property
+    def storage_index_dimensions(self) -> tuple[Dimension, ...]:
+        """NON-frame Dimensions in storage order."""
+        return _sort_dims_to_storage_order(self.index_dimensions, self.storage_order)
+
+    @cached_property
     def array_dimensions(self) -> tuple[Dimension, ...]:
         """All Dimensions excluding PositionDimension dimensions."""
         return tuple(
             dim for dim in self.dimensions if not isinstance(dim, PositionDimension)
         )
+
+    @cached_property
+    def array_storage_dimensions(self) -> tuple[Dimension, ...]:
+        """All Dimensions (excluding PositionDimension) in storage order."""
+        return self.storage_index_dimensions + self.frame_dimensions
 
     @model_validator(mode="after")
     def _validate_plate_positions(self) -> AcquisitionSettings:
@@ -370,3 +389,38 @@ def dims_from_standard_axes(
                 )
             )
     return dims
+
+
+def _ngff_sort_key(dim: Dimension) -> tuple[int, int]:
+    """Sort key for NGFF canonical order: time, channel, space (z, y, x)."""
+    if dim.type == "time":
+        return (0, 0)
+    if dim.type == "channel":
+        return (1, 0)
+    if dim.type == "space":
+        return (2, {"z": 0, "y": 1, "x": 2}.get(dim.name, -1))
+    return (3, 0)
+
+
+def _sort_dims_to_storage_order(
+    acq_dims: list[Dimension],
+    storage_order: str | list[str],
+) -> tuple[Dimension, ...]:
+    """Resolve storage_order setting to explicit list of dimension names."""
+    if storage_order == "acquisition":
+        return tuple(acq_dims)
+    elif storage_order == "ngff":
+        return tuple(sorted(acq_dims, key=_ngff_sort_key))
+    elif isinstance(storage_order, list):
+        dims_map = {dim.name: dim for dim in acq_dims}
+        if set(storage_order) != set(dims_map):
+            raise ValueError(
+                f"storage_order names {storage_order!r} don't match "
+                f"acquisition dimension names {list(dims_map)}"
+            )
+        return tuple(dims_map[name] for name in storage_order)
+    else:
+        raise ValueError(
+            f"Invalid storage_order: {storage_order!r}. Must be 'acquisition', 'ngff', "
+            "or list of names."
+        )
