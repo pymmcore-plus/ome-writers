@@ -215,7 +215,7 @@ class AcquireZarrBackend(ArrayBackend):
         # The key matches the output_key we set in ArraySettings
         # the check on num positions matches the behavior above in prepare()
         az_pos_key = self._az_pos_keys[position_info[0]]
-        self._stream.append(frame, key=az_pos_key)  # type: ignore (stream will not be None)
+        self._stream.append(frame, key=az_pos_key)  # pyright: ignore (stream will not be None)
 
     def finalize(self) -> None:
         """Close stream and patch metadata."""
