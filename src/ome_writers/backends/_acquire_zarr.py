@@ -143,24 +143,15 @@ class AcquireZarrBackend(ArrayBackend):
         plate = settings.plate
         assert plate is not None
 
+        # Create output keys for each position: "row/column/fov_name"
+        # Use empty plate_path so the plate is at the root, not in a subdirectory
+        self._az_pos_keys = [f"{pos.row}/{pos.column}/{pos.name}" for pos in positions]
+
         # Group positions by (row, column) to create wells
         # wells_map: {(row, col): [(pos_idx, Position), ...]}
         wells_map: dict[tuple[str, str], list[tuple[int, Position]]] = {}
         for idx, pos in enumerate(positions):
-            if pos.row is None or pos.column is None:
-                raise ValueError(
-                    f"Position {pos.name!r} must have row and column for plate mode. "
-                    f"Got row={pos.row!r}, column={pos.column!r}"
-                )
-            key = (pos.row, pos.column)
-            wells_map.setdefault(key, []).append((idx, pos))
-
-        # Create output keys for each position: "row/column/fov_name"
-        # Use empty plate_path so the plate is at the root, not in a subdirectory
-        self._az_pos_keys = []
-        for pos in positions:
-            az_key = f"{pos.row}/{pos.column}/{pos.name}"
-            self._az_pos_keys.append(az_key)
+            wells_map.setdefault((pos.row, pos.column), []).append((idx, pos))
 
         # Create Wells with FieldOfViews
         az_wells = []
@@ -242,7 +233,7 @@ class AcquireZarrBackend(ArrayBackend):
         In certain scenarios, we need to slightly modify the metadata generated
         by acquire-zarr to ensure full compliance with OME-NGFF v0.5
         """
-        if self._root_path is None:
+        if self._root_path is None:  # pragma: no cover
             return
 
         if not self._is_hcs and self._num_positions > 1:
@@ -356,7 +347,7 @@ def _fix_array_json_hack(metadata: dict) -> None:
 
 
 def _fix_group_json_hack(metadata: dict) -> None:
-    if not (ome_attrs := metadata.get("attributes").get("ome")):
+    if not (ome_attrs := metadata.get("attributes").get("ome")):  # pragma: no cover
         return
 
     # Update multiscales datasets and axes

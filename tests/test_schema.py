@@ -9,6 +9,7 @@ from ome_writers.schema import (
     Plate,
     Position,
     PositionDimension,
+    dims_from_standard_axes,
 )
 
 
@@ -143,3 +144,54 @@ def test_duplicate_names_rejected() -> None:
             ],
             dtype="uint16",
         )
+
+
+def test_acquisition_settings_properties() -> None:
+    """Test AcquisitionSettings properties for coverage."""
+    # Test is_unbounded property
+    settings = AcquisitionSettings(
+        root_path="test.zarr",
+        dimensions=[
+            Dimension(name="t", count=None),
+            Dimension(name="y", count=64, type="space"),
+            Dimension(name="x", count=64, type="space"),
+        ],
+        dtype="uint16",
+    )
+    assert settings.is_unbounded is True
+
+    # Test plate without PositionDimension raises error
+    with pytest.raises(
+        ValueError, match="Plate mode requires a PositionDimension in dimensions"
+    ):
+        AcquisitionSettings(
+            root_path="plate.zarr",
+            dimensions=[
+                Dimension(name="t", count=2, type="time"),
+                Dimension(name="y", count=16, type="space"),
+                Dimension(name="x", count=16, type="space"),
+            ],
+            dtype="uint16",
+            plate=Plate(row_names=["A"], column_names=["1"]),
+        )
+
+    # Test dims_from_standard_axes with invalid axis name
+    with pytest.raises(ValueError, match="All axes must be one of"):
+        dims_from_standard_axes({"invalid": 10, "y": 64, "x": 64})
+
+    # Test dims_from_standard_axes with invalid position value
+    with pytest.raises(ValueError, match="Invalid position value"):
+        dims_from_standard_axes({"p": "invalid", "y": 64, "x": 64})
+
+    # Test dimension with type="other" for _ngff_sort_key coverage
+    settings_with_other = AcquisitionSettings(
+        root_path="test.zarr",
+        dimensions=[
+            Dimension(name="custom", count=5, type="other"),
+            Dimension(name="y", count=64, type="space"),
+            Dimension(name="x", count=64, type="space"),
+        ],
+        dtype="uint16",
+        storage_order="ngff",
+    )
+    assert settings_with_other.storage_index_dimensions[0].name == "custom"

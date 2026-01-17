@@ -176,6 +176,50 @@ def test_cases_as_zarr(
         _assert_valid_ome_zarr(case, stored_array_dims)
 
 
+def test_overwrite_safety(tmp_path: Path, any_backend: str) -> None:
+    """Test that attempting to overwrite existing files raises an error."""
+    ext = ".ome.tiff" if any_backend == "tiff" else ".ome.zarr"
+    root_path = tmp_path / f"output{ext}"
+    settings = AcquisitionSettings(
+        root_path=str(root_path),
+        dimensions=[
+            D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
+            D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
+        ],
+        dtype="uint16",
+        backend=any_backend,
+    )
+
+    # First write should succeed
+    with create_stream(settings) as stream:
+        stream.append(np.empty((64, 64), dtype=settings.dtype))
+
+    # grab snapshot of tree complete tree-structure for later comparison
+    root_mtime = root_path.stat().st_mtime
+
+    # Second write should fail due to existing data
+    with pytest.raises(FileExistsError):
+        with create_stream(settings) as stream:
+            stream.append(np.empty((64, 64), dtype=settings.dtype))
+
+    assert root_path.stat().st_mtime == root_mtime, (
+        "Directory modification time changed despite failed overwrite"
+    )
+
+    # add back overwrite=True to settings and verify it works
+    object.__setattr__(settings, "overwrite", True)
+    with create_stream(settings) as stream:
+        stream.append(np.empty((64, 64), dtype=settings.dtype))
+
+    new_stamp = root_path.stat().st_mtime
+    assert new_stamp > root_mtime, (
+        "Directory modification time not updated on overwrite"
+    )
+
+
+# ---------------------- Helpers for validation ----------------------
+
+
 def _assert_valid_ome_tiff(
     case: AcquisitionSettings, stored_array_dims: list[Dimension]
 ) -> None:

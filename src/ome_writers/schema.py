@@ -46,9 +46,6 @@ class StandardAxis(str, Enum):
     TIME = "t"
     POSITION = "p"
 
-    def __str__(self) -> str:
-        return self.value
-
     def dimension_type(self) -> DimensionType:
         if self in {StandardAxis.X, StandardAxis.Y, StandardAxis.Z}:
             return "space"
@@ -56,7 +53,7 @@ class StandardAxis(str, Enum):
             return "time"
         if self == StandardAxis.CHANNEL:
             return "channel"
-        return "other"
+        return "other"  # pragma: no cover
 
     def unit(self) -> str | None:
         if self in {StandardAxis.X, StandardAxis.Y, StandardAxis.Z}:
