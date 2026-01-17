@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import importlib.util
 import math
-from typing import TYPE_CHECKING, cast
+from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pytest
@@ -20,14 +21,19 @@ from ome_writers import (
     create_stream,
 )
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
-
 # NOTES:
 # - All root_paths will be replaced with temporary directories during testing.
 D = Dimension  # alias, for brevity
 CASES = [
+    AcquisitionSettings(
+        root_path="tmp",
+        dimensions=[
+            D(name="c", count=3, type="channel"),
+            D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
+            D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
+        ],
+        dtype="uint8",
+    ),
     AcquisitionSettings(
         root_path="tmp",
         dimensions=[
@@ -127,12 +133,13 @@ UNBOUNDED_FRAME_COUNT = 2  # number of frames to write for unbounded dimensions
 
 @pytest.mark.parametrize("case", CASES, ids=_name_case)
 def test_cases_as_zarr(
-    case: AcquisitionSettings, zarr_backend: str, tmp_path: Path
+    case: AcquisitionSettings, any_backend: str, tmp_path: Path
 ) -> None:
-    case.root_path = root = tmp_path / "output.zarr"  # ty: ignore[invalid-assignment]
-    case.backend = zarr_backend
+    is_tiff = any_backend == "tiff"
+    ext = ".ome.tiff" if is_tiff else ".ome.zarr"
+    case.root_path = tmp_path / f"output{ext}"  # ty: ignore[invalid-assignment]
+    case.backend = any_backend
     dims = case.dimensions
-    dtype = case.dtype
     # currently, we enforce that the last 2 dimensions are the frame dimensions
     frame_shape = cast("tuple[int, ...]", tuple(d.count for d in dims[-2:]))
 
@@ -144,23 +151,95 @@ def test_cases_as_zarr(
 
     with create_stream(case) as stream:
         router = stream._router
-        num_positions = len(router.positions)
         stored_array_dims = list(router.array_storage_dimensions)
         for f in range(num_frames):
-            frame_data = np.full(frame_shape, f, dtype=dtype)
+            frame_data = np.full(frame_shape, f, dtype=case.dtype)
             stream.append(frame_data)
 
     # -------------- Validate the result --------------
+    # it's always the first dimension that is possibly unbounded
+    # patch the stored_array_dims to match our expectations for validation
+    if stored_array_dims[0].count is None:
+        stored_array_dims[0].count = UNBOUNDED_FRAME_COUNT
+
+    if is_tiff:
+        _assert_valid_ome_tiff(case, stored_array_dims)
+    else:
+        _assert_valid_ome_zarr(case, stored_array_dims)
+
+
+def _assert_valid_ome_tiff(
+    case: AcquisitionSettings, stored_array_dims: list[Dimension]
+) -> None:
+    try:
+        import ome_types
+        import tifffile
+    except ImportError:
+        pytest.skip("ome-types and tifffile are required for OME-TIFF validation")
+        return
+
+    # Collect expected file paths based on position count
+    if (num_positions := len(case.positions)) == 1:
+        # Single file for single position
+        file_paths = [Path(case.root_path)]
+    else:
+        # Multiple files for multiple positions
+        # Follow the naming pattern from TiffBackend._prepare_files
+        file_paths = [
+            Path(case.root_path.replace(".ome.tiff", f"_p{p_idx:03d}.ome.tiff"))
+            for p_idx in range(num_positions)
+        ]
+
+    assert len(file_paths) == num_positions
+
+    # Validate each TIFF file
+    for file_path in file_paths:
+        assert file_path.exists(), f"Expected TIFF file not found: {file_path}"
+
+        # Read and validate OME metadata
+        ome_metadata = ome_types.from_tiff(file_path)
+        assert ome_metadata is not None, f"Failed to read OME metadata from {file_path}"
+        assert len(ome_metadata.images) > 0, f"No images in OME metadata: {file_path}"
+
+        # Get the first image (each file has one image per position)
+        pixels = ome_metadata.images[0].pixels
+
+        # Validate basic dimensional properties
+        expected_shape = {d.name.upper(): d.count for d in stored_array_dims}
+
+        assert pixels.size_x == expected_shape.get("X", 1)
+        assert pixels.size_y == expected_shape.get("Y", 1)
+        assert pixels.size_z == expected_shape.get("Z", 1)
+        assert pixels.size_c == expected_shape.get("C", 1)
+        assert pixels.size_t == expected_shape.get("T", 1)
+
+        # Validate dtype (basic check - OME types use uppercase enum names)
+        assert pixels.type.numpy_dtype == case.dtype
+
+        # Verify we can read the actual TIFF data
+        with tifffile.TiffFile(file_path) as tif:
+            # Just verify the file is readable and has the expected number of pages
+            expected_pages = pixels.size_t * pixels.size_c * pixels.size_z
+            assert len(tif.pages) == expected_pages, (
+                f"Expected {expected_pages} pages, got {len(tif.pages)}"
+            )
+
+
+def _assert_valid_ome_zarr(
+    case: AcquisitionSettings, stored_array_dims: list[Dimension]
+) -> None:
+    root = Path(case.root_path)
     group = yaozarrs.validate_zarr_store(root)
     ome_meta = group.ome_metadata()
 
     # Assert group type (single image, multi-position, plate)
     # and collect image paths for further validation
     image_paths: list[Path] = []
+    num_positions = len(case.positions)
     # Plate
     if case.plate is not None:
         assert isinstance(ome_meta, v05.Plate)
-        image_paths = [root / p.row / p.column / p.name for p in router.positions]  # ty: ignore
+        image_paths = [root / p.row / p.column / p.name for p in case.positions]  # ty: ignore
     # Single image
     elif num_positions == 1:
         assert isinstance(ome_meta, v05.Image)
@@ -170,22 +249,10 @@ def test_cases_as_zarr(
         assert isinstance(ome_meta, v05.Bf2Raw)
         ome_group = yaozarrs.validate_ome_uri(root / "OME")
         assert isinstance(ome_group.attributes.ome, v05.Series)
-        image_paths = [root / pos.name for pos in router.positions]
+        image_paths = [root / pos.name for pos in case.positions]
 
     assert len(image_paths) == num_positions
 
-    # it's always the first dimension that is possibly unbounded
-    # patch the stored_array_dims to match our expectations for validation
-    if stored_array_dims[0].count is None:
-        stored_array_dims[0].count = UNBOUNDED_FRAME_COUNT
-
-    _validate_images(stored_array_dims, image_paths, dtype)
-
-
-def _validate_images(
-    storage_dims: list[D], image_paths: list[Path], dtype: str
-) -> None:
-    """Validate all images (multiscales groups) generated by a test."""
     for image_path in image_paths:
         group = yaozarrs.open_group(image_path)
         image = group.ome_metadata()
@@ -198,9 +265,9 @@ def _validate_images(
         # due to zarr-python's dropped support for python versions that are still
         # before EOL (i.e. SPEC-0)
         if importlib.util.find_spec("tensorstore") is not None:
-            _validate_array_tensorstore(group, storage_dims, dtype)
+            _validate_array_tensorstore(group, stored_array_dims, case.dtype)
         else:
-            _validate_array_zarr(group, storage_dims, dtype)
+            _validate_array_zarr(group, stored_array_dims, case.dtype)
 
 
 def _validate_array_tensorstore(
