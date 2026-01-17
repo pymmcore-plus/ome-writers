@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -161,6 +162,8 @@ class TensorstoreBackend(YaozarrsBackend):
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         if not settings.root_path.endswith(".zarr"):
             return "Root path must end with .zarr for TensorstoreBackend."
+        if sys.version_info < (3, 11) and settings.is_unbounded:
+            return "TensorstoreBackend requires Python 3.11+ for unbounded dimensions."
         return False
 
 

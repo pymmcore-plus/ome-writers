@@ -194,8 +194,8 @@ def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:
         )
 
     if reason := backend.is_incompatible(settings):
-        raise ValueError(
-            f"Backend '{type(backend).__name__}' is incompatible: {reason}"
+        raise NotImplementedError(
+            f"Backend '{type(backend).__name__}' does not support settings: {reason}"
         )
 
     return backend

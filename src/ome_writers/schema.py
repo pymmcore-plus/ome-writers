@@ -227,6 +227,11 @@ class AcquisitionSettings(_BaseModel):
         return tuple(dim.count for dim in self.dimensions)
 
     @property
+    def is_unbounded(self) -> bool:
+        """Whether the acquisition has an unbounded (None) dimension."""
+        return any(dim.count is None for dim in self.dimensions)
+
+    @property
     def positions(self) -> tuple[Position, ...]:
         """Position objects in acquisition order.
 
