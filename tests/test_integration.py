@@ -151,7 +151,8 @@ def test_cases_as_zarr(
 
     with create_stream(case) as stream:
         router = stream._router
-        stored_array_dims = list(router.array_storage_dimensions)
+        # Create deep copies to avoid mutating the original Dimension objects
+        stored_array_dims = [d.model_copy() for d in router.array_storage_dimensions]
         for f in range(num_frames):
             frame_data = np.full(frame_shape, f, dtype=case.dtype)
             stream.append(frame_data)

@@ -44,6 +44,7 @@ class TiffBackend(ArrayBackend):
         self._queues: dict[int, Queue[np.ndarray | None]] = {}
         self._file_paths: dict[int, str] = {}  # Store paths for metadata updates
         self._finalized = False
+        self._storage_dims: tuple[Dimension, ...] | None = None
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         """Check if settings are compatible with TIFF backend."""
@@ -62,10 +63,15 @@ class TiffBackend(ArrayBackend):
         root = Path(settings.root_path).expanduser().resolve()
         positions = router.positions
         storage_dims = router.array_storage_dimensions
+        self._storage_dims = storage_dims  # Store for metadata updates
+        self._dtype = settings.dtype
 
         # Compute shape from storage dimensions
         shape = tuple(d.count if d.count is not None else 1 for d in storage_dims)
         dtype = settings.dtype
+
+        # Check if any dimension is unbounded
+        has_unbounded = any(d.count is None for d in storage_dims)
 
         # Prepare file paths
         fnames = self._prepare_files(root, len(positions), settings.overwrite)
@@ -83,6 +89,7 @@ class TiffBackend(ArrayBackend):
                 dtype=dtype,
                 image_queue=q,
                 ome_xml=ome_xml,
+                has_unbounded=has_unbounded,
             )
             thread.start()
 
@@ -114,6 +121,10 @@ class TiffBackend(ArrayBackend):
             # Wait for threads to finish
             for thread in self._threads.values():
                 thread.join(timeout=5)
+
+            # Update OME metadata if unbounded dimensions were written
+            if self._storage_dims and any(d.count is None for d in self._storage_dims):
+                self._update_unbounded_metadata()
 
             self._threads.clear()
             self._queues.clear()
@@ -148,6 +159,61 @@ class TiffBackend(ArrayBackend):
             self._update_position_metadata(position_idx, metadata)
 
     # -------------------
+
+    def _update_unbounded_metadata(self) -> None:
+        """Update OME metadata after writing unbounded dimensions.
+
+        For unbounded dimensions, we write frames without knowing the final count.
+        After writing completes, update the OME-XML with the actual frame counts.
+        """
+        if not self._storage_dims:
+            return
+
+        # Get actual frame count from first position's thread
+        # (all positions should have written the same number of frames)
+        if 0 not in self._threads:
+            return
+
+        total_frames_written = self._threads[0].frames_written
+        if total_frames_written == 0:
+            return
+
+        # Calculate the count for the unbounded dimension
+        # total_frames = product of all dimension counts (excluding spatial dims Y,X)
+        # For unbounded dim: unbounded_count = total_frames / product(other_dims)
+        import math
+
+        # Product of all known (non-None) dimension counts except Y,X
+        known_product = math.prod(
+            d.count for d in self._storage_dims[:-2] if d.count is not None
+        )
+
+        # Calculate unbounded dimension count
+        unbounded_count = (
+            total_frames_written // known_product
+            if known_product > 0
+            else total_frames_written
+        )
+
+        # Create corrected dimensions with actual counts
+        corrected_dims = tuple(
+            d.model_copy(update={"count": unbounded_count}) if d.count is None else d
+            for d in self._storage_dims
+        )
+
+        # Regenerate OME-XML for each position
+        for _p_idx, fname in self._file_paths.items():
+            ome_xml = self._generate_ome_xml(
+                corrected_dims, self._dtype, Path(fname).name
+            )
+            # Update the TIFF file's description tag
+            try:
+                tifffile.tiffcomment(fname, comment=ome_xml.encode("ascii"))
+            except Exception as e:
+                warnings.warn(
+                    f"Failed to update OME metadata in {fname}: {e}",
+                    stacklevel=2,
+                )
 
     def _update_position_metadata(self, position_idx: int, metadata: ome.OME) -> None:
         """Update OME metadata for a specific position's TIFF file."""
@@ -320,6 +386,7 @@ class WriterThread(threading.Thread):
         image_queue: Queue[np.ndarray | None],
         ome_xml: str = "",
         pixelsize: float = 1.0,
+        has_unbounded: bool = False,
     ) -> None:
         super().__init__(daemon=True, name=f"TiffWriterThread-{next(_thread_counter)}")
         self._path = path
@@ -328,6 +395,8 @@ class WriterThread(threading.Thread):
         self._image_queue = image_queue
         self._ome_xml = ome_xml
         self._res = 1 / pixelsize
+        self._has_unbounded = has_unbounded
+        self.frames_written = 0  # Track actual frames written for unbounded dims
 
     def run(self) -> None:
         """Write frames from queue to TIFF file sequentially."""
@@ -338,19 +407,34 @@ class WriterThread(threading.Thread):
                 frame = self._image_queue.get()
                 if frame is None:
                     break
+                self.frames_written += 1
                 yield frame
 
         try:
             with tifffile.TiffWriter(self._path, bigtiff=True, ome=False) as writer:
-                writer.write(
-                    _queue_iterator(),
-                    shape=self._shape,
-                    dtype=self._dtype,
-                    resolution=(self._res, self._res),
-                    resolutionunit=tifffile.RESUNIT.MICROMETER,
-                    photometric=tifffile.PHOTOMETRIC.MINISBLACK,
-                    description=self._ome_xml,
-                )
+                if self._has_unbounded:
+                    # For unbounded dimensions, write frames individually
+                    # to avoid shape mismatch errors
+                    for i, frame in enumerate(_queue_iterator()):
+                        writer.write(
+                            frame,
+                            dtype=self._dtype,
+                            resolution=(self._res, self._res),
+                            resolutionunit=tifffile.RESUNIT.MICROMETER,
+                            photometric=tifffile.PHOTOMETRIC.MINISBLACK,
+                            description=self._ome_xml if i == 0 else None,
+                        )
+                else:
+                    # For bounded dimensions, use iterator with shape
+                    writer.write(
+                        _queue_iterator(),
+                        shape=self._shape,
+                        dtype=self._dtype,
+                        resolution=(self._res, self._res),
+                        resolutionunit=tifffile.RESUNIT.MICROMETER,
+                        photometric=tifffile.PHOTOMETRIC.MINISBLACK,
+                        description=self._ome_xml,
+                    )
         except Exception as e:
             # Suppress over-eager tifffile exception for incomplete writes
             if "wrong number of bytes" in str(e):
