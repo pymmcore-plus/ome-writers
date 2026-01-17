@@ -347,7 +347,7 @@ def _fix_array_json_hack(metadata: dict) -> None:
 
 
 def _fix_group_json_hack(metadata: dict) -> None:
-    if not (ome_attrs := metadata.get("attributes").get("ome")):  # pragma: no cover
+    if not (ome_attrs := metadata.get("attributes", {}).get("ome")):  # pragma: no cover
         return
 
     # Update multiscales datasets and axes
