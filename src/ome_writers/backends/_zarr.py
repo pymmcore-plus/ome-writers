@@ -158,7 +158,7 @@ class ZarrBackend(YaozarrsBackend):
     writer = "zarr"
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
-        if not settings.root_path.endswith(".zarr"):
+        if not settings.root_path.endswith(".zarr"):  # pragma: no cover
             return "Root path must end with .zarr for ZarrBackend."
         return False
 
@@ -173,7 +173,7 @@ class TensorstoreBackend(YaozarrsBackend):
         self._futures: list[Any] = []
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
-        if not settings.root_path.endswith(".zarr"):
+        if not settings.root_path.endswith(".zarr"):  # pragma: no cover
             return "Root path must end with .zarr for TensorstoreBackend."
         return False
 

@@ -205,10 +205,7 @@ class FrameRouter:
         last_idx = self._num_non_frame_dims - 1
         self._dim_indices[last_idx] += 1
 
-        size_limit = self._non_frame_sizes[last_idx]
-        if size_limit is None:
-            return  # Unlimited dimension
-        if self._dim_indices[last_idx] < size_limit:
+        if self._dim_indices[last_idx] < self._non_frame_sizes[last_idx]:
             return  # Still within bounds - common case
 
         # Slow path: wrap rightmost and carry to other dimensions (rare)

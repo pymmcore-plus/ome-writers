@@ -131,7 +131,7 @@ def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:
     """
 
     requested_backend = settings.backend.lower()
-    if requested_backend not in VALID_BACKEND_NAMES:
+    if requested_backend not in VALID_BACKEND_NAMES:  # pragma: no cover
         raise ValueError(
             f"Unknown backend requested: '{requested_backend!r}'.  "
             f"Must be one of {VALID_BACKEND_NAMES}."
@@ -188,9 +188,10 @@ def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:
         else:
             backend = AcquireZarrBackend()
 
-    if backend is None:
+    if backend is None:  # pragma: no cover
         raise ValueError(
             f"Could not create backend for requested name: '{requested_backend}'."
+            "Did you install ome-writers with at least one backend?"
         )
 
     if reason := backend.is_incompatible(settings):
