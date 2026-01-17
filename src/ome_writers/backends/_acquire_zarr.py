@@ -215,7 +215,7 @@ class AcquireZarrBackend(ArrayBackend):
         # The key matches the output_key we set in ArraySettings
         # the check on num positions matches the behavior above in prepare()
         az_pos_key = self._az_pos_keys[position_info[0]]
-        self._stream.append(frame, key=az_pos_key)
+        self._stream.append(frame, key=az_pos_key)  # type: ignore (stream will not be None)
 
     def finalize(self) -> None:
         """Close stream and patch metadata."""
@@ -289,7 +289,7 @@ def _to_acquire_dim(dim: Dimension) -> az.Dimension:
 
     return az.Dimension(
         name=dim.name,
-        kind=dim_type_map.get(dim.type, az.DimensionType.OTHER),
+        kind=dim_type_map.get(dim.type, az.DimensionType.OTHER),  # pyright: ignore[reportCallIssue]
         array_size_px=dim.count or 1,
         chunk_size_px=dim.chunk_size or 1,
         shard_size_chunks=dim.shard_size or 1,

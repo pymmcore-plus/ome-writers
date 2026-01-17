@@ -188,7 +188,7 @@ class TiffBackend(ArrayBackend):
         path_str = str(path)
 
         # Strip known extensions
-        ext = None
+        ext = path_root = None
         for possible_ext in [".ome.tiff", ".ome.tif", ".tiff", ".tif"]:
             if path_str.endswith(possible_ext):
                 ext = possible_ext
