@@ -192,16 +192,6 @@ class FrameRouter:
         """
         return tuple(self._storage_index_dims) + tuple(self._frame_dims)
 
-    @property
-    def num_frames(self) -> int | None:
-        """Return total number of frames, or None if unlimited dimension present."""
-        total = 1
-        for size in self._non_frame_sizes:
-            if size is None:
-                return None
-            total *= size
-        return total
-
     def __iter__(self) -> Iterator[tuple[PositionInfo, tuple[int, ...]]]:
         """Return iterator, resetting to first frame."""
         self._reset()

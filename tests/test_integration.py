@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import math
 from typing import TYPE_CHECKING, cast
 
 import numpy as np
@@ -99,6 +100,18 @@ CASES = [
             column_names=["1", "2", "3", "4", "5", "6", "7", "8"],
         ),
     ),
+    # Unbounded first dimension (mimics runtime-determined acquisition length)
+    AcquisitionSettings(
+        root_path="tmp",
+        dimensions=[
+            D(name="t", count=None, chunk_size=1, type="time"),  # unbounded
+            D(name="c", count=2, type="channel"),
+            D(name="z", count=3, type="space"),
+            D(name="y", count=128, chunk_size=64, type="space", scale=0.1),
+            D(name="x", count=128, chunk_size=64, type="space", scale=0.1),
+        ],
+        dtype="uint16",
+    ),
 ]
 
 
@@ -107,6 +120,9 @@ def _name_case(case: AcquisitionSettings) -> str:
     dim_names = "_".join(f"{d.name}{d.count}" for d in dims)
     plate_str = "plate-" if case.plate is not None else ""
     return f"{plate_str}{dim_names}-{case.dtype}"
+
+
+UNBOUNDED_FRAME_COUNT = 2  # number of frames to write for unbounded dimensions
 
 
 @pytest.mark.parametrize("case", CASES, ids=_name_case)
@@ -122,11 +138,15 @@ def test_cases_as_zarr(
 
     # -------------- Write out all frames --------------
 
+    if (num_frames := case.num_frames) is None:
+        # unbounded, use a fixed number for testing
+        num_frames = math.prod((d.count or UNBOUNDED_FRAME_COUNT) for d in dims[:-2])
+
     with create_stream(case) as stream:
         router = stream._router
         num_positions = len(router.positions)
-        stored_array_dims = router.array_storage_dimensions
-        for f in range(router.num_frames):
+        stored_array_dims = list(router.array_storage_dimensions)
+        for f in range(num_frames):
             frame_data = np.full(frame_shape, f, dtype=dtype)
             stream.append(frame_data)
 
@@ -153,6 +173,12 @@ def test_cases_as_zarr(
         image_paths = [root / pos.name for pos in router.positions]
 
     assert len(image_paths) == num_positions
+
+    # it's always the first dimension that is possibly unbounded
+    # patch the stored_array_dims to match our expectations for validation
+    if stored_array_dims[0].count is None:
+        stored_array_dims[0].count = UNBOUNDED_FRAME_COUNT
+
     _validate_images(stored_array_dims, image_paths, dtype)
 
 

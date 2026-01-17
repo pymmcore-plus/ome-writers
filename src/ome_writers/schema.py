@@ -232,6 +232,17 @@ class AcquisitionSettings(_BaseModel):
         return any(dim.count is None for dim in self.dimensions)
 
     @property
+    def num_frames(self) -> int | None:
+        """Return total number of frames, or None if unlimited dimension present."""
+        _non_frame_sizes = tuple(d.count for d in self.dimensions[:-2])
+        total = 1
+        for size in _non_frame_sizes:
+            if size is None:
+                return None
+            total *= size
+        return total
+
+    @property
     def positions(self) -> tuple[Position, ...]:
         """Position objects in acquisition order.
 
