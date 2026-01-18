@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING, Literal, TypeAlias, get_args
+from typing import TYPE_CHECKING, get_args
+
+from .schema import BackendName
 
 if TYPE_CHECKING:
     import numpy as np
@@ -14,7 +16,6 @@ if TYPE_CHECKING:
 
 __all__ = ["OMEStream", "create_stream"]
 
-BackendName: TypeAlias = Literal["acquire-zarr", "tensorstore", "zarr", "tiff"]
 VALID_BACKEND_NAMES: set[str] = set(get_args(BackendName)) | {"auto"}
 
 

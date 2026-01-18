@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from enum import Enum
 from functools import cached_property
-from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeAlias, cast
 
 import numpy as np
+from annotated_types import Len
 from pydantic import (
     AfterValidator,
     BaseModel,
@@ -19,8 +20,9 @@ from pydantic import (
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-DimensionType = Literal["space", "time", "channel", "other"]
-StandardAxisKey = Literal["x", "y", "z", "c", "t", "p"]
+BackendName: TypeAlias = Literal["acquire-zarr", "tensorstore", "zarr", "tiff"]
+DimensionType: TypeAlias = Literal["space", "time", "channel", "other"]
+StandardAxisKey: TypeAlias = Literal["x", "y", "z", "c", "t", "p"]
 
 
 class _BaseModel(BaseModel):
@@ -76,7 +78,7 @@ class StandardAxis(str, Enum):
 class Dimension(_BaseModel):
     """A single array dimension."""
 
-    name: str
+    name: Annotated[str, Len(min_length=1)]
     count: PositiveInt | None  # None for unlimited (first dimension only)
     chunk_size: PositiveInt | None = None
     shard_size: PositiveInt | None = None
@@ -89,7 +91,7 @@ class Dimension(_BaseModel):
 class Position(_BaseModel):
     """A single acquisition position."""
 
-    name: str
+    name: Annotated[str, Len(min_length=1)]
     row: str | None = None
     column: str | None = None
     # TODO
@@ -117,7 +119,7 @@ class PositionDimension(_BaseModel):
     """
 
     positions: list[Position]
-    name: str = "p"
+    name: Annotated[str, Len(min_length=1)] = "p"
 
     @property
     def count(self) -> int:
@@ -228,7 +230,7 @@ class AcquisitionSettings(_BaseModel):
     storage_order: Literal["acquisition", "ngff"] | list[str] = "ngff"
     plate: Plate | None = None
     overwrite: bool = False
-    backend: str = "auto"
+    backend: BackendName | Literal["auto"] = "auto"
 
     @cached_property
     def shape(self) -> tuple[int | None, ...]:
