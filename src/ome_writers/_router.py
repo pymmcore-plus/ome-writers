@@ -201,7 +201,7 @@ class FrameRouter:
             self._finished = True
             return
 
-        # Fast path: increment rightmost dimension (99%+ of calls)
+        # Fast path: increment rightmost dimension
         last_idx = self._num_non_frame_dims - 1
         self._dim_indices[last_idx] += 1
 
@@ -209,10 +209,10 @@ class FrameRouter:
         if self._dim_indices[last_idx] < size_limit:
             return  # Still within bounds - common case
 
-        # Slow path: wrap rightmost and carry to other dimensions (rare)
+        # Slow path: wrap rightmost and carry to other dimensions
         self._dim_indices[last_idx] = 0
 
-        # Handle remaining dimensions (only when wrapping occurs)
+        # Handle remaining dimensions
         for i in range(last_idx - 1, -1, -1):
             self._dim_indices[i] += 1
 

@@ -6,6 +6,7 @@ from enum import Enum
 from functools import cached_property
 from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
+import numpy as np
 from pydantic import (
     AfterValidator,
     BaseModel,
@@ -29,6 +30,14 @@ class _BaseModel(BaseModel):
         validate_assignment=True,
         extra="forbid",
     )
+
+
+def _validate_dtype(dtype: Any) -> str:
+    """Validate dtype is a valid string."""
+    try:
+        return np.dtype(dtype).name
+    except Exception as e:
+        raise ValueError(f"Invalid dtype: {dtype!r}: {e}") from e
 
 
 class StandardAxis(str, Enum):
@@ -138,7 +147,6 @@ def _validate_dims_list(
         # TODO: Consider whether this is the best way to express this.
         # should dimension take another parameter indicating image dims?
         # (to distinguish from other spatial dims like Z?)
-        breakpoint()
         raise ValueError(
             "The last two dimensions must have `type='space'` (e.g. Y and X)."
         )
@@ -209,7 +217,7 @@ class AcquisitionSettings(_BaseModel):
     dimensions: Annotated[
         tuple[Dimension | PositionDimension, ...], AfterValidator(_validate_dims_list)
     ]
-    dtype: str
+    dtype: Annotated[str, BeforeValidator(_validate_dtype)]
     compression: str | None = None
     # FIXME:
     # "ngff" is intended to be a placeholder for "spec-compliant" storage order.

@@ -10,13 +10,13 @@ except PackageNotFoundError:  # pragma: no cover
     __version__ = "uninstalled"
 
 from ._stream import BackendName, create_stream
-from ._util import fake_data_for_sizes
 from .schema import (
     AcquisitionSettings,
     Dimension,
     Plate,
     Position,
     PositionDimension,
+    StandardAxis,
     dims_from_standard_axes,
 )
 
@@ -27,8 +27,8 @@ __all__ = [
     "Plate",
     "Position",
     "PositionDimension",
+    "StandardAxis",
     "__version__",
     "create_stream",
     "dims_from_standard_axes",
-    "fake_data_for_sizes",
 ]
