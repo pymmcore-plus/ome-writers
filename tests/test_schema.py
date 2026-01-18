@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from contextlib import suppress
-from functools import cached_property
-
 import pytest
 from pydantic import ValidationError
 
@@ -476,14 +473,3 @@ def test_storage_order_invalid_list() -> None:
             dtype="uint16",
             storage_order=["z", "t", "y", "x"],  # 'z' doesn't exist in index dims
         )
-
-
-def test_acq_settings_cached_props() -> None:
-    """Test cached properties in AcquisitionSettings for coverage."""
-    cached_names = set()
-    for attr in dir(AcquisitionSettings):
-        with suppress(Exception):
-            val = getattr(AcquisitionSettings, attr)
-            if isinstance(val, cached_property):
-                cached_names.add(attr)
-    assert cached_names == set(AcquisitionSettings._cached_props)  # type: ignore

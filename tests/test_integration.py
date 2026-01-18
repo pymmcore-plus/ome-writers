@@ -177,8 +177,13 @@ def _validate_expected_frames(
 def test_cases(case: AcquisitionSettings, any_backend: str, tmp_path: Path) -> None:
     is_tiff = any_backend == "tiff"
     ext = ".ome.tiff" if is_tiff else ".ome.zarr"
-    object.__setattr__(case, "root_path", str(tmp_path / f"output{ext}"))
-    object.__setattr__(case, "backend", any_backend)
+    # Use model_copy to avoid cached_property contamination across tests
+    case = case.model_copy(
+        update={
+            "root_path": str(tmp_path / f"output{ext}"),
+            "backend": any_backend,
+        }
+    )
     dims = case.dimensions
     # currently, we enforce that the last 2 dimensions are the frame dimensions
     frame_shape = cast("tuple[int, ...]", tuple(d.count for d in dims[-2:]))
@@ -251,7 +256,7 @@ def test_overwrite_safety(tmp_path: Path, any_backend: str) -> None:
     )
 
     # add back overwrite=True to settings and verify it works
-    object.__setattr__(settings, "overwrite", True)
+    settings = settings.model_copy(update={"overwrite": True})
     with create_stream(settings) as stream:
         stream.append(np.empty((64, 64), dtype=settings.dtype))
 
@@ -291,7 +296,7 @@ def _assert_valid_ome_tiff(
     assert len(file_paths) == num_positions
 
     # Validate each TIFF file
-    for file_path in file_paths:
+    for pos_idx, file_path in enumerate(file_paths):
         assert file_path.exists(), f"Expected TIFF file not found: {file_path}"
 
         # Read and validate OME metadata
@@ -304,6 +309,11 @@ def _assert_valid_ome_tiff(
 
         # Validate basic dimensional properties
         expected_shape = {d.name.upper(): d.count for d in stored_array_dims}
+
+        # Reverse because OME dimension order has fastest-varying dimension on right,
+        # but storage order has slowest-varying dimension first
+        expected_order = "".join(d.name.upper() for d in reversed(stored_array_dims))
+        assert pixels.dimension_order.value.startswith(expected_order)
 
         assert pixels.size_x == expected_shape.get("X", 1)
         assert pixels.size_y == expected_shape.get("Y", 1)
@@ -322,6 +332,16 @@ def _assert_valid_ome_tiff(
                 f"Expected {expected_pages} pages, got {len(tif.pages)}"
             )
 
+            # Validate frame values
+            expected = expected_frames.get(pos_idx, {})
+            if expected:
+                shape_tuple = tuple(d.count for d in stored_array_dims[:-2])
+                shape = cast("tuple[int, ...]", shape_tuple)
+                for s_idx, expected_val in expected.items():
+                    page_num = int(np.ravel_multi_index(s_idx, shape))
+                    page_data = tif.pages[page_num].asarray()
+                    assert page_data.mean() == expected_val
+
 
 def _assert_valid_ome_zarr(
     case: AcquisitionSettings,
@@ -339,7 +359,7 @@ def _assert_valid_ome_zarr(
     # Plate
     if case.plate is not None:
         assert isinstance(ome_meta, v05.Plate)
-        image_paths = [root / p.row / p.column / p.name for p in case.positions]
+        image_paths = [root / p.row / p.column / p.name for p in case.positions]  # ty: ignore[unsupported-operator]
     # Single image
     elif num_positions == 1:
         assert isinstance(ome_meta, v05.Image)

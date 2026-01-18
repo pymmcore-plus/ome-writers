@@ -316,9 +316,11 @@ class TiffBackend(ArrayBackend):
         # (all start with XY since those are the spatial in-plane dimensions)
 
         # Extract non-spatial dimension names from storage order
-        non_spatial_names = [d.name.upper() for d in dims[:-2]]
+        # Reverse because OME dimension order has fastest-varying dimension on right,
+        # but storage order has slowest-varying dimension first
+        non_spatial_names = [d.name.upper() for d in reversed(dims[:-2])]
 
-        # Build OME dimension order: XY + remaining dimensions in storage order
+        # Build OME dimension order: XY + remaining dimensions in reversed storage order
         # Filter to only include Z, C, T dimensions
         remaining_dims = [d for d in non_spatial_names if d in "ZCT"]
 

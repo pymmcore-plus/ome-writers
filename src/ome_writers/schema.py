@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import warnings
 from enum import Enum
-from functools import cached_property
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, TypeAlias, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeAlias, cast
 
 import numpy as np
 from annotated_types import Len
@@ -253,24 +252,24 @@ class AcquisitionSettings(_BaseModel):
     overwrite: bool = False
     backend: BackendName | Literal["auto"] = "auto"
 
-    @cached_property
+    @property
     def format(self) -> Literal["tiff", "zarr"]:
         """Return file format.  Either (OME) 'tiff' or 'zarr'."""
         if self.backend in {"tiff"}:
             return "tiff"
         return "zarr"
 
-    @cached_property
+    @property
     def shape(self) -> tuple[int | None, ...]:
         """Shape of the array (count for each dimension)."""
         return tuple(dim.count for dim in self.dimensions)
 
-    @cached_property
+    @property
     def is_unbounded(self) -> bool:
         """Whether the acquisition has an unbounded (None) dimension."""
         return self.dimensions[0].count is None
 
-    @cached_property
+    @property
     def num_frames(self) -> int | None:
         """Return total number of frames, or None if unlimited dimension present."""
         _non_frame_sizes = tuple(d.count for d in self.dimensions[:-2])
@@ -281,7 +280,7 @@ class AcquisitionSettings(_BaseModel):
             total *= size
         return total
 
-    @cached_property
+    @property
     def positions(self) -> tuple[Position, ...]:
         """Position objects in acquisition order."""
         for dim in self.dimensions[:-2]:  # last 2 dims may never be positions
@@ -289,7 +288,7 @@ class AcquisitionSettings(_BaseModel):
                 return tuple(dim.positions)
         return (Position(name="0"),)  # single default position
 
-    @cached_property
+    @property
     def position_dimension_index(self) -> int | None:
         """Index of PositionDimension in dimensions, or None if not present."""
         for i, dim in enumerate(self.dimensions[:-2]):
@@ -297,38 +296,38 @@ class AcquisitionSettings(_BaseModel):
                 return i
         return None
 
-    @cached_property
+    @property
     def frame_dimensions(self) -> tuple[Dimension, ...]:
         """In-frame dimensions, currently always last two dims (usually (Y,X))."""
         return cast("tuple[Dimension, ...]", self.dimensions[-2:])
 
-    @cached_property
+    @property
     def index_dimensions(self) -> tuple[Dimension, ...]:
         """All NON-frame Dimensions, excluding PositionDimension dimensions."""
         return tuple(dim for dim in self.dimensions[:-2] if isinstance(dim, Dimension))
 
-    @cached_property
+    @property
     def array_dimensions(self) -> tuple[Dimension, ...]:
         """All Dimensions excluding PositionDimension dimensions."""
         return tuple(
             dim for dim in self.dimensions if not isinstance(dim, PositionDimension)
         )
 
-    @cached_property
+    @property
     def storage_index_dimensions(self) -> tuple[Dimension, ...]:
         """NON-frame Dimensions in storage order."""
         return _sort_dims_to_storage_order(
             self.index_dimensions, self.storage_order, self.format
         )
 
-    @cached_property
+    @property
     def storage_index_permutation(self) -> tuple[int, ...] | None:
         """Permutation to convert acquisition index to storage index, if different."""
         storage_dims = self.storage_index_dimensions
         perm = _compute_permutation(self.index_dimensions, storage_dims)
         return perm if perm != tuple(range(len(perm))) else None
 
-    @cached_property
+    @property
     def array_storage_dimensions(self) -> tuple[Dimension, ...]:
         """All Dimensions (excluding PositionDimension) in storage order."""
         return self.storage_index_dimensions + self.frame_dimensions
@@ -381,34 +380,6 @@ class AcquisitionSettings(_BaseModel):
                 )
 
         return self
-
-    if not TYPE_CHECKING:
-        # pydantic's model_copy copies __dict__ directly, so `cached_property`
-        # remain cached in the copy.  We need to clear them manually.
-        # this list is tested in `test_acq_settings_cached_props`
-
-        _cached_props: ClassVar[tuple[str, ...]] = (
-            "format",
-            "shape",
-            "is_unbounded",
-            "num_frames",
-            "positions",
-            "position_dimension_index",
-            "frame_dimensions",
-            "index_dimensions",
-            "array_dimensions",
-            "storage_index_dimensions",
-            "storage_index_permutation",
-            "array_storage_dimensions",
-        )
-
-        def model_copy(self, *args: Any, **kwargs: Any) -> AcquisitionSettings:
-            """Override model_copy to clear cached properties on copy."""
-            obj = super().model_copy(*args, **kwargs)
-            for prop in AcquisitionSettings._cached_props:
-                if prop in obj.__dict__:
-                    del obj.__dict__[prop]
-            return obj
 
 
 # ---------------------------------------------------------------------------
