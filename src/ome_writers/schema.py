@@ -12,6 +12,7 @@ from pydantic import (
     BaseModel,
     BeforeValidator,
     ConfigDict,
+    PositiveInt,
     model_validator,
 )
 
@@ -76,9 +77,9 @@ class Dimension(_BaseModel):
     """A single array dimension."""
 
     name: str
-    count: int | None  # None for unlimited (first dimension only)
-    chunk_size: int | None = None
-    shard_size: int | None = None
+    count: PositiveInt | None  # None for unlimited (first dimension only)
+    chunk_size: PositiveInt | None = None
+    shard_size: PositiveInt | None = None
     type: DimensionType | None = None
     unit: str | None = None
     scale: float | None = None
