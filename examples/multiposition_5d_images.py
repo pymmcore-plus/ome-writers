@@ -47,7 +47,7 @@ with create_stream(settings) as stream:
         stream.append(np.full(shape[-2:], i, dtype=settings.dtype))
 
 
-if BACKEND != "tiff":
+if settings.format == "zarr":
     # Validate the output
     try:
         import yaozarrs

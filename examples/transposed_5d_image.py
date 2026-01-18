@@ -1,4 +1,7 @@
-"""Basic example of using ome_writers to write a single 5D image."""
+"""Basic example of using ome_writers to write a single 5D image.
+
+Where storage format differs from acquisition order.
+"""
 
 import sys
 from typing import cast
@@ -13,16 +16,17 @@ BACKEND = "auto" if len(sys.argv) < 2 else sys.argv[1]
 
 suffix = ".ome.tiff" if BACKEND == "tiff" else ".ome.zarr"
 settings = AcquisitionSettings(
-    root_path=f"example_5d_image{suffix}",
+    root_path=f"example_transposed_5d_image{suffix}",
     dimensions=[
         Dimension(name="t", count=2, chunk_size=1, type="time"),
-        Dimension(name="c", count=3, chunk_size=1, type="channel"),
         Dimension(name="z", count=4, chunk_size=1, type="space", scale=5),
+        Dimension(name="c", count=3, chunk_size=1, type="channel"),
         Dimension(name="y", count=256, chunk_size=64, type="space", scale=0.1),
         Dimension(name="x", count=256, chunk_size=64, type="space", scale=0.1),
     ],
     dtype="uint16",
     overwrite=True,
+    storage_order=["t", "c", "z", "y", "x"],  # aka, ome-zarr standard order
     backend=BACKEND,
 )
 

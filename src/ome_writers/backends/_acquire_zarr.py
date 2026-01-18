@@ -54,14 +54,11 @@ class AcquireZarrBackend(ArrayBackend):
         if not settings.root_path.endswith(".zarr"):  # pragma: no cover
             return "Root path must end with .zarr for AcquireZarrBackend."
 
-        # TODO
-        # # Acquire-zarr only supports sequential writes in acquisition order
-        # if settings.storage_order != "acquisition":
-        #     return (
-        #         'AcquireZarrBackend requires storage_order="acquisition" '
-        #         "(sequential writes only). "
-        #         f"Got: {settings.storage_order!r}"
-        #     )
+        if settings.storage_index_permutation is not None:  # pragma: no cover
+            return (
+                "AcquireZarrBackend does not currently support permuted storage order. "
+                "Data may only be written in acquisition order."
+            )
 
         return False
 

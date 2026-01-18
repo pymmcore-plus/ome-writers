@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import importlib.util
 import math
+import re
 from pathlib import Path
-from typing import cast
+from typing import TypeAlias, cast
 
 import numpy as np
 import pytest
@@ -20,6 +21,7 @@ from ome_writers import (
     PositionDimension,
     create_stream,
 )
+from ome_writers._router import FrameRouter
 
 # NOTES:
 # - All root_paths will be replaced with temporary directories during testing.
@@ -138,11 +140,41 @@ def _name_case(case: AcquisitionSettings) -> str:
 
 UNBOUNDED_FRAME_COUNT = 2  # number of frames to write for unbounded dimensions
 
+StorageIdxToFrame: TypeAlias = dict[tuple[int, ...], int]
+FrameExpectation: TypeAlias = dict[int, StorageIdxToFrame]
+
+
+def _build_expected_frames(
+    case: AcquisitionSettings, num_frames: int
+) -> FrameExpectation:
+    """Build expected frame value mapping using FrameRouter.
+
+    Returns a mapping of {position index -> {storage index -> frame number}}.
+
+    This assumes that the data is written as np.full(..., fill_value=frame_number).
+    """
+    router = FrameRouter(case)
+    expected_frames: FrameExpectation = {}
+    for frame_num, ((pos_idx, _), storage_idx) in enumerate(router):
+        if frame_num >= num_frames:
+            break
+        if pos_idx not in expected_frames:
+            expected_frames[pos_idx] = {}
+        expected_frames[pos_idx][storage_idx] = frame_num
+    return expected_frames
+
+
+def _validate_expected_frames(
+    arr: np.ndarray,
+    expected_frames: StorageIdxToFrame,
+) -> None:
+    """Validate that the array contains the expected frame values."""
+    for s_idx, expected_val in expected_frames.items():
+        assert arr[s_idx][0, 0] == expected_val
+
 
 @pytest.mark.parametrize("case", CASES, ids=_name_case)
-def test_cases_as_zarr(
-    case: AcquisitionSettings, any_backend: str, tmp_path: Path
-) -> None:
+def test_cases(case: AcquisitionSettings, any_backend: str, tmp_path: Path) -> None:
     is_tiff = any_backend == "tiff"
     ext = ".ome.tiff" if is_tiff else ".ome.zarr"
     object.__setattr__(case, "root_path", str(tmp_path / f"output{ext}"))
@@ -157,8 +189,19 @@ def test_cases_as_zarr(
         # unbounded, use a fixed number for testing
         num_frames = math.prod((d.count or UNBOUNDED_FRAME_COUNT) for d in dims[:-2])
 
+    # Build expected frame value map using router
+
     stored_array_dims = [d.model_copy() for d in case.array_storage_dimensions]
-    with create_stream(case) as stream:
+
+    try:
+        stream = create_stream(case)
+    except NotImplementedError as e:
+        if re.match("Backend .* does not support settings", str(e)):
+            pytest.xfail(f"Backend does not support this configuration: {e}")
+            return
+        raise
+
+    with stream:
         # Create deep copies to avoid mutating the original Dimension objects
         for f in range(num_frames):
             frame_data = np.full(frame_shape, f, dtype=case.dtype)
@@ -170,10 +213,11 @@ def test_cases_as_zarr(
     if stored_array_dims[0].count is None:
         stored_array_dims[0].count = UNBOUNDED_FRAME_COUNT
 
+    expected_frames = _build_expected_frames(case, num_frames)
     if is_tiff:
-        _assert_valid_ome_tiff(case, stored_array_dims)
+        _assert_valid_ome_tiff(case, stored_array_dims, expected_frames)
     else:
-        _assert_valid_ome_zarr(case, stored_array_dims)
+        _assert_valid_ome_zarr(case, stored_array_dims, expected_frames)
 
 
 def test_overwrite_safety(tmp_path: Path, any_backend: str) -> None:
@@ -221,7 +265,9 @@ def test_overwrite_safety(tmp_path: Path, any_backend: str) -> None:
 
 
 def _assert_valid_ome_tiff(
-    case: AcquisitionSettings, stored_array_dims: list[Dimension]
+    case: AcquisitionSettings,
+    stored_array_dims: list[Dimension],
+    expected_frames: dict[int, dict[tuple[int, ...], int]],
 ) -> None:
     try:
         import ome_types
@@ -278,7 +324,9 @@ def _assert_valid_ome_tiff(
 
 
 def _assert_valid_ome_zarr(
-    case: AcquisitionSettings, stored_array_dims: list[Dimension]
+    case: AcquisitionSettings,
+    stored_array_dims: list[Dimension],
+    expected_frames: FrameExpectation,
 ) -> None:
     root = Path(case.root_path)
     group = yaozarrs.validate_zarr_store(root)
@@ -291,7 +339,7 @@ def _assert_valid_ome_zarr(
     # Plate
     if case.plate is not None:
         assert isinstance(ome_meta, v05.Plate)
-        image_paths = [root / p.row / p.column / p.name for p in case.positions]  # ty: ignore
+        image_paths = [root / p.row / p.column / p.name for p in case.positions]
     # Single image
     elif num_positions == 1:
         assert isinstance(ome_meta, v05.Image)
@@ -305,7 +353,7 @@ def _assert_valid_ome_zarr(
 
     assert len(image_paths) == num_positions
 
-    for image_path in image_paths:
+    for pos_idx, image_path in enumerate(image_paths):
         group = yaozarrs.open_group(image_path)
         image = group.ome_metadata()
         assert isinstance(image, v05.Image), (
@@ -316,14 +364,18 @@ def _assert_valid_ome_zarr(
         # we're validating on disk data with tensorstore rather than zarr-python
         # due to zarr-python's dropped support for python versions that are still
         # before EOL (i.e. SPEC-0)
+        expected = expected_frames[pos_idx]
         if importlib.util.find_spec("tensorstore") is not None:
-            _validate_array_tensorstore(group, stored_array_dims, case.dtype)
+            _validate_array_tensorstore(group, stored_array_dims, case.dtype, expected)
         else:
-            _validate_array_zarr(group, stored_array_dims, case.dtype)
+            _validate_array_zarr(group, stored_array_dims, case.dtype, expected)
 
 
 def _validate_array_tensorstore(
-    group: yaozarrs.ZarrGroup, storage_dims: list[D], dtype: str
+    group: yaozarrs.ZarrGroup,
+    storage_dims: list[D],
+    dtype: str,
+    expected_frames: StorageIdxToFrame,
 ) -> None:
     """Validate an array stored on disk using tensorstore."""
     import tensorstore
@@ -344,12 +396,14 @@ def _validate_array_tensorstore(
         f"expected {expected_chunk_shape}, got {actual_chunk_shape}"
     )
 
-    # validate sharding
-    # TODO
+    _validate_expected_frames(array0.read().result(), expected_frames)
 
 
 def _validate_array_zarr(
-    group: yaozarrs.ZarrGroup, storage_dims: list[D], dtype: str
+    group: yaozarrs.ZarrGroup,
+    storage_dims: list[D],
+    dtype: str,
+    expected_frames: dict[tuple[int, ...], int],
 ) -> None:
     """Validate an array stored on disk using zarr-python."""
     import zarr
@@ -367,5 +421,4 @@ def _validate_array_zarr(
         f"expected {expected_chunk_shape}, got {array0.chunks}"
     )
 
-    # validate sharding
-    # TODO
+    _validate_expected_frames(array0, expected_frames)

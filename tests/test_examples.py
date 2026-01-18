@@ -33,7 +33,7 @@ def test_example_runs(example_path: Path, tmp_path: Path, any_backend: str) -> N
             exec(code, {"sys": sys_module, "__name__": "__main__"})
         except NotImplementedError as e:
             if "does not support settings" in str(e):
-                pytest.skip(f"Example {example_path.name} uses unsupported settings.")
+                pytest.xfail(f"Example {example_path.name} uses unsupported settings.")
             raise
 
     # Validate that example created output files
