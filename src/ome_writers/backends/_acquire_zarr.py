@@ -54,7 +54,7 @@ class AcquireZarrBackend(ArrayBackend):
         if not settings.root_path.endswith(".zarr"):  # pragma: no cover
             return "Root path must end with .zarr for AcquireZarrBackend."
 
-        if settings.storage_index_permutation is not None:  # pragma: no cover
+        if settings.storage_index_permutation is not None:
             return (
                 "AcquireZarrBackend does not currently support permuted storage order. "
                 "Data may only be written in acquisition order."
