@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import warnings
 from enum import Enum
 from functools import cached_property
-from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeAlias, cast
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, TypeAlias, cast
 
 import numpy as np
 from annotated_types import Len
@@ -135,34 +136,56 @@ class PositionDimension(_BaseModel):
 def _validate_dims_list(
     dims: tuple[Dimension | PositionDimension, ...],
 ) -> tuple[Dimension | PositionDimension, ...]:
-    dim_names = [dim.name for dim in dims]
-    if len(dim_names) != len(set(dim_names)):
-        raise ValueError("Dimension names must be unique.")
-
-    # only the first dimension can be unbounded
-    for dim in dims[1:]:
-        if isinstance(dim, Dimension) and dim.count is None:
-            raise ValueError("Only the first dimension may be unbounded (count=None).")
-
-    # ensure at least 2 spatial dimensions at the end
-    spatial_dims = [d for d in dims if isinstance(d, Dimension) and d.type == "space"]
-    if len(spatial_dims) < 2 or dims[-2:] != tuple(spatial_dims[-2:]):
-        # TODO: Consider whether this is the best way to express this.
-        # should dimension take another parameter indicating image dims?
-        # (to distinguish from other spatial dims like Z?)
-        raise ValueError(
-            "The last two dimensions must have `type='space'` (e.g. Y and X)."
-        )
-
-    # ensure at most one PositionDimension and
+    """Validate dimensions list for AcquisitionSettings."""
+    # ensure at most one PositionDimension and 2-5 non-position dimensions.
     # ensure unique position names within each well (row/column combination)
     has_pos = False
-    for dim in dims:
+    n_dims = 0
+    name_counts: dict[str, int] = {}
+    for idx, dim in enumerate(dims):
+        name_counts.setdefault(dim.name, 0)
+        name_counts[dim.name] += 1
         if isinstance(dim, PositionDimension):
             if has_pos:
                 raise ValueError("Only one PositionDimension is allowed.")
             _validate_unique_names_per_well(dim.positions)
             has_pos = True
+        else:
+            n_dims += 1
+            # only the first dimension can be unbounded
+            if dim.count is None and idx != 0:
+                raise ValueError(
+                    "Only the first dimension may be unbounded (count=None)."
+                )
+
+    if n_dims < 2:
+        raise ValueError(
+            "At least 2 non-position dimensions are required (usually Y and X)."
+        )
+    if n_dims > 5:
+        raise ValueError(
+            "At most 5 non-position dimensions are allowed for both OME-Zarr and "
+            f"OME-TIFF, got {n_dims}."
+        )
+
+    # ensure all dimension names are unique
+    if dupe_names := [name for name, count in name_counts.items() if count > 1]:
+        raise ValueError(f"Dimension names must be unique, duplicates: {dupe_names}")
+
+    # ensure at least 2 spatial dimensions at the end
+    for dim in dims[-2:]:
+        if not isinstance(dim, Dimension) or dim.type not in {"space", None}:
+            raise ValueError(
+                "The last two dimensions must be spatial dimensions (type='space')."
+            )
+        if dim.type is None:
+            if dim.name.lower() not in {"x", "y"}:
+                warnings.warn(
+                    "The last two dimensions are expected to have type='space'. Setting"
+                    f"type='space' for non-standard dimension name '{dim.name}'.",
+                    stacklevel=2,
+                )
+            dim.type = "space"
 
     return tuple(dims)
 
@@ -222,15 +245,20 @@ class AcquisitionSettings(_BaseModel):
     ]
     dtype: Annotated[str, BeforeValidator(_validate_dtype)]
     compression: str | None = None
-    # FIXME:
-    # "ngff" is intended to be a placeholder for "spec-compliant" storage order.
+    # "ome" means "spec-compliant" storage order.
     # It MAY depend on the output format (e.g. OME-Zarr vs OME-TIFF) and
-    # version, and backends may have different restrictions.  So 'ngff' is probably
-    # too narrow of a term.
-    storage_order: Literal["acquisition", "ngff"] | list[str] = "ngff"
+    # version, and backends may have different restrictions.
+    storage_order: Literal["acquisition", "ome"] | list[str] = "ome"
     plate: Plate | None = None
     overwrite: bool = False
     backend: BackendName | Literal["auto"] = "auto"
+
+    @cached_property
+    def format(self) -> Literal["tiff", "zarr"]:
+        """Return file format.  Either (OME) 'tiff' or 'zarr'."""
+        if self.backend in {"tiff"}:
+            return "tiff"
+        return "zarr"
 
     @cached_property
     def shape(self) -> tuple[int | None, ...]:
@@ -240,7 +268,7 @@ class AcquisitionSettings(_BaseModel):
     @cached_property
     def is_unbounded(self) -> bool:
         """Whether the acquisition has an unbounded (None) dimension."""
-        return any(dim.count is None for dim in self.dimensions)
+        return self.dimensions[0].count is None
 
     @cached_property
     def num_frames(self) -> int | None:
@@ -280,11 +308,6 @@ class AcquisitionSettings(_BaseModel):
         return tuple(dim for dim in self.dimensions[:-2] if isinstance(dim, Dimension))
 
     @cached_property
-    def storage_index_dimensions(self) -> tuple[Dimension, ...]:
-        """NON-frame Dimensions in storage order."""
-        return _sort_dims_to_storage_order(self.index_dimensions, self.storage_order)
-
-    @cached_property
     def array_dimensions(self) -> tuple[Dimension, ...]:
         """All Dimensions excluding PositionDimension dimensions."""
         return tuple(
@@ -292,9 +315,46 @@ class AcquisitionSettings(_BaseModel):
         )
 
     @cached_property
+    def storage_index_dimensions(self) -> tuple[Dimension, ...]:
+        """NON-frame Dimensions in storage order."""
+        return _sort_dims_to_storage_order(
+            self.index_dimensions, self.storage_order, self.format
+        )
+
+    @cached_property
+    def storage_index_permutation(self) -> tuple[int, ...] | None:
+        """Permutation to convert acquisition index to storage index, if different."""
+        storage_dims = self.storage_index_dimensions
+        perm = _compute_permutation(self.index_dimensions, storage_dims)
+        return perm if perm != tuple(range(len(perm))) else None
+
+    @cached_property
     def array_storage_dimensions(self) -> tuple[Dimension, ...]:
         """All Dimensions (excluding PositionDimension) in storage order."""
         return self.storage_index_dimensions + self.frame_dimensions
+
+    # --------- Validators ---------
+
+    @model_validator(mode="after")
+    def _validate_storage_order(self) -> AcquisitionSettings:
+        """Validate storage_order value."""
+        if isinstance(self.storage_order, list):
+            # manual sort orders are still not allowed to permute the last 2 dims
+            if set(self.storage_order[-2:]) != {
+                self.dimensions[-2].name,
+                self.dimensions[-1].name,
+            }:
+                raise ValueError(
+                    "storage_order may not (yet) permute the last two dimensions."
+                )
+            dim_names = {dim.name for dim in self.dimensions}
+            if set(self.storage_order) != set(dim_names):
+                raise ValueError(
+                    f"storage_order names {self.storage_order!r} don't match "
+                    f"acquisition dimension names {list(dim_names)}"
+                )
+
+        return self
 
     @model_validator(mode="after")
     def _validate_plate_positions(self) -> AcquisitionSettings:
@@ -321,6 +381,34 @@ class AcquisitionSettings(_BaseModel):
                 )
 
         return self
+
+    if not TYPE_CHECKING:
+        # pydantic's model_copy copies __dict__ directly, so `cached_property`
+        # remain cached in the copy.  We need to clear them manually.
+        # this list is tested in `test_acq_settings_cached_props`
+
+        _cached_props: ClassVar[tuple[str, ...]] = (
+            "format",
+            "shape",
+            "is_unbounded",
+            "num_frames",
+            "positions",
+            "position_dimension_index",
+            "frame_dimensions",
+            "index_dimensions",
+            "array_dimensions",
+            "storage_index_dimensions",
+            "storage_index_permutation",
+            "array_storage_dimensions",
+        )
+
+        def model_copy(self, *args: Any, **kwargs: Any) -> AcquisitionSettings:
+            """Override model_copy to clear cached properties on copy."""
+            obj = super().model_copy(*args, **kwargs)
+            for prop in AcquisitionSettings._cached_props:
+                if prop in obj.__dict__:
+                    del obj.__dict__[prop]
+            return obj
 
 
 # ---------------------------------------------------------------------------
@@ -410,25 +498,52 @@ def _ngff_sort_key(dim: Dimension) -> tuple[int, int]:
     return (3, 0)
 
 
+def _ome_tiff_sort_key(dim: Dimension) -> tuple[int, int]:
+    """Sort key for OME-TIFF canonical order: [TCZ]YX variations."""
+    # FIXME: ... if even possible
+    # here we have a problem... because OME-TIFF didn't have the concept
+    # of dimension types, it uses strict "XYXCZT" naming conventions.
+    # so if the user has non-standard names, we can't really map to OME-TIFF
+    # storage order correctly.
+    # however... OME-Tiff storage order is more flexible in practice (within
+    # the strict 5-dim limit).  So for now we just return the acquisition order
+    # and ... pray?
+    order_priority = {"t": 1, "c": 1, "z": 1, "y": 3, "x": 4}
+    return (order_priority.get(dim.name.lower(), 5), 0)
+
+
 def _sort_dims_to_storage_order(
-    acq_dims: list[Dimension],
+    index_dims: list[Dimension],
     storage_order: str | list[str],
+    format: Literal["tiff", "zarr"],
 ) -> tuple[Dimension, ...]:
-    """Resolve storage_order setting to explicit list of dimension names."""
+    """Resolve storage_order setting to explicit list of dimension names.
+
+    NOTE: this function is the only place in the schema that cares about format.
+    While it seems a little like a backend concern, putting it here lets us have
+    immediate validation of Zarr/Tiff-specific storage order rules.  Additionally,
+    the "rules" are relatively constant across backends.
+    """
     if storage_order == "acquisition":
-        return tuple(acq_dims)
-    elif storage_order == "ngff":
-        return tuple(sorted(acq_dims, key=_ngff_sort_key))
+        return tuple(index_dims)
+    elif storage_order == "ome":
+        if format == "zarr":
+            return tuple(sorted(index_dims, key=_ngff_sort_key))
+        else:
+            return tuple(sorted(index_dims, key=_ome_tiff_sort_key))
     elif isinstance(storage_order, list):
-        dims_map = {dim.name: dim for dim in acq_dims}
-        if set(storage_order) != set(dims_map):
-            raise ValueError(
-                f"storage_order names {storage_order!r} don't match "
-                f"acquisition dimension names {list(dims_map)}"
-            )
-        return tuple(dims_map[name] for name in storage_order)
+        dims_map = {dim.name: dim for dim in index_dims}
+        return tuple(dims_map[name] for name in storage_order if name in dims_map)
     else:
-        raise ValueError(
-            f"Invalid storage_order: {storage_order!r}. Must be 'acquisition', 'ngff', "
+        raise ValueError(  # pragma: no cover (unreachable due to prior validation)
+            f"Invalid storage_order: {storage_order!r}. Must be 'acquisition', 'ome', "
             "or list of names."
         )
+
+
+def _compute_permutation(
+    acq_dims: list[Dimension], storage_names: list[Dimension]
+) -> tuple[int, ...]:
+    """Compute permutation to convert acquisition indices to storage indices."""
+    dim_names = [dim.name for dim in acq_dims]
+    return tuple(dim_names.index(dim.name) for dim in storage_names)

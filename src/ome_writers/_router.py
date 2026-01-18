@@ -21,7 +21,7 @@ The router is the *only* component that understands both orderings:
 
 - **Storage order**: Controlled by `AcquisitionSettings.storage_order`. Can be:
   - "acquisition" - same as acquisition order
-  - "ngff" - canonical NGFF order (time, channel, space)
+  - "ome" - canonical OME order (format dependent)
   - list[str] - explicit axis names
 
 The router yields `(position_info, storage_index)` tuples where:
@@ -95,7 +95,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from .schema import AcquisitionSettings, Dimension, Position
+from .schema import AcquisitionSettings, Position
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -140,10 +140,7 @@ class FrameRouter:
         self._num_non_frame_dims = len(self._non_frame_sizes)
 
         # Compute storage order permutation (for non-position "index" dimensions only)
-        self._permutation = _compute_permutation(
-            settings.index_dimensions, settings.storage_index_dimensions
-        )
-        self._is_permuted = self._permutation != tuple(range(len(self._permutation)))
+        self._permutation = settings.storage_index_permutation
 
         # Precompute which indices to extract for acq_idx (all except position)
         if self._position_index is not None:
@@ -184,7 +181,7 @@ class FrameRouter:
 
         # Build storage index by extracting relevant indices and applying permutation
         storage_idx = tuple(self._dim_indices[i] for i in self._acq_idx_positions)
-        if self._is_permuted:
+        if self._permutation is not None:
             storage_idx = tuple(storage_idx[p] for p in self._permutation)
 
         # Increment indices for next iteration
@@ -227,11 +224,3 @@ class FrameRouter:
 
         # Wrapped all dimensions - iteration is complete
         self._finished = True
-
-
-def _compute_permutation(
-    acq_dims: list[Dimension], storage_names: list[Dimension]
-) -> tuple[int, ...]:
-    """Compute permutation to convert acquisition indices to storage indices."""
-    dim_names = [dim.name for dim in acq_dims]
-    return tuple(dim_names.index(dim.name) for dim in storage_names)

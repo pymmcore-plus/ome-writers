@@ -88,7 +88,7 @@ STORAGE_ORDER_CASES = [
     pytest.param(
         # Acquisition TZC, storage TCZ (ngff)
         {"t": 2, "z": 2, "c": 2, "y": 64, "x": 64},
-        "ngff",
+        "ome",
         [
             ("0", (0, 0, 0)),
             ("0", (0, 1, 0)),  # z varies, but stored as c
@@ -129,7 +129,7 @@ def test_router_iteration(
 @pytest.mark.parametrize("sizes,storage_order,expected", STORAGE_ORDER_CASES)
 def test_router_storage_order(
     sizes: Mapping[str, int | Sequence[str] | None],
-    storage_order: Literal["acquisition", "ngff"],
+    storage_order: Literal["acquisition", "ome"],
     expected: list[tuple[str, tuple[int, ...]]],
 ) -> None:
     """Test router applies storage order permutation correctly."""

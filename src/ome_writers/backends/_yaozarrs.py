@@ -120,9 +120,9 @@ class YaozarrsBackend(ArrayBackend):
         frame: np.ndarray,
     ) -> None:
         """Write frame to specified location with auto-resize for unlimited dims."""
-        if self._finalized:
+        if self._finalized:  # pragma: no cover
             raise RuntimeError("Cannot write after finalize().")
-        if not self._arrays:
+        if not self._arrays:  # pragma: no cover
             raise RuntimeError("Backend not prepared. Call prepare() first.")
 
         array = self._arrays[position_info[0]]
