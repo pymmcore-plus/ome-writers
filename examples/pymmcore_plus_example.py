@@ -24,7 +24,7 @@ SUFFIX = ".ome.tiff" if BACKEND == "tiff" else ".ome.zarr"
 
 
 # Initialize pymmcore-plus core and load system configuration
-core = CMMCorePlus.instance()
+core = CMMCorePlus()
 core.loadSystemConfiguration()
 
 # Create a MDASequence, which will be used to run the MDA with pymmcore-plus
