@@ -75,6 +75,7 @@ dev = [
     "ruff>=0.13.0",
     "prek>=0.2.28",
     "ty>=0.0.12",
+    "useq-schema>=0.8.2",
 ]
 
 [project.urls]
@@ -171,5 +172,5 @@ extend-ignore-identifiers-re = ["(?i)nd2?.*", "(?i)ome", "FOV"]
 python = "./.venv"
 
 [tool.ty.rules]
-invalid-argument-type = "ignore"      # tough with pydantic
-possibly-missing-attribute = "ignore"
+invalid-argument-type = "ignore"
+unresolved-import = "ignore"
