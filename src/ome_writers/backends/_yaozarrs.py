@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import warnings
+from copy import deepcopy
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from ome_writers._backend import ArrayBackend
 
@@ -36,13 +39,17 @@ class YaozarrsBackend(ArrayBackend):
 
     def __init__(self) -> None:
         self._arrays: list[Any] = []
+        self._image_group_paths: list[str] = []  # Parallel to _arrays, for metadata
+        self._metadata_cache: dict[str, dict] = {}  # group path -> attrs dict
         self._finalized = False
+        self._root: Path | None = None
 
     def prepare(self, settings: AcquisitionSettings, router: FrameRouter) -> None:
         """Initialize OME-Zarr storage structure."""
 
         self._finalized = False
         root = Path(settings.root_path).expanduser().resolve()
+        self._root = root
         positions = settings.positions
 
         # Build storage metadata
@@ -80,9 +87,12 @@ class YaozarrsBackend(ArrayBackend):
                 builder.add_well(row=row, col=col, images=images_dict)
 
             _, all_arrays = builder.prepare()
-            # Map position index to array path: row/col/name/0
+            # Map position index to array path and store arrays
+            self._image_group_paths = [
+                f"{pos.row}/{pos.column}/{pos.name}" for pos in positions
+            ]
             self._arrays = [
-                all_arrays[f"{pos.row}/{pos.column}/{pos.name}/0"] for pos in positions
+                all_arrays[f"{parent}/0"] for parent in self._image_group_paths
             ]
 
         # Single position
@@ -96,6 +106,7 @@ class YaozarrsBackend(ArrayBackend):
                 shards=shards,
                 writer=self.writer,
             )
+            self._image_group_paths = ["."]
             self._arrays = [all_arrays["0"]]
 
         # Multi-position (bf2raw layout)
@@ -111,7 +122,14 @@ class YaozarrsBackend(ArrayBackend):
                 builder.add_series(pos.name, image, [(shape, dtype)])
 
             _, all_arrays = builder.prepare()
-            self._arrays = [all_arrays[f"{pos.name}/0"] for pos in positions]
+            self._image_group_paths = [pos.name for pos in positions]
+            self._arrays = [
+                all_arrays[f"{parent}/0"] for parent in self._image_group_paths
+            ]
+
+        # Cache metadata immediately after creation
+        # This is used later for get_metadata() and update_metadata()
+        self._cache_metadata_from_arrays(root)
 
     def write(
         self,
@@ -137,10 +155,75 @@ class YaozarrsBackend(ArrayBackend):
 
         self._write(array, index, frame)
 
+    def get_metadata(self) -> dict[str, dict]:
+        """Get metadata from all array groups in the zarr hierarchy.
+
+        Returns a dict mapping group paths to their .zattrs contents.
+        Each .zattrs dict typically contains:
+        - "ome": yaozarrs v05.Image model (structured OME metadata)
+        - "omero": dict with channel colors/names (if applicable)
+        - Custom keys for non-standard metadata (timestamps, etc.)
+
+        Returns
+        -------
+        dict[str, dict]
+            Mapping of group paths to .zattrs dicts, or empty dict if not prepared.
+
+        Examples
+        --------
+        For single position:
+            {".": {"ome": {...}}}  # root group attrs
+
+        For multi-position:
+            {"pos0": {"ome": {...}}, "pos1": {"ome": {...}}}
+
+        For plates:
+            {"A/1/field_0": {"ome": {...}}, "A/2/field_0": {"ome": {...}}}
+        """
+        if not self._metadata_cache:  # pragma: no cover
+            return {}
+
+        return deepcopy(self._metadata_cache)
+
+    def update_metadata(self, metadata: dict[str, dict]) -> None:
+        """Update metadata for all array groups in the zarr hierarchy.
+
+        Parameters
+        ----------
+        metadata : dict[str, dict]
+            Mapping of group paths to .zattrs dicts. Keys should match those
+            returned by get_metadata(). Values are dicts that will be written
+            to the corresponding .zattrs files.
+
+        Raises
+        ------
+        KeyError
+            If a path in metadata doesn't correspond to a group.
+        RuntimeError
+            If backend is not prepared.
+        """
+        if not self._metadata_cache:  # pragma: no cover
+            raise RuntimeError("Backend not prepared. Call prepare() first.")
+
+        if self._root is None:  # pragma: no cover
+            warnings.warn("Root path is unknown. Cannot update metadata.", stacklevel=2)
+            return
+
+        for path, attrs in metadata.items():
+            if path not in self._metadata_cache:
+                raise KeyError(f"Unknown path: {path}")
+
+            if (zarr_json := self._root / path / "zarr.json").exists():
+                data = cast("dict", json.loads(zarr_json.read_text()))
+                data.setdefault("attributes", {}).update(attrs)
+                zarr_json.write_text(json.dumps(data, indent=2))
+                self._metadata_cache[path] = deepcopy(attrs)
+
     def finalize(self) -> None:
         """Flush and release resources."""
         if not self._finalized:
             self._arrays.clear()
+            self._image_group_paths.clear()
             self._finalized = True
 
     def _write(self, array: Any, index: tuple[int, ...], frame: np.ndarray) -> None:
@@ -150,6 +233,16 @@ class YaozarrsBackend(ArrayBackend):
     def _resize(self, array: Any, new_shape: Sequence[int]) -> None:
         """Resize array to new shape."""
         array.resize(new_shape)
+
+    def _cache_metadata_from_arrays(self, root: Path) -> None:
+        """Cache metadata from parent groups.
+
+        Reads zarr.json and caches their attributes in position order.
+        """
+        for parent_path in self._image_group_paths:
+            if (zarr_json := root / parent_path / "zarr.json").exists():
+                data = json.loads(zarr_json.read_text())
+                self._metadata_cache[parent_path] = data.get("attributes", {})
 
 
 class ZarrBackend(YaozarrsBackend):

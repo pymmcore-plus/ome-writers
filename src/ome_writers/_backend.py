@@ -163,6 +163,43 @@ class ArrayBackend(ABC):
     # Optional hooks
     # -------------------------------------------------------------------------
 
+    def get_metadata(self) -> Any:
+        """Get the base metadata structure generated from acquisition settings.
+
+        Returns the metadata that was auto-generated during prepare() based on
+        dimensions, dtype, and other acquisition settings. Users can modify this
+        object and pass it to update_metadata() to add acquisition-specific details.
+
+        Returns
+        -------
+        metadata
+            Format-specific metadata object. The exact type depends on the backend:
+            - TIFF: `ome_types.model.OME` - single object with all positions
+            - Zarr: `dict[str, dict]` - mapping of group paths to .zattrs dicts
+            Returns None if backend doesn't support metadata retrieval.
+
+        Notes
+        -----
+        The returned metadata is a "base" structure with generic names and
+        dimension information. Modify it to add:
+        - Meaningful image/channel names
+        - Acquisition timestamps
+        - Stage positions
+        - Instrument details
+        - Any other acquisition-specific metadata
+
+        For TIFF, the returned ome.OME object contains all positions as Image
+        objects with IDs "Image:0", "Image:1", etc.
+
+        For Zarr, the returned dict has keys that are group paths relative to
+        the root (e.g., "0", "1" for multi-position, or "A/1/field_0" for plates).
+        Each value is a dict containing the .zattrs content, typically with keys:
+        - "ome": yaozarrs v05.Image model (structured OME metadata)
+        - "omero": dict with channel colors/names (if applicable)
+        - Custom keys for non-standard metadata (timestamps, etc.)
+        """
+        return None  # pragma: no cover
+
     def update_metadata(self, metadata: Any) -> None:  # noqa: B027
         """Update metadata after writing is complete.
 
@@ -174,11 +211,15 @@ class ArrayBackend(ABC):
         ----------
         metadata
             Format-specific metadata object. The exact type depends on the
-            backend (e.g., `ome_types.OME` for TIFF).
+            backend (e.g., `ome_types.OME` for TIFF, `dict[str, dict]` for Zarr).
 
         Notes
         -----
         This method is typically called after `finalize()` when complete
         acquisition metadata is available (e.g., actual timestamps, stage
         positions recorded during acquisition).
+
+        For convenience, use get_metadata() to retrieve the base structure,
+        modify it, and pass it back to this method. This avoids duplicating
+        dimension and dtype information.
         """

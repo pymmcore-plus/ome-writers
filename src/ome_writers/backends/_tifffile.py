@@ -23,7 +23,6 @@ if TYPE_CHECKING:
 try:
     import ome_types.model as ome
     import tifffile
-    from ome_types.model import PixelType
 except ImportError as e:
     raise ImportError(
         f"{__name__} requires tifffile and ome-types: "
@@ -45,12 +44,13 @@ class TiffBackend(ArrayBackend):
         self._file_paths: dict[int, str] = {}  # Store paths for metadata updates
         self._finalized = False
         self._storage_dims: tuple[Dimension, ...] | None = None
+        self._cached_metadata: ome.OME | None = None  # Cache for get_metadata()
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         """Check if settings are compatible with TIFF backend."""
         path = settings.root_path.lower()
         valid_extensions = [".tif", ".tiff", ".ome.tif", ".ome.tiff"]
-        if not any(path.endswith(ext) for ext in valid_extensions):
+        if not any(path.endswith(ext) for ext in valid_extensions):  # pragma: no cover
             return (
                 "Root path must end with .tif, .tiff, .ome.tif, or .ome.tiff "
                 "for TiffBackend."
@@ -62,8 +62,7 @@ class TiffBackend(ArrayBackend):
         self._finalized = False
         root = Path(settings.root_path).expanduser().resolve()
         positions = settings.positions
-        storage_dims = settings.array_storage_dimensions
-        self._storage_dims = storage_dims  # Store for metadata updates
+        self._storage_dims = storage_dims = settings.array_storage_dimensions
         self._dtype = settings.dtype
 
         # Compute shape from storage dimensions
@@ -76,10 +75,22 @@ class TiffBackend(ArrayBackend):
         # Prepare file paths
         fnames = self._prepare_files(root, len(positions), settings.overwrite)
 
+        # Generate OME metadata for all positions and cache it
+        all_images = []
+        for p_idx, fname in enumerate(fnames):
+            # Generate OME Image for this position
+            image = _create_ome_image(
+                storage_dims, dtype, Path(fname).name, image_index=p_idx
+            )
+            all_images.append(image)
+
+        # Cache complete OME metadata with all positions
+        self._cached_metadata = ome.OME(images=all_images)
+
         # Create writer thread for each position
         for p_idx, fname in enumerate(fnames):
-            # Generate OME metadata
-            ome_xml = self._generate_ome_xml(storage_dims, dtype, Path(fname).name)
+            # Extract XML for this specific position (single-image OME)
+            ome_xml = ome.OME(images=[all_images[p_idx]]).to_xml()
 
             self._file_paths[p_idx] = fname
             self._queues[p_idx] = q = Queue()
@@ -103,9 +114,9 @@ class TiffBackend(ArrayBackend):
 
         The index parameter is ignored since TIFF writes are sequential.
         """
-        if self._finalized:
+        if self._finalized:  # pragma: no cover
             raise RuntimeError("Cannot write after finalize().")
-        if not self._threads:
+        if not self._threads:  # pragma: no cover
             raise RuntimeError("Backend not prepared. Call prepare() first.")
 
         position_idx = position_info[0]
@@ -129,6 +140,26 @@ class TiffBackend(ArrayBackend):
             self._threads.clear()
             self._queues.clear()
             self._finalized = True
+
+    def get_metadata(self) -> ome.OME | None:
+        """Get the base OME metadata generated from acquisition settings.
+
+        Returns the OME metadata object that was auto-generated during prepare()
+        based on dimensions, dtype, and file paths. This object contains all
+        positions as Image objects with IDs "Image:0", "Image:1", etc.
+
+        Users can modify this object to add meaningful names, timestamps, etc.,
+        and pass it to update_metadata().
+
+        Returns
+        -------
+        ome_types.model.OME or None
+            Complete OME metadata object with all positions, or None if prepare()
+            has not been called yet.
+        """
+        if self._cached_metadata is None:
+            return None
+        return self._cached_metadata.model_copy(deep=True)
 
     def update_metadata(self, metadata: ome.OME) -> None:
         """Update the OME metadata in the TIFF files.
@@ -155,8 +186,11 @@ class TiffBackend(ArrayBackend):
                 f"Expected ome_types.model.OME metadata, got {type(metadata)}"
             )
 
-        for position_idx in self._threads:
+        for position_idx in self._file_paths:
             self._update_position_metadata(position_idx, metadata)
+
+        # Update cache to reflect what's now on disk
+        self._cached_metadata = metadata.model_copy(deep=True)
 
     # -------------------
 
@@ -166,16 +200,16 @@ class TiffBackend(ArrayBackend):
         For unbounded dimensions, we write frames without knowing the final count.
         After writing completes, update the OME-XML with the actual frame counts.
         """
-        if not self._storage_dims:
+        if not self._storage_dims:  # pragma: no cover
             return
 
         # Get actual frame count from first position's thread
         # (all positions should have written the same number of frames)
-        if 0 not in self._threads:
+        if 0 not in self._threads:  # pragma: no cover
             return
 
         total_frames_written = self._threads[0].frames_written
-        if total_frames_written == 0:
+        if total_frames_written == 0:  # pragma: no cover
             return
 
         # Calculate the count for the unbounded dimension
@@ -201,19 +235,26 @@ class TiffBackend(ArrayBackend):
             for d in self._storage_dims
         )
 
-        # Regenerate OME-XML for each position
-        for _p_idx, fname in self._file_paths.items():
-            ome_xml = self._generate_ome_xml(
-                corrected_dims, self._dtype, Path(fname).name
+        # Regenerate OME metadata for each position
+        all_images = []
+        for p_idx, fname in self._file_paths.items():
+            image = _create_ome_image(
+                corrected_dims, self._dtype, Path(fname).name, image_index=p_idx
             )
+            all_images.append(image)
+
             # Update the TIFF file's description tag
             try:
+                ome_xml = ome.OME(images=[image]).to_xml()
                 tifffile.tiffcomment(fname, comment=ome_xml.encode("ascii"))
-            except Exception as e:
+            except Exception as e:  # pragma: no cover
                 warnings.warn(
                     f"Failed to update OME metadata in {fname}: {e}",
                     stacklevel=2,
                 )
+
+        # Update cached metadata with corrected dimensions
+        self._cached_metadata = ome.OME(images=all_images)
 
     def _update_position_metadata(self, position_idx: int, metadata: ome.OME) -> None:
         """Update OME metadata for a specific position's TIFF file."""
@@ -289,93 +330,6 @@ class TiffBackend(ArrayBackend):
 
         return fnames
 
-    def _generate_ome_xml(
-        self, dims: tuple[Dimension, ...], dtype: str, filename: str
-    ) -> str:
-        """Generate OME-XML metadata for TIFF file.
-
-        Creates basic OME metadata structure. The dimension order is determined
-        by the storage dimensions order.
-        """
-        # Build shape dictionary from dimensions
-        shape_dict: dict[str, int] = {}
-        for d in dims:
-            shape_dict[d.name.upper()] = d.count if d.count is not None else 1
-
-        # OME-TIFF requires exactly 5 dimensions in a specific order
-        # Default missing dimensions to size 1
-        size_t = shape_dict.get("T", 1)
-        size_c = shape_dict.get("C", 1)
-        size_z = shape_dict.get("Z", 1)
-        size_y = shape_dict.get("Y", 1)
-        size_x = shape_dict.get("X", 1)
-
-        # Compute dimension order from storage dimensions
-        # OME dimension order describes how planes are ordered in the file
-        # Valid orders: XYZCT, XYZTC, XYCTZ, XYCZT, XYTCZ, XYTZC
-        # (all start with XY since those are the spatial in-plane dimensions)
-
-        # Extract non-spatial dimension names from storage order
-        # Reverse because OME dimension order has fastest-varying dimension on right,
-        # but storage order has slowest-varying dimension first
-        non_spatial_names = [d.name.upper() for d in reversed(dims[:-2])]
-
-        # Build OME dimension order: XY + remaining dimensions in reversed storage order
-        # Filter to only include Z, C, T dimensions
-        remaining_dims = [d for d in non_spatial_names if d in "ZCT"]
-
-        # Ensure we have Z, C, T (add missing ones at the end with size 1)
-        for dim_char in "ZCT":
-            if dim_char not in remaining_dims:
-                remaining_dims.append(dim_char)
-
-        # Build final dimension order string (XY + remaining)
-        final_dim_order = "XY" + "".join(remaining_dims[:3])  # Only use first 3
-
-        # Map dtype string to OME pixel type
-        dtype_map = {
-            "uint8": PixelType.UINT8,
-            "uint16": PixelType.UINT16,
-            "uint32": PixelType.UINT32,
-            "int8": PixelType.INT8,
-            "int16": PixelType.INT16,
-            "int32": PixelType.INT32,
-            "float": PixelType.FLOAT,
-            "double": PixelType.DOUBLE,
-        }
-        pixel_type = dtype_map.get(dtype, PixelType.UINT16)
-
-        # Create OME metadata
-        pixels = ome.Pixels(
-            id="Pixels:0",
-            dimension_order=final_dim_order,  # String is auto-converted to enum
-            size_x=size_x,
-            size_y=size_y,
-            size_z=size_z,
-            size_c=size_c,
-            size_t=size_t,
-            type=pixel_type,
-            big_endian=False,
-            channels=[ome.Channel(id=f"Channel:0:{i}") for i in range(size_c)],
-            tiff_data_blocks=[
-                ome.TiffData(
-                    plane_count=size_t * size_c * size_z,
-                )
-            ],
-        )
-
-        image = ome.Image(
-            id="Image:0",
-            pixels=pixels,
-            name=Path(filename).stem,
-        )
-
-        ome_obj = ome.OME(
-            images=[image],
-        )
-
-        return ome_obj.to_xml()
-
 
 class WriterThread(threading.Thread):
     """Background thread for sequential TIFF writing."""
@@ -449,6 +403,47 @@ _thread_counter = count()
 # ------------------------
 
 # helpers for position-specific OME metadata updates
+
+
+def _create_ome_image(
+    dims: tuple[Dimension, ...], dtype: str, filename: str, image_index: int
+) -> ome.Image:
+    """Generate OME Image object for TIFF file.
+
+    Creates basic OME Image structure. The dimension order is determined
+    by the storage dimensions order.
+    """
+    # Build shape dictionary from dimensions
+    shape_dict = {d.name.upper(): d.count or 1 for d in dims}
+    size_t = shape_dict.get("T", 1)
+    size_c = shape_dict.get("C", 1)
+    size_z = shape_dict.get("Z", 1)
+    # OME-XML has fasted-varying dimension on the left (rightmost in storage order)
+    dim_order = next(
+        order
+        for order in ome.Pixels_DimensionOrder
+        if order.value.startswith("".join(reversed(shape_dict.keys())))
+    )
+
+    return ome.Image(
+        id=f"Image:{image_index}",
+        pixels=ome.Pixels(
+            id=f"Pixels:{image_index}",
+            dimension_order=dim_order,
+            size_t=size_t,
+            size_c=size_c,
+            size_z=size_z,
+            size_y=shape_dict.get("Y", 1),
+            size_x=shape_dict.get("X", 1),
+            type=dtype,
+            big_endian=False,
+            channels=[
+                ome.Channel(id=f"Channel:{image_index}:{i}") for i in range(size_c)
+            ],
+            tiff_data_blocks=[ome.TiffData(plane_count=size_t * size_c * size_z)],
+        ),
+        name=Path(filename).stem,
+    )
 
 
 def _create_position_specific_ome(position_idx: int, metadata: ome.OME) -> ome.OME:
