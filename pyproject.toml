@@ -31,7 +31,7 @@ dependencies = ["numpy>=2", "typing-extensions>=4.10.0", "yaozarrs>=0.2.0"]
 [project.optional-dependencies]
 tensorstore = [
     "yaozarrs[write-tensorstore]>=0.2.0",
-    "tensorstore>=0.1.80; python_version > '3.10'",
+    "tensorstore>=0.1.80; python_version >= '3.11'",
 ]
 zarr = ["yaozarrs[write-zarr]>=0.2.0"]
 acquire-zarr = ["acquire-zarr>=0.6.0; python_version < '3.14'"]
@@ -61,20 +61,13 @@ acquire-zarr = [
     "tensorstore>=0.1.78",       # just for read validation in tests
 ]
 tifffile = [{ include-group = 'test' }, "ome-writers[tifffile]"]
-pymmcore = [
-    { include-group = 'tensorstore' },
-    { include-group = 'zarr' },
-    { include-group = 'acquire-zarr' },
-    { include-group = 'tifffile' },
-    "pymmcore-plus>=0.15.0",
-]
+
 dev = [
     { include-group = "test" },
     { include-group = 'tensorstore' },
     { include-group = 'zarr' },
     { include-group = 'acquire-zarr' },
     { include-group = 'tifffile' },
-    { include-group = "pymmcore" },
     "ipython>=8.37.0",
     "pdbpp>=0.11.7 ; sys_platform != 'win32'",
     "pyright>=1.1.405",
