@@ -6,8 +6,6 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
-import tifffile
-from ome_types import from_xml
 
 from ome_writers import (
     AcquisitionSettings,
@@ -21,9 +19,11 @@ from ome_writers import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-
-pytest.importorskip("tifffile", reason="tifffile not available")
-pytest.importorskip("ome_types", reason="ome_types not available")
+try:
+    import tifffile
+    from ome_types import from_xml
+except ImportError:
+    pytest.skip("tifffile or ome_types not installed", allow_module_level=True)
 
 
 def test_update_metadata_single_file(tmp_path: Path) -> None:
