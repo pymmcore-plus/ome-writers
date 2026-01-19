@@ -304,7 +304,7 @@ def _get_chunks_and_shards(
         if dim.chunk_size is not None:
             chunks.append(dim.chunk_size)
         elif i >= n - 2:  # Last 2 dims (spatial)
-            chunks.append(dim.count or 1)
+            chunks.append(dim.count)
         else:
             chunks.append(1)
 

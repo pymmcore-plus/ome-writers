@@ -82,7 +82,11 @@ class AcquireZarrBackend(ArrayBackend):
             shutil.rmtree(self._root_path)
 
         # Convert to az dimensions
-        az_dims = [_to_acquire_dim(dim) for dim in storage_dims]
+        # special-casing frame dimensions for default chunk sizes
+        # TODO: maybe this should go in schema validation of the dimension list instead?
+        # this can be extremely problematic if chunk_size stays at 1 for frame dims
+        az_dims = [_to_acquire_dim(dim, False) for dim in storage_dims[:-2]]
+        az_dims += [_to_acquire_dim(dim, True) for dim in storage_dims[-2:]]
 
         # Acquire-zarr requires at least 3 dimensions. For 2D images (Y, X only),
         # add a phantom Z dimension with size 1.
@@ -266,7 +270,7 @@ def _create_zarr3_group(
     (dest_path / "zarr.json").write_text(json.dumps(zarr_json, indent=indent))
 
 
-def _to_acquire_dim(dim: Dimension) -> az.Dimension:
+def _to_acquire_dim(dim: Dimension, frame_dim: bool) -> az.Dimension:
     """Convert a Dimension to az.Dimension."""
     # Map dimension type to az DimensionType
     dim_type_map = {
@@ -275,11 +279,16 @@ def _to_acquire_dim(dim: Dimension) -> az.Dimension:
         "space": az.DimensionType.SPACE,
     }
 
+    if dim.chunk_size is not None:
+        chunk_size = dim.chunk_size
+    else:
+        chunk_size = dim.count if frame_dim else 1
+
     return az.Dimension(
         name=dim.name,
         kind=dim_type_map.get(dim.type, az.DimensionType.OTHER),  # pyright: ignore[reportCallIssue]
         array_size_px=dim.count or 1,
-        chunk_size_px=dim.chunk_size or 1,
+        chunk_size_px=chunk_size,
         shard_size_chunks=dim.shard_size or 1,
     )
 
