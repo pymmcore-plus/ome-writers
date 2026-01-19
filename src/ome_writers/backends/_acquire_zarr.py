@@ -224,6 +224,7 @@ class AcquireZarrBackend(ArrayBackend):
             self._stream.close()
             self._stream = None
             gc.collect()
+            gc.collect()
 
             self._patch_metadata()
             self._finalized = True
@@ -318,7 +319,7 @@ def _cleanup_2d_hack(root: Path) -> None:
 
     https://github.com/acquire-project/acquire-zarr/issues/183
     """
-    for zarr_json in root.rglob("zarr.json"):
+    for zarr_json in list(root.rglob("zarr.json")):
         metadata = json.loads(zarr_json.read_text())
         if metadata.get("node_type") == "array":
             _fix_array_json_hack(metadata)
@@ -326,8 +327,7 @@ def _cleanup_2d_hack(root: Path) -> None:
             _fix_group_json_hack(metadata)
 
         # Write back updated metadata
-        with open(zarr_json, "w") as f:
-            json.dump(metadata, f, indent=2)
+        zarr_json.write_text(json.dumps(metadata, indent=2))
 
 
 def _fix_array_json_hack(metadata: dict) -> None:
