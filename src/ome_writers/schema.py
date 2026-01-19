@@ -90,7 +90,7 @@ class StandardAxis(str, Enum):
                 if not isinstance(count, int):
                     raise ValueError(f"Invalid position value: {count}.")
                 positions = [Position(name=str(i)) for i in range(count)]
-            else:
+            else:  # pragma: no cover
                 raise ValueError(
                     "Either count or positions must be provided for PositionDimension."
                 )

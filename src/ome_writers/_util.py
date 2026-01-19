@@ -98,7 +98,7 @@ def dims_from_useq(
         # if we can't import MDASequence, then seq must not be a MDASequence
         raise ValueError("seq must be a useq.MDASequence") from None
     else:
-        if not isinstance(seq, MDASequence):
+        if not isinstance(seq, MDASequence):  # pragma: no cover
             raise ValueError("seq must be a useq.MDASequence")
 
     if any(pos.sequence for pos in seq.stage_positions):
@@ -129,7 +129,7 @@ def dims_from_useq(
         _ax = "p" if ax_name == Axis.GRID else ax_name
         try:
             std_axis = StandardAxis(_ax)
-        except ValueError:
+        except ValueError:  # pragma: no cover
             raise ValueError(f"Unsupported axis for OME: {ax_name}") from None
 
         dim = std_axis.to_dimension(count=size)
