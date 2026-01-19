@@ -10,6 +10,7 @@ except PackageNotFoundError:  # pragma: no cover
     __version__ = "uninstalled"
 
 from ._stream import BackendName, create_stream
+from ._util import dims_from_useq
 from .schema import (
     AcquisitionSettings,
     Dimension,
@@ -31,4 +32,5 @@ __all__ = [
     "__version__",
     "create_stream",
     "dims_from_standard_axes",
+    "dims_from_useq",
 ]

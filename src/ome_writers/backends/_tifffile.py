@@ -445,7 +445,10 @@ def _create_ome_image(
             type=dtype,
             big_endian=False,
             channels=[
-                ome.Channel(id=f"Channel:{image_index}:{i}") for i in range(size_c)
+                # NB: samples_per_pixel=1 means grayscale
+                # Adjust as needed for multi-sample RGB images
+                ome.Channel(id=f"Channel:{image_index}:{i}", samples_per_pixel=1)
+                for i in range(size_c)
             ],
             tiff_data_blocks=[ome.TiffData(plane_count=size_t * size_c * size_z)],
         ),

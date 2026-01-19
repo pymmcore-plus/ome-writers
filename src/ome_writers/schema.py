@@ -74,6 +74,37 @@ class StandardAxis(str, Enum):
             return "second"
         return None
 
+    def to_dimension(
+        self,
+        *,
+        count: int | None = None,
+        positions: list[str | Position] | None = None,
+        chunk_size: int | None = None,
+        shard_size: int | None = None,
+    ) -> Dimension | PositionDimension:
+        """Convert to Dimension or PositionDimension with given count."""
+        if self == StandardAxis.POSITION:
+            if positions:
+                positions = [Position.model_validate(n) for n in positions]
+            elif count:
+                if not isinstance(count, int):
+                    raise ValueError(f"Invalid position value: {count}.")
+                positions = [Position(name=str(i)) for i in range(count)]
+            else:
+                raise ValueError(
+                    "Either count or positions must be provided for PositionDimension."
+                )
+            return PositionDimension(positions=positions)
+
+        return Dimension(
+            name=self.value,
+            count=count,
+            type=self.dimension_type(),
+            unit=self.unit(),
+            chunk_size=chunk_size,
+            shard_size=shard_size,
+        )
+
 
 class Dimension(_BaseModel):
     """A single array dimension."""
@@ -437,24 +468,11 @@ def dims_from_standard_axes(
     dims: list[Dimension | PositionDimension] = []
     for axis in std_axes:
         value = sizes[axis.value]
-        if axis == StandardAxis.POSITION:
-            if isinstance(value, list):
-                positions = [Position.model_validate(n) for n in value]
-            elif isinstance(value, int):
-                positions = [Position(name=str(i)) for i in range(value)]
-            else:
-                raise ValueError(f"Invalid position value: {value}")
-            dims.append(PositionDimension(positions=positions))
+        if axis == StandardAxis.POSITION and isinstance(value, list):
+            kwargs = {"positions": value}
         else:
-            dims.append(
-                Dimension(
-                    name=axis.value,
-                    count=cast("int", value),
-                    type=axis.dimension_type(),
-                    unit=axis.unit(),
-                    chunk_size=chunk_shapes[axis],
-                )
-            )
+            kwargs = {"count": value}
+        dims.append(axis.to_dimension(chunk_size=chunk_shapes.get(axis), **kwargs))
     return dims
 
 

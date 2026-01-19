@@ -74,6 +74,7 @@ dev = [
     { include-group = 'zarr' },
     { include-group = 'acquire-zarr' },
     { include-group = 'tifffile' },
+    { include-group = "pymmcore" },
     "ipython>=8.37.0",
     "pdbpp>=0.11.7 ; sys_platform != 'win32'",
     "pyright>=1.1.405",
