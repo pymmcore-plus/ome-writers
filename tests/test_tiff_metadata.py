@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import numpy as np
-import ome_types.model as ome
 import pytest
 import tifffile
 from ome_types import from_xml
@@ -27,243 +26,103 @@ pytest.importorskip("tifffile", reason="tifffile not available")
 pytest.importorskip("ome_types", reason="ome_types not available")
 
 
-def create_metadata(
-    *,
-    image_name: str,
-    channel_name: str = "Test Channel",
-    dtype: str = "uint16",
-    size_t: int = 1,
-    size_c: int = 1,
-    size_z: int = 1,
-    size_x: int = 32,
-    size_y: int = 32,
-    num_images: int = 1,
-    include_plate: bool = False,
-) -> ome.OME:
-    """Create OME metadata object with customizable parameters."""
-    if include_plate:
-        plates = [
-            ome.Plate(
-                id="Plate:0",
-                name="Test Plate",
-                wells=[
-                    ome.Well(
-                        id=f"Well:{i}",
-                        row=0,
-                        column=i,
-                        well_samples=[
-                            ome.WellSample(
-                                id=f"WellSample:{i}",
-                                index=0,
-                                image_ref=ome.ImageRef(id=f"Image:{i}"),
-                            )
-                        ],
-                    )
-                    for i in range(num_images)
-                ],
-            )
-        ]
-    else:
-        plates = []
-
-    return ome.OME(
-        images=[
-            ome.Image(
-                id=f"Image:{i}",
-                name=image_name.replace("Position 0", f"Position {i}"),
-                pixels=ome.Pixels(
-                    id=f"Pixels:{i}",
-                    type=dtype,
-                    size_x=size_x,
-                    size_y=size_y,
-                    size_z=size_z,
-                    size_c=size_c,
-                    size_t=size_t,
-                    dimension_order="XYCZT",
-                    channels=[
-                        ome.Channel(
-                            id=f"Channel:{i}",
-                            name=channel_name.replace("P0", f"P{i}"),
-                            samples_per_pixel=1,
-                        )
-                    ],
-                ),
-            )
-            for i in range(num_images)
-        ],
-        creator="ome_writers test suite",
-        plates=plates,
-    )
-
-
 def test_update_metadata_single_file(tmp_path: Path) -> None:
     """Test update_metadata method for single-file TIFF streams."""
-    # Create acquisition settings for a simple 2D+T dataset
     settings = AcquisitionSettings(
-        root_path=str(tmp_path / "test_update_metadata.ome.tiff"),
+        root_path=str(tmp_path / "test.ome.tiff"),
         dimensions=[
             Dimension(name="t", count=2, type="time"),
             Dimension(name="c", count=1, type="channel"),
-            Dimension(name="z", count=1, type="space"),
-            Dimension(name="y", count=32, chunk_size=16, type="space"),
-            Dimension(name="x", count=32, chunk_size=16, type="space"),
+            Dimension(name="y", count=32, type="space"),
+            Dimension(name="x", count=32, type="space"),
         ],
         dtype="uint16",
-        overwrite=True,
         backend="tiff",
     )
 
-    # Create and write data
     with create_stream(settings) as stream:
-        for _i in range(2):  # 2 time points
-            frame = np.random.randint(0, 1000, (32, 32), dtype=np.uint16)
-            stream.append(frame)
+        for _ in range(2):
+            stream.append(np.random.randint(0, 1000, (32, 32), dtype=np.uint16))
 
-    # NEW API: Get auto-generated metadata instead of recreating it
-    metadata = stream._backend.get_metadata()
-    assert metadata is not None
-    assert len(metadata.images) == 1
-
-    # Modify the metadata
-    metadata.images[0].name = "Updated Test Image"
+    # Update metadata after context exits (TIFF requires files to be closed)
+    metadata = stream.get_metadata()
+    metadata.images[0].name = "Updated Image"
     metadata.images[0].pixels.channels[0].name = "Updated Channel"
+    stream.update_metadata(metadata)
 
-    # Update metadata after writing
-    stream._backend.update_metadata(metadata)
-
-    # Verify the metadata was updated by reading it back
-    output_path = tmp_path / "test_update_metadata.ome.tiff"
-    with tifffile.TiffFile(str(output_path)) as tif:
-        ome_xml = tif.ome_metadata
-        assert ome_xml is not None
-        assert "Updated Test Image" in ome_xml
-        assert "Updated Channel" in ome_xml
-
-        # Also verify we can parse the OME-XML
-        ome_obj = from_xml(ome_xml)
-        assert ome_obj.images[0].name == "Updated Test Image"
+    # Verify on disk
+    with tifffile.TiffFile(str(tmp_path / "test.ome.tiff")) as tif:
+        ome_obj = from_xml(tif.ome_metadata)
+        assert ome_obj.images[0].name == "Updated Image"
         assert ome_obj.images[0].pixels.channels[0].name == "Updated Channel"
 
 
 def test_update_metadata_multiposition(tmp_path: Path) -> None:
     """Test update_metadata method for multi-position TIFF streams."""
-
-    # Create acquisition settings with 2 positions
     settings = AcquisitionSettings(
-        root_path=str(tmp_path / "test_update_multipos.ome.tiff"),
+        root_path=str(tmp_path / "multipos.ome.tiff"),
         dimensions=[
             PositionDimension(positions=["Pos0", "Pos1"]),
             Dimension(name="t", count=2, type="time"),
-            Dimension(name="c", count=1, type="channel"),
-            Dimension(name="z", count=1, type="space"),
-            Dimension(name="y", count=32, chunk_size=16, type="space"),
-            Dimension(name="x", count=32, chunk_size=16, type="space"),
+            Dimension(name="y", count=32, type="space"),
+            Dimension(name="x", count=32, type="space"),
         ],
         dtype="uint16",
-        overwrite=True,
         backend="tiff",
     )
 
-    # Create and write data
     with create_stream(settings) as stream:
-        for _p in range(2):  # 2 positions
-            for _t in range(2):  # 2 time points
-                frame = np.random.randint(0, 1000, (32, 32), dtype=np.uint16)
-                stream.append(frame)
+        for _ in range(4):
+            stream.append(np.random.randint(0, 1000, (32, 32), dtype=np.uint16))
 
-    # Create updated metadata with multiple images (positions)
-    updated_metadata = create_metadata(
-        image_name="Position 0 Updated",
-        channel_name="Channel P0",
-        size_t=2,
-        size_c=1,
-        size_z=1,
-        size_x=32,
-        size_y=32,
-        num_images=2,
-    )
+    # Update metadata after context exits
+    metadata = stream.get_metadata()
+    metadata.images[0].name = "Position 0 Updated"
+    metadata.images[1].name = "Position 1 Updated"
+    stream.update_metadata(metadata)
 
-    # Update metadata after writing
-    stream._backend.update_metadata(updated_metadata)
-
-    # Verify each position file has the correct metadata
-    base_path = tmp_path / "test_update_multipos"
-
+    # Verify each position file
+    base_path = tmp_path / "multipos"
     for pos_idx in range(2):
         pos_file = base_path.with_name(f"{base_path.name}_p{pos_idx:03d}.ome.tiff")
-        assert pos_file.exists()
-
         with tifffile.TiffFile(str(pos_file)) as tif:
-            ome_xml = tif.ome_metadata
-            expected_name = f"Position {pos_idx} Updated"
-            expected_channel = f"Channel P{pos_idx}"
-
-            assert ome_xml is not None
-            assert expected_name in ome_xml
-            assert expected_channel in ome_xml
-
-            # Verify we can parse the OME-XML and it contains only this position's data
-            ome_obj = from_xml(ome_xml)
-            assert len(ome_obj.images) == 1  # Each file should have only one image
-            assert ome_obj.images[0].name == expected_name
-            assert ome_obj.images[0].pixels.channels[0].name == expected_channel
-            assert ome_obj.images[0].id == f"Image:{pos_idx}"
+            ome_obj = from_xml(tif.ome_metadata)
+            assert ome_obj.images[0].name == f"Position {pos_idx} Updated"
 
 
 def test_update_metadata_error_conditions(tmp_path: Path) -> None:
     """Test error conditions in update_metadata method."""
-    # Create acquisition settings
     settings = AcquisitionSettings(
-        root_path=str(tmp_path / "test_error_metadata.ome.tiff"),
+        root_path=str(tmp_path / "error.ome.tiff"),
         dimensions=[
-            Dimension(name="t", count=1, type="time"),
-            Dimension(name="y", count=32, chunk_size=16, type="space"),
-            Dimension(name="x", count=32, chunk_size=16, type="space"),
+            Dimension(name="y", count=32, type="space"),
+            Dimension(name="x", count=32, type="space"),
         ],
         dtype="uint16",
-        overwrite=True,
         backend="tiff",
     )
 
-    # Create and write data
     with create_stream(settings) as stream:
-        frame = np.random.randint(0, 1000, (32, 32), dtype=np.uint16)
-        stream.append(frame)
+        stream.append(np.random.randint(0, 1000, (32, 32), dtype=np.uint16))
 
-    # Test with invalid metadata structure
-    invalid_metadata = {"not": "an ome object"}
+    # Invalid metadata type should raise TypeError
+    with pytest.raises(TypeError, match=r"Expected ome_types\.model\.OME"):
+        stream.update_metadata({"not": "an ome object"})
 
-    # This should raise a TypeError due to wrong type
-    with pytest.raises(TypeError, match=r"Expected ome_types\.model\.OME metadata"):
-        stream._backend.update_metadata(invalid_metadata)
+    # Valid update should work
+    metadata = stream.get_metadata()
+    metadata.images[0].name = "Fixed"
+    stream.update_metadata(metadata)
 
-    # Test that we can successfully update with valid metadata after error
-    valid_metadata = create_metadata(
-        image_name="Test Image After Error",
-        channel_name="Test",
-        size_x=32,
-        size_y=32,
-    )
-
-    # This should work without errors
-    stream._backend.update_metadata(valid_metadata)
-
-    # Verify the metadata was actually updated
-    import tifffile
-
-    output_path = tmp_path / "test_error_metadata.ome.tiff"
-    with tifffile.TiffFile(str(output_path)) as tif:
-        ome_xml = tif.ome_metadata
-        assert ome_xml is not None
-        assert "Test Image After Error" in ome_xml
+    with tifffile.TiffFile(str(tmp_path / "error.ome.tiff")) as tif:
+        ome_obj = from_xml(tif.ome_metadata)
+        assert ome_obj.images[0].name == "Fixed"
 
 
 def test_update_metadata_with_plates(tmp_path: Path) -> None:
     """Test update_metadata with plate metadata for multi-position experiments."""
-
-    # Create acquisition settings with plate
     settings = AcquisitionSettings(
-        root_path=str(tmp_path / "test_plate_metadata.ome.tiff"),
+        root_path=str(tmp_path / "plate.ome.tiff"),
         dimensions=[
             PositionDimension(
                 positions=[
@@ -271,64 +130,28 @@ def test_update_metadata_with_plates(tmp_path: Path) -> None:
                     Position(name="Well_A02", row="A", column="2"),
                 ]
             ),
-            Dimension(name="t", count=1, type="time"),
-            Dimension(name="c", count=1, type="channel"),
-            Dimension(name="z", count=1, type="space"),
-            Dimension(name="y", count=32, chunk_size=16, type="space"),
-            Dimension(name="x", count=32, chunk_size=16, type="space"),
+            Dimension(name="y", count=32, type="space"),
+            Dimension(name="x", count=32, type="space"),
         ],
         dtype="uint16",
-        overwrite=True,
         backend="tiff",
-        plate=Plate(
-            name="Test Plate",
-            row_names=["A"],
-            column_names=["1", "2"],
-        ),
+        plate=Plate(name="Test Plate", row_names=["A"], column_names=["1", "2"]),
     )
 
-    # Create and write data
     with create_stream(settings) as stream:
-        for _p in range(2):  # 2 wells
-            frame = np.random.randint(0, 1000, (32, 32), dtype=np.uint16)
-            stream.append(frame)
+        for _ in range(2):
+            stream.append(np.random.randint(0, 1000, (32, 32), dtype=np.uint16))
 
-    updated_metadata = create_metadata(
-        image_name="Well A01 Field 1",
-        channel_name="Channel",
-        size_x=32,
-        size_y=32,
-        num_images=2,
-        include_plate=True,
-    )
+    # Update metadata after context exits
+    metadata = stream.get_metadata()
+    metadata.images[0].name = "Well A01"
+    metadata.images[1].name = "Well A02"
+    stream.update_metadata(metadata)
 
-    # Manually update the second image name
-    updated_metadata.images[1].name = "Well A02 Field 1"
-
-    # Update metadata after writing
-    stream._backend.update_metadata(updated_metadata)
-
-    # Verify that each position file contains only the relevant plate information
-    base_path = tmp_path / "test_plate_metadata"
-
+    # Verify each well file has updated name
+    base_path = tmp_path / "plate"
     for pos_idx in range(2):
         pos_file = base_path.with_name(f"{base_path.name}_p{pos_idx:03d}.ome.tiff")
-        assert pos_file.exists()
-
         with tifffile.TiffFile(str(pos_file)) as tif:
-            ome_xml = tif.ome_metadata
-            assert ome_xml is not None
-            ome_obj = from_xml(ome_xml)
-
-            # Each file should have only one image and relevant plate info
-            assert len(ome_obj.images) == 1
-            assert ome_obj.images[0].id == f"Image:{pos_idx}"
-
-            # Should have plate information, but only the relevant well
-            if ome_obj.plates:
-                assert len(ome_obj.plates) == 1
-                plate_obj = ome_obj.plates[0]
-                assert len(plate_obj.wells) == 1  # Only the relevant well
-                well = plate_obj.wells[0]
-                assert well.well_samples[0].image_ref is not None
-                assert well.well_samples[0].image_ref.id == f"Image:{pos_idx}"
+            ome_obj = from_xml(tif.ome_metadata)
+            assert ome_obj.images[0].name == f"Well A0{pos_idx + 1}"

@@ -42,7 +42,7 @@ def test_get_metadata_single_position(tmp_path: Path) -> None:
             stream.append(frame)
 
     # Get metadata - returns dict[str, dict]
-    metadata = stream._backend.get_metadata()
+    metadata = stream.get_metadata()
     assert metadata is not None
     assert isinstance(metadata, dict)
     assert "." in metadata  # Root group for single position
@@ -62,7 +62,7 @@ def test_get_metadata_single_position(tmp_path: Path) -> None:
     }
 
     # Update metadata
-    stream._backend.update_metadata(metadata)
+    stream.update_metadata(metadata)
 
     # Verify by reading back
     import zarr
@@ -99,7 +99,7 @@ def test_get_metadata_multiposition(tmp_path: Path) -> None:
             stream.append(frame)
 
     # Get metadata
-    metadata = stream._backend.get_metadata()
+    metadata = stream.get_metadata()
     assert metadata is not None
     assert len(metadata) == 2
     assert "Pos0" in metadata  # Parent groups
@@ -113,7 +113,7 @@ def test_get_metadata_multiposition(tmp_path: Path) -> None:
     metadata["Pos1"]["stage_position"] = {"x": 100.0, "y": 50.0}
 
     # Update metadata
-    stream._backend.update_metadata(metadata)
+    stream.update_metadata(metadata)
 
     # Verify
     import zarr
@@ -150,7 +150,7 @@ def test_update_metadata_error_handling(tmp_path: Path) -> None:
     bad_metadata = {"nonexistent_path": {"foo": "bar"}}
 
     with pytest.raises(KeyError, match="Unknown path"):
-        stream._backend.update_metadata(bad_metadata)
+        stream.update_metadata(bad_metadata)
 
 
 def test_zarr_metadata_workflow_example(tmp_path: Path) -> None:
@@ -176,7 +176,7 @@ def test_zarr_metadata_workflow_example(tmp_path: Path) -> None:
                 stream.append(frame)
 
     # Get auto-generated metadata
-    metadata = stream._backend.get_metadata()
+    metadata = stream.get_metadata()
     assert metadata is not None
 
     # Add acquisition metadata that OME-Zarr v0.5 doesn't natively support
@@ -205,7 +205,7 @@ def test_zarr_metadata_workflow_example(tmp_path: Path) -> None:
     }
 
     # Write it all back
-    stream._backend.update_metadata(metadata)
+    stream.update_metadata(metadata)
 
     # Verify everything was saved
     import zarr

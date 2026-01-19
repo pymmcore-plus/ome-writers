@@ -166,8 +166,9 @@ class TiffBackend(ArrayBackend):
 
         The metadata argument MUST be an instance of ome_types.OME.
 
-        This method should be called after flush() to update the OME-XML
-        description in the already-written TIFF files with complete metadata.
+        This method must be called AFTER exiting the stream context (after
+        finalize() completes), as TIFF files must be closed before metadata
+        can be updated.
 
         Parameters
         ----------
@@ -179,8 +180,14 @@ class TiffBackend(ArrayBackend):
         TypeError
             If metadata is not an ome_types.model.OME instance.
         RuntimeError
-            If metadata generation or file update fails.
+            If called before finalize() completes, or if metadata update fails.
         """
+        if not self._finalized:
+            raise RuntimeError(
+                "update_metadata() must be called after the stream context exits. "
+                "TIFF files must be closed before metadata can be updated."
+            )
+
         if not isinstance(metadata, ome.OME):
             raise TypeError(
                 f"Expected ome_types.model.OME metadata, got {type(metadata)}"

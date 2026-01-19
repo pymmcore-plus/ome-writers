@@ -7,6 +7,10 @@
 - compression needs to be passed through
 - document auto-backend selection, and refactor selection
 - consider root_path more.  what about remote?
+- test cases where you don't append all frames (partial datasets)
+- test cases where an exception happens during writing (is file left in consistent state?)
+- possibly add append(None) API to skip frames
+
 
 Missing Test Cases
 

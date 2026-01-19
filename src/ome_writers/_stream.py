@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING, get_args
+from typing import TYPE_CHECKING, Any, get_args
 
 from .schema import BackendName
 
@@ -58,9 +58,13 @@ class OMEStream:
         pos_info, idx = next(self._iterator)
         self._backend.write(pos_info, idx, frame)
 
-    # def update_metadata(self, metadata: Any) -> None:
-    #     """Update metadata in the backend.  Meaning is format-dependent."""
-    #     self._backend.update_metadata(metadata)
+    def get_metadata(self) -> Any:
+        """Retrieve metadata from the backend.  Meaning is format-dependent."""
+        return self._backend.get_metadata()
+
+    def update_metadata(self, metadata: Any) -> None:
+        """Update metadata in the backend.  Meaning is format-dependent."""
+        self._backend.update_metadata(metadata)
 
     def __enter__(self) -> OMEStream:
         """Enter context manager."""
