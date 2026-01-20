@@ -22,6 +22,32 @@ The core problem ome-writers solves:
 > locations** in multi-dimensional arrays, while generating **OME-compliant
 > metadata** for both TIFF and Zarr formats.
 
+## Installation
+
+You can install `ome-writers` via pip. You *must* also select select at least
+one backend extra:
+
+```bash
+pip install ome-writers[<backend>]
+```
+
+Where `<backend>` is a comma-separated list of one or more of the following:
+
+- `tensorstore` — Uses [tensorstore](https://github.com/google/tensorstore) and
+  [yaozarrs](https://github.com/tlambert03/yaozarrs) for metadata, supports
+  OME-Zarr v0.5.
+- `acquire-zarr` — Uses
+  [acquire-zarr](https://github.com/acquire-project/acquire-zarr), supports
+  OME-Zarr v0.5.
+- `zarr` — Uses [zarr-python](https://github.com/zarr-developers/zarr-python)
+  and [yaozarrs](https://github.com/tlambert03/yaozarrs) for metadata, supports
+  OME-Zarr v0.5.
+- `tifffile` — Uses [tifffile](https://github.com/cgohlke/tifffile), supports
+  OME-TIFF.
+- `all` — install all backends.
+
+(Developers using `uv sync` will end up with all backends installed by default.)
+
 ## Basic Usage
 
 ```python
