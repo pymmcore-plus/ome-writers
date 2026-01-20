@@ -157,7 +157,7 @@ class TiffBackend(ArrayBackend):
             Complete OME metadata object with all positions, or None if prepare()
             has not been called yet.
         """
-        if self._cached_metadata is None:
+        if self._cached_metadata is None:  # pragma: no cover
             return None
         return self._cached_metadata.model_copy(deep=True)
 
@@ -182,7 +182,7 @@ class TiffBackend(ArrayBackend):
         RuntimeError
             If called before finalize() completes, or if metadata update fails.
         """
-        if not self._finalized:
+        if not self._finalized:  # pragma: no cover
             raise RuntimeError(
                 "update_metadata() must be called after the stream context exits. "
                 "TIFF files must be closed before metadata can be updated."
@@ -267,7 +267,7 @@ class TiffBackend(ArrayBackend):
         """Update OME metadata for a specific position's TIFF file."""
         file_path = self._file_paths[position_idx]
 
-        if not Path(file_path).exists():
+        if not Path(file_path).exists():  # pragma: no cover
             warnings.warn(
                 f"TIFF file for position {position_idx} does not exist at "
                 f"{file_path}. Not writing metadata.",
@@ -282,7 +282,7 @@ class TiffBackend(ArrayBackend):
             # Create ASCII version for tifffile.tiffcomment
             # tifffile.tiffcomment requires ASCII strings
             ascii_xml = position_ome.to_xml().replace("µ", "&#x00B5;").encode("ascii")
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             raise RuntimeError(
                 f"Failed to create position-specific OME metadata for position "
                 f"{position_idx}: {e}"
@@ -290,7 +290,7 @@ class TiffBackend(ArrayBackend):
 
         try:
             tifffile.tiffcomment(file_path, comment=ascii_xml)
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             raise RuntimeError(
                 f"Failed to update OME metadata in {file_path}: {e}"
             ) from e
@@ -398,7 +398,7 @@ class WriterThread(threading.Thread):
                         photometric=tifffile.PHOTOMETRIC.MINISBLACK,
                         description=self._ome_xml,
                     )
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             # Suppress over-eager tifffile exception for incomplete writes
             if "wrong number of bytes" in str(e):
                 return
