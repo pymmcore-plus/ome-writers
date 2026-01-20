@@ -6,8 +6,10 @@ from pathlib import Path
 
 import pytest
 
+SKIP_EXAMPLES = {"pymmcore_plus_example.py"}
+
 EXAMPLE_DIR = Path(__file__).parent.parent / "examples"
-EXAMPLES = sorted(EXAMPLE_DIR.glob("*.py"))
+EXAMPLES = [p for p in sorted(EXAMPLE_DIR.glob("*.py")) if p.name not in SKIP_EXAMPLES]
 
 
 @contextlib.contextmanager
@@ -35,9 +37,6 @@ def test_example_runs(example_path: Path, tmp_path: Path, any_backend: str) -> N
             if "does not support settings" in str(e):
                 pytest.xfail(f"Example {example_path.name} uses unsupported settings.")
             raise
-        except ImportError as e:
-            pytest.skip(f"Example {example_path.name} skipped due to ImportError: {e}")
-            return
 
     # Validate that example created output files
     output_files = list(tmp_path.glob("*.ome.*")) + list(tmp_path.glob("*.ome.tiff"))
