@@ -13,6 +13,7 @@ from pydantic import (
     BaseModel,
     BeforeValidator,
     ConfigDict,
+    Field,
     PositiveInt,
     model_validator,
 )
@@ -59,6 +60,7 @@ class StandardAxis(str, Enum):
     POSITION = "p"
 
     def dimension_type(self) -> DimensionType:
+        """Return dimension type for this standard axis."""
         if self in {StandardAxis.X, StandardAxis.Y, StandardAxis.Z}:
             return "space"
         if self == StandardAxis.TIME:
@@ -68,6 +70,7 @@ class StandardAxis(str, Enum):
         return "other"  # pragma: no cover
 
     def unit(self) -> str | None:
+        """Return unit for this standard axis, or None if unknown."""
         if self in {StandardAxis.X, StandardAxis.Y, StandardAxis.Z}:
             return "micrometer"
         if self == StandardAxis.TIME:
@@ -109,22 +112,70 @@ class StandardAxis(str, Enum):
 class Dimension(_BaseModel):
     """A single array dimension."""
 
-    name: Annotated[str, Len(min_length=1)]
-    count: PositiveInt | None  # None for unlimited (first dimension only)
-    chunk_size: PositiveInt | None = None
-    shard_size: PositiveInt | None = None
-    type: DimensionType | None = None
-    unit: str | None = None
-    scale: float | None = None
-    translation: float | None = None
+    name: Annotated[str, Len(min_length=1)] = Field(
+        description="User-defined name. Can be anything, but prefer using standard "
+        "names like 'x', 'y', 'z', 'c', 't' where possible. Must be unique across all "
+        "dimensions in an acquisition.",
+    )
+    count: PositiveInt | None = Field(
+        default=None,
+        description="Size of this dimension (in number of elements/pixels)."
+        "None indicates an unbounded (unlimited) 'append' dimension. "
+        "Only the first dimension in may be unbounded.",
+    )
+    chunk_size: PositiveInt | None = Field(
+        default=None,
+        description="Number of elements in a chunk for this dimension, for storage "
+        "backends that support chunking (e.g. Zarr). If None, defaults to full size "
+        "(i.e. `count`) for the last two 'frame' dimensions, and 1 for others.",
+    )
+    shard_size: PositiveInt | None = Field(
+        default=None,
+        description="Number of chunks per shard, for storage backends that "
+        "support sharding (e.g. Zarr v3). If not specified, no sharding is used.",
+    )
+    type: DimensionType | None = Field(
+        default=None,
+        description="Type of this dimension. Must be one of 'space', 'time', 'channel' "
+        "or 'other'. If `None`, type _may_ be inferred from the name for standard "
+        "names like 'x', 'y', 'z', 'c', 't'.",
+    )
+    unit: str | None = Field(
+        default=None,
+        description="Physical unit for this dimension, e.g. 'micrometer' for spatial "
+        "dimensions or 'second' for time.  Prefer using [ome-ngff unit naming "
+        "conventions](https://ngff.openmicroscopy.org/latest/index.html#axes-md)"
+        " where possible.",
+    )
+    scale: float | None = Field(
+        default=None,
+        description="Physical size of a single element along this dimension, "
+        "in the specified `unit`. For spatial dimensions, this is often referred to "
+        "as 'pixel size'.  For time dimensions, this would be the time interval.",
+    )
+    translation: float | None = Field(
+        default=None,
+        description="Physical offset of the first element along this dimension, "
+        "in the specified `unit`. (e.g. the physical coordinate of the first pixel "
+        "or timepoint, in some XYZ stage or other coordinate system).",
+    )
 
 
 class Position(_BaseModel):
     """A single acquisition position."""
 
-    name: Annotated[str, Len(min_length=1)]
-    row: str | None = None
-    column: str | None = None
+    name: Annotated[str, Len(min_length=1)] = Field(
+        description="Unique name for this position. Within a list of positions, "
+        "names must be unique within each `(row, column)` pair.",
+    )
+    row: str | None = Field(
+        default=None,
+        description="Row name for plate position.",
+    )
+    column: str | None = Field(
+        default=None,
+        description="Column name for plate position.",
+    )
     # TODO
     # These could be used to specify the coordinateTransform.translate for
     # different positions
@@ -133,7 +184,7 @@ class Position(_BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _cast(cls, value: Any) -> Any:
+    def _validate_position(cls, value: Any) -> Any:
         """Allow casting from string to Position."""
         if isinstance(value, str):
             return {"name": value}
@@ -149,12 +200,19 @@ class PositionDimension(_BaseModel):
     positions are visited during acquisition.
     """
 
-    positions: list[Position]
-    name: Annotated[str, Len(min_length=1)] = "p"
+    positions: list[Position] = Field(
+        description="List of positions in acquisition order.  String literals "
+        "are also accepted and will be converted to Position objects with the "
+        "given name.",
+    )
+    name: Annotated[str, Len(min_length=1)] = Field(
+        default="p",
+        description="Name of this position dimension. Default is 'p'.",
+    )
 
     @property
     def count(self) -> int:
-        """Number of positions."""
+        """Number of positions in the list."""
         return len(self.positions)
 
     @property
@@ -249,44 +307,110 @@ def _validate_unique_names_per_well(positions: list[Position]) -> None:
                 )
 
 
+DimensionsList: TypeAlias = Annotated[
+    tuple[Dimension | PositionDimension, ...], AfterValidator(_validate_dims_list)
+]
+"""Assembled list of Dimensions and PositionDimensions."""
+
+
 class Plate(_BaseModel):
     """Plate structure for OME metadata.
 
     This defines the plate geometry (rows/columns) for metadata generation.
-    Acquisition order is determined by PositionDimension in AcquisitionSettings,
+    Acquisition order is determined by `PositionDimension` in `AcquisitionSettings`,
     not by this class.
     """
 
-    row_names: list[str]
-    column_names: list[str]
-    name: str | None = None
+    row_names: list[str] = Field(
+        description="List of *all* row names in the plate, e.g. "
+        "`['A', 'B', 'C', ...]`. This is used to indicate the full plate structure in "
+        "OME metadata, even if not all wells are acquired.",
+    )
+    column_names: list[str] = Field(
+        description="List of *all* column names in the plate, e.g. "
+        "`['1', '2', '3', ...]`. This is used to indicate the full plate structure in "
+        "OME metadata, even if not all wells are acquired.",
+    )
+    name: str | None = Field(
+        default=None,
+        description="Optional name for the plate.",
+    )
 
 
 class AcquisitionSettings(_BaseModel):
-    """Top-level acquisition settings."""
+    """Top-level acquisition settings.
+
+    This is the main schema object for defining an acquisition to be written
+    using ome-writers.  It includes the output path, dimensions, data type,
+    compression, storage order, plate structure, and backend selection.
+
+    Pass this object to [ome_writers.create_stream][] to create a data stream
+    for writing acquisition data.
+
+    !!! note
+        This is a frozen model.  Use `.model_copy(update={...})` to create modified
+        copies.
+    """
 
     model_config = ConfigDict(frozen=True, validate_default=True)
 
-    root_path: Annotated[str, BeforeValidator(str)]
-    # PositionDimension can appear anywhere in the list to control acquisition order.
-    # Its location determines when positions are visited relative to other dimensions.
-    dimensions: Annotated[
-        tuple[Dimension | PositionDimension, ...], AfterValidator(_validate_dims_list)
-    ]
-    dtype: Annotated[str, BeforeValidator(_validate_dtype)]
+    root_path: Annotated[str, BeforeValidator(str)] = Field(
+        description="Root output path for the acquisition data.  This may be a "
+        "directory (for OME-Zarr) or a file path (for OME-TIFF). It is customary "
+        "to use an `.ome.zarr` extension for OME-Zarr directories and `.ome.tiff` "
+        "for OME-TIFF files.",
+    )
+    dimensions: DimensionsList = Field(
+        description="List of dimensions in order of acquisition. Must include at least "
+        "two spatial 'in-frame' dimensions (usually Y and X) at the end. May not "
+        "include more than 5 non-position dimensions total. May include one "
+        "`PositionDimension` to specify multiple acquisition positions. Only the first "
+        "dimension may be unbounded (count=None).",
+    )
+    dtype: Annotated[str, BeforeValidator(_validate_dtype)] = Field(
+        description="Data type of the pixel data to be written, e.g. 'uint8', "
+        "'uint16', 'float32', etc. Must be a valid numpy DTypeLike string.",
+    )
     compression: str | None = None
     # "ome" means "spec-compliant" storage order.
     # It MAY depend on the output format (e.g. OME-Zarr vs OME-TIFF) and
     # version, and backends may have different restrictions.
-    storage_order: Literal["acquisition", "ome"] | list[str] = "ome"
-    plate: Plate | None = None
-    overwrite: bool = False
-    backend: BackendName | Literal["auto"] = "auto"
+    storage_order: Literal["acquisition", "ome"] | list[str] = Field(
+        default="ome",
+        description="Storage order for non-frame dimensions (if different from "
+        "acquisition order).  May be 'acquisition' (same as acquisition order), "
+        "a list of dimension names to specify a custom storage order. Or 'ome' to "
+        "use a format-specific OME-compliant canonical order (e.g. TCZYX for OME-Zarr "
+        "v0.5), or any [TCZ]YX variation for OME-TIFF. The last two 'frame' dimensions "
+        "(usually Y and X) may not be reordered. Default is 'ome'.",
+    )
+    plate: Plate | None = Field(
+        default=None,
+        description="Plate structure for OME metadata. If specified, requires a "
+        "`PositionDimension` in `dimensions`, and all positions must have "
+        "row/column defined. Presence of this field indicates plate mode.",
+    )
+    overwrite: bool = Field(
+        default=False,
+        description="Whether to overwrite existing data at `root_path`. If False "
+        "and data already exists at the path, an error will be raised when "
+        "creating the stream.",
+    )
+    backend: BackendName | Literal["auto"] = Field(
+        default="auto",
+        description="Storage backend to use for writing data.  May be one of "
+        "'acquire-zarr', 'tensorstore', 'zarr', or 'tiff'.  If 'auto', the backend "
+        "will be chosen based on the `root_path` extension and available dependencies. "
+        "Default is 'auto'.",
+    )
 
     @property
     def format(self) -> Literal["tiff", "zarr"]:
-        """Return file format.  Either (OME) 'tiff' or 'zarr'."""
-        if self.backend in {"tiff"}:
+        """Inferred file format.  Either (OME) 'tiff' or 'zarr'."""
+        if self.backend == "tiff" or (
+            self.backend == "auto"
+            and self.root_path.lower().endswith((".tiff", ".tif"))
+        ):
             return "tiff"
         return "zarr"
 
