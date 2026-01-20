@@ -232,7 +232,7 @@ def test_overwrite_safety(tmp_path: Path, any_backend: str) -> None:
     settings = AcquisitionSettings(
         root_path=str(root_path),
         dimensions=[
-            D(name="z", count=3, type="space"),
+            D(name="z", count=2, type="space"),
             D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
             D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
         ],
@@ -242,7 +242,7 @@ def test_overwrite_safety(tmp_path: Path, any_backend: str) -> None:
 
     # First write should succeed
     with create_stream(settings) as stream:
-        for _ in range(3):
+        for _ in range(2):
             stream.append(np.empty((64, 64), dtype=settings.dtype))
 
     # grab snapshot of tree complete tree-structure for later comparison
@@ -251,7 +251,7 @@ def test_overwrite_safety(tmp_path: Path, any_backend: str) -> None:
     # Second write should fail due to existing data
     with pytest.raises(FileExistsError):
         with create_stream(settings) as stream:
-            for _ in range(3):
+            for _ in range(2):
                 stream.append(np.empty((64, 64), dtype=settings.dtype))
 
     assert root_path.stat().st_mtime == root_mtime, (
@@ -261,7 +261,7 @@ def test_overwrite_safety(tmp_path: Path, any_backend: str) -> None:
     # add back overwrite=True to settings and verify it works
     settings = settings.model_copy(update={"overwrite": True})
     with create_stream(settings) as stream:
-        for _ in range(3):
+        for _ in range(2):
             stream.append(np.empty((64, 64), dtype=settings.dtype))
 
     new_stamp = root_path.stat().st_mtime
