@@ -59,7 +59,7 @@ with create_stream(settings) as stream:
 └─────────────────────┘      └─────────────────┘      └───────────────────────┘
 ```
 
-### StorageSchema (`schema.py`)
+### AcquisitionSchema (`schema.py`)
 
 The schema is the **declarative description** of what to create.  In addition to
 other storage details such as data types, chunking, compression, and other
@@ -156,4 +156,4 @@ But we also:
 ## Contributing
 
 We welcome contributions to `ome-writers`!  See our [contributing
-guid](CONTRIBUTING.md) for details.
+guide](CONTRIBUTING.md) for details.
