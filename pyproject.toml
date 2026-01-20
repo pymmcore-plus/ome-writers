@@ -46,6 +46,7 @@ test = [
     "pytest-cov>=7.0.0",
     "yaozarrs[io]>=0.2.0",
     "pytest-xdist>=3.8.0",
+    "useq-schema>=0.8.2",
 ]
 # these mirror the extras above
 # but with additional dependencies for testing
