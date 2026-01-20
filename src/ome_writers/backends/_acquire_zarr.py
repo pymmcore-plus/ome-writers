@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import gc
 import json
+import platform
 import shutil
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -25,6 +27,8 @@ except ImportError as e:
     raise ImportError(
         f"{__name__} requires acquire-zarr: `pip install acquire-zarr`."
     ) from e
+
+WIN = platform.system() == "Windows"
 
 
 class AcquireZarrBackend(ArrayBackend):
@@ -85,8 +89,11 @@ class AcquireZarrBackend(ArrayBackend):
         # special-casing frame dimensions for default chunk sizes
         # TODO: maybe this should go in schema validation of the dimension list instead?
         # this can be extremely problematic if chunk_size stays at 1 for frame dims
-        az_dims = [_to_acquire_dim(dim, False) for dim in storage_dims[:-2]]
-        az_dims += [_to_acquire_dim(dim, True) for dim in storage_dims[-2:]]
+        ndims = len(storage_dims)
+        az_dims = [
+            _to_acquire_dim(dim, frame_dim=(i >= ndims - 2))
+            for i, dim in enumerate(storage_dims)
+        ]
 
         # Acquire-zarr requires at least 3 dimensions. For 2D images (Y, X only),
         # add a phantom Z dimension with size 1.
@@ -253,7 +260,15 @@ class AcquireZarrBackend(ArrayBackend):
 
         # Remove phantom Z dimension if we added one
         if self._used_2d_hack:
+            if WIN:
+                time.sleep(0.2)
+                gc.collect()
             _cleanup_2d_hack(self._root_path)
+            # On Windows, modifying zarr.json files may temporarily lock chunk files
+            # in the same directory. Give the OS time to release those locks.
+            if WIN:
+                time.sleep(0.2)
+                gc.collect()
 
 
 def _create_zarr3_group(
