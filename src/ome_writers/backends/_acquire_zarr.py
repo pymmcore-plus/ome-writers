@@ -6,7 +6,6 @@ import gc
 import json
 import platform
 import shutil
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -46,7 +45,6 @@ class AcquireZarrBackend(ArrayBackend):
         self._storage_dims: tuple[Dimension, ...] = ()
         self._num_positions: int = 0
         self._is_hcs: bool = False
-        self._used_2d_hack: bool = False
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         """Check if settings are compatible with acquire-zarr.
@@ -98,10 +96,7 @@ class AcquireZarrBackend(ArrayBackend):
         # Acquire-zarr requires at least 3 dimensions. For 2D images (Y, X only),
         # add a phantom Z dimension with size 1.
         if len(az_dims) == 2:
-            self._used_2d_hack = True
             _inject_phantom_dim(az_dims)
-        else:
-            self._used_2d_hack = False
 
         # Check if this is a plate
         self._is_hcs = settings.plate is not None
@@ -258,18 +253,6 @@ class AcquireZarrBackend(ArrayBackend):
                 ome_path, v05.Series(series=[p.name for p in self._positions])
             )
 
-        # Remove phantom Z dimension if we added one
-        if self._used_2d_hack:
-            if WIN:
-                time.sleep(0.2)
-                gc.collect()
-            _cleanup_2d_hack(self._root_path)
-            # On Windows, modifying zarr.json files may temporarily lock chunk files
-            # in the same directory. Give the OS time to release those locks.
-            if WIN:
-                time.sleep(0.2)
-                gc.collect()
-
 
 def _create_zarr3_group(
     dest_path: Path,
@@ -309,76 +292,16 @@ def _to_acquire_dim(dim: Dimension, frame_dim: bool) -> az.Dimension:
     )
 
 
-# -----------------
-# code to deal with the fact that acquire-zarr doesn't directly support 2D images
-# https://github.com/acquire-project/acquire-zarr/issues/183
-
-HACK_AXIS_NAME = "singleton"
-
-
 def _inject_phantom_dim(az_dims: list[az.Dimension]) -> None:
+    # code to deal with the fact that acquire-zarr doesn't directly support 2D images
+    # https://github.com/acquire-project/acquire-zarr/issues/183
     az_dims.insert(
         0,
         az.Dimension(
-            name=HACK_AXIS_NAME,
-            kind=az.DimensionType.SPACE,
+            name="_singleton",
+            kind=az.DimensionType.TIME,
             array_size_px=1,
             chunk_size_px=1,
             shard_size_chunks=1,
         ),
     )
-
-
-def _cleanup_2d_hack(root: Path) -> None:
-    """Remove phantom Z dimension added for 2D images.
-
-    https://github.com/acquire-project/acquire-zarr/issues/183
-    """
-    for zarr_json in list(root.rglob("zarr.json")):
-        metadata = json.loads(zarr_json.read_text())
-        if metadata.get("node_type") == "array":
-            _fix_array_json_hack(metadata)
-        elif metadata.get("node_type") == "group":
-            _fix_group_json_hack(metadata)
-
-        # Write back updated metadata
-        zarr_json.write_text(json.dumps(metadata, indent=2))
-
-
-def _fix_array_json_hack(metadata: dict) -> None:
-    # https://github.com/acquire-project/acquire-zarr/issues/183
-    # Remove phantom Z dimension from array meta
-    if len(metadata["shape"]) > 2:
-        metadata["shape"] = metadata["shape"][1:]
-    if (
-        (chunk_grid := metadata.get("chunk_grid"))
-        and (chunk_config := chunk_grid.get("configuration"))
-        and len(chunk_config.get("chunk_shape", [])) > 2
-    ):
-        chunk_config["chunk_shape"] = chunk_config["chunk_shape"][1:]
-    if len(metadata.get("dimension_names", [])) > 2:
-        metadata["dimension_names"] = metadata["dimension_names"][1:]
-    for codec in metadata.get("codecs", []):
-        if codec.get("name") == "sharding_indexed" and (
-            cfg := codec.get("configuration")
-        ):
-            chunk_shape = cfg.get("chunk_shape", [])
-            if len(chunk_shape) > 2:
-                codec["configuration"]["chunk_shape"] = chunk_shape[1:]
-
-
-def _fix_group_json_hack(metadata: dict) -> None:
-    if not (ome_attrs := metadata.get("attributes", {}).get("ome")):  # pragma: no cover
-        return
-
-    # Update multiscales datasets and axes
-    for multiscale in ome_attrs.get("multiscales", []):
-        if "axes" in multiscale and len(axes := multiscale.get("axes", [])) > 2:
-            if axes[0].get("name") == HACK_AXIS_NAME:
-                multiscale["axes"] = axes[1:]
-
-        for dataset in multiscale.get("datasets", []):
-            for tform in dataset.get("coordinateTransformations", []):
-                for type_ in ("scale", "translation"):
-                    if type_ in tform and len(tform[type_]) > 2:
-                        tform[type_] = tform[type_][1:]

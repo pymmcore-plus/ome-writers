@@ -170,7 +170,7 @@ def _validate_expected_frames(
 ) -> None:
     """Validate that the array contains the expected frame values."""
     for s_idx, expected_val in expected_frames.items():
-        assert arr[s_idx][0, 0] == expected_val
+        assert np.all(arr[s_idx][0] == expected_val)
 
 
 @pytest.mark.parametrize("case", CASES, ids=_name_case)
@@ -386,7 +386,13 @@ def _assert_valid_ome_zarr(
         # before EOL (i.e. SPEC-0)
         expected = expected_frames[pos_idx]
         if importlib.util.find_spec("tensorstore") is not None:
-            _validate_array_tensorstore(group, stored_array_dims, case.dtype, expected)
+            _validate_array_tensorstore(
+                group,
+                stored_array_dims,
+                case.dtype,
+                expected,
+                az_hack=case.backend == "acquire-zarr" and len(stored_array_dims) == 2,
+            )
         else:
             _validate_array_zarr(group, stored_array_dims, case.dtype, expected)
 
@@ -396,6 +402,7 @@ def _validate_array_tensorstore(
     storage_dims: list[D],
     dtype: str,
     expected_frames: StorageIdxToFrame,
+    az_hack: bool = False,
 ) -> None:
     """Validate an array stored on disk using tensorstore."""
     import tensorstore
@@ -404,16 +411,25 @@ def _validate_array_tensorstore(
     assert isinstance(array0, tensorstore.TensorStore)
 
     # check on disk shape, dtype, dimension order and labels
-    assert array0.shape == tuple(d.count for d in storage_dims)
+    stored_shape = array0.shape
+    stored_labels = [d.label for d in array0.domain]  # type: ignore
+    stored_chunk_shape = array0.chunk_layout.read_chunk.shape
+    if az_hack:
+        # adjust for phantom dimension added by acquire-zarr for 2D images
+        # https://github.com/acquire-project/acquire-zarr/issues/183
+        assert stored_labels[0] == "_singleton", "Hack not present?  Fix tests?"
+        stored_shape = stored_shape[1:]
+        stored_labels = stored_labels[1:]
+        stored_chunk_shape = stored_chunk_shape[1:]  # ty: ignore
+
+    assert stored_shape == tuple(d.count for d in storage_dims)
     assert array0.dtype == np.dtype(dtype)
-    expected_dim_order = [d.name for d in storage_dims]
-    assert [d.label for d in array0.domain] == expected_dim_order  # type: ignore
+    assert stored_labels == [d.name for d in storage_dims]
 
     # validate chunking
     expected_chunk_shape = tuple(d.chunk_size or 1 for d in storage_dims)
-    actual_chunk_shape = array0.chunk_layout.read_chunk.shape
-    assert actual_chunk_shape == expected_chunk_shape, (
-        f"expected {expected_chunk_shape}, got {actual_chunk_shape}"
+    assert stored_chunk_shape == expected_chunk_shape, (
+        f"expected {expected_chunk_shape}, got {stored_chunk_shape}"
     )
 
     _validate_expected_frames(array0.read().result(), expected_frames)
