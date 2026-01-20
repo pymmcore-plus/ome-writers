@@ -92,6 +92,9 @@ def dims_from_useq(
         The expected height of the images in the stream.
     units : Mapping[str, UnitTuple | None] | None, optional
         An optional mapping of dimension labels to their units.
+    pixel_size_um : float | None, optional
+        The size of a pixel in micrometers. If provided, it will be used to set the
+        scale for the spatial dimensions.
     """
     try:
         from useq import Axis, MDASequence
