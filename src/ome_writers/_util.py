@@ -106,7 +106,7 @@ def dims_from_useq(
             "Sequences with position sub-sequences are not supported."
         )
 
-    units: Mapping[str, UnitTuple | None] = units or {}
+    units = units or {}
     has_grid = seq.grid_plan is not None
     has_positions = bool(seq.stage_positions)
     if has_grid and has_positions:
