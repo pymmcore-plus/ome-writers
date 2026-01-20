@@ -239,7 +239,7 @@ def test_auto_backend(tmp_path: Path, fmt: str) -> None:
     try:
         stream = create_stream(settings)
     except Exception as e:
-        if "Could not find compatible backend for requested backend 'auto'" in str(e):
+        if "No available backends" in str(e) or "Could not find compatible" in str(e):
             pytest.xfail(f"No available backend for format '{fmt}': {e}")
             return
         raise

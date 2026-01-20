@@ -136,7 +136,7 @@ BACKENDS: list[BackendMetadata] = [
         is_available=_is_acquire_zarr_available,
     ),
 ]
-VALID_BACKEND_NAMES: set[str] = {b.name for b in BACKENDS} | {"auto"}
+VALID_BACKEND_NAMES: list[str] = [b.name for b in BACKENDS] + ["auto"]
 AVAILABLE_BACKENDS: dict[str, BackendMetadata] = {
     b.name: b for b in BACKENDS if b.is_available()
 }
@@ -254,7 +254,7 @@ def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:
             f"No available backends found for format '{target_format}'. "
             "Install at least one backend: "
             "pip install ome-writers[<backend>], where <backend> is one of "
-            f"{list(AVAILABLE_BACKENDS.keys())}"
+            f"{VALID_BACKEND_NAMES}"
         )
 
     # Try each candidate in order
@@ -294,5 +294,5 @@ def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:
         f"Attempted: {attempted}. "
         "Install at least one backend: "
         "pip install ome-writers[<backend>], where <backend> is one of "
-        f"{list(VALID_BACKEND_NAMES)}"
+        f"{VALID_BACKEND_NAMES}"
     )
