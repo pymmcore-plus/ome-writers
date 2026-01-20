@@ -225,6 +225,35 @@ def test_cases(case: AcquisitionSettings, any_backend: str, tmp_path: Path) -> N
         _assert_valid_ome_zarr(case, stored_array_dims, expected_frames)
 
 
+@pytest.mark.parametrize("fmt", ["tiff", "zarr"])
+def test_auto_backend(tmp_path: Path, fmt: str) -> None:
+    # just exercise the "auto" backend selection path
+    suffix = f".{fmt}"
+    settings = CASES[1].model_copy(
+        update={
+            "root_path": str(tmp_path / f"output.ome{suffix}"),
+            "backend": "auto",
+        }
+    )
+    frame_shape = tuple(d.count for d in settings.dimensions[-2:])
+    try:
+        stream = create_stream(settings)
+    except Exception as e:
+        if "No available backends" in str(e) or "Could not find compatible" in str(e):
+            pytest.xfail(f"No available backend for format '{fmt}': {e}")
+            return
+        raise
+
+    with stream:
+        for _ in range(settings.num_frames or 1):
+            stream.append(np.empty(frame_shape, dtype=settings.dtype))
+
+    dest = Path(settings.root_path)
+    assert dest.exists()
+    assert dest.suffix == suffix
+    assert dest.is_dir() == (fmt == "zarr")
+
+
 def test_overwrite_safety(tmp_path: Path, any_backend: str) -> None:
     """Test that attempting to overwrite existing files raises an error."""
     ext = ".ome.tiff" if any_backend == "tiff" else ".ome.zarr"

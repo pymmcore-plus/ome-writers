@@ -78,6 +78,7 @@ def dims_from_useq(
     image_width: int,
     image_height: int,
     units: Mapping[str, UnitTuple | None] | None = None,
+    pixel_size_um: float | None = None,
 ) -> list[Dimension | PositionDimension]:
     """Convert a useq.MDASequence to a list of Dimensions for ome-writers.
 
@@ -91,6 +92,9 @@ def dims_from_useq(
         The expected height of the images in the stream.
     units : Mapping[str, UnitTuple | None] | None, optional
         An optional mapping of dimension labels to their units.
+    pixel_size_um : float | None, optional
+        The size of a pixel in micrometers. If provided, it will be used to set the
+        scale for the spatial dimensions.
     """
     try:
         from useq import Axis, MDASequence
@@ -120,7 +124,7 @@ def dims_from_useq(
     # with v2, we have better ways to look for unbounded dimensions.
     dims: list[Dimension] = []
     for ax_name, size in seq.sizes.items():
-        if not size:
+        if not size:  # pragma: no cover
             continue
 
         # convert useq Axis to StandardAxis
@@ -132,7 +136,7 @@ def dims_from_useq(
         except ValueError:  # pragma: no cover
             raise ValueError(f"Unsupported axis for OME: {ax_name}") from None
 
-        dim = std_axis.to_dimension(count=size)
+        dim = std_axis.to_dimension(count=size, scale=1)
 
         # if units are explicitly provided, set them on the dimension
         if isinstance(dim, Dimension):
@@ -144,6 +148,6 @@ def dims_from_useq(
 
     return [
         *dims,
-        StandardAxis.Y.to_dimension(count=image_height),
-        StandardAxis.X.to_dimension(count=image_width),
+        StandardAxis.Y.to_dimension(count=image_height, scale=pixel_size_um),
+        StandardAxis.X.to_dimension(count=image_width, scale=pixel_size_um),
     ]

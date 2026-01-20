@@ -45,6 +45,11 @@ jobs:
         exclude:
           - group: zarr
             python-version: "3.10"
+        include:
+          - group: zarr
+            python-version: "3.14"
+            platform: ubuntu-latest
+            resolution: highest
 
     steps:
       - uses: actions/checkout@v6
@@ -53,8 +58,6 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
-      - uses: pymmcore-plus/setup-mm-test-adapters@main
-        if: matrix.group == 'pymmcore'
 
       - name: Install Dependencies
         run: uv sync --no-dev --group test --group ${{ matrix.group }}

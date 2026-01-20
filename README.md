@@ -22,23 +22,47 @@ The core problem ome-writers solves:
 > locations** in multi-dimensional arrays, while generating **OME-compliant
 > metadata** for both TIFF and Zarr formats.
 
+## Installation
+
+You can install `ome-writers` via pip. You *must* also select select at least
+one backend extra:
+
+```bash
+pip install ome-writers[<backend>]
+```
+
+Where `<backend>` is a comma-separated list of one or more of the following:
+
+- `tensorstore` — Uses [tensorstore](https://github.com/google/tensorstore) and
+  [yaozarrs](https://github.com/tlambert03/yaozarrs) for metadata, supports
+  OME-Zarr v0.5.
+- `acquire-zarr` — Uses
+  [acquire-zarr](https://github.com/acquire-project/acquire-zarr), supports
+  OME-Zarr v0.5.
+- `zarr` — Uses [zarr-python](https://github.com/zarr-developers/zarr-python)
+  and [yaozarrs](https://github.com/tlambert03/yaozarrs) for metadata, supports
+  OME-Zarr v0.5.
+- `tifffile` — Uses [tifffile](https://github.com/cgohlke/tifffile), supports
+  OME-TIFF.
+- `all` — install all backends.
+
+(Developers using `uv sync` will end up with all backends installed by default.)
+
 ## Basic Usage
 
 ```python
-from ome_writers import AcquisitionSettings, ArraySettings, Dimension, create_stream
+from ome_writers import AcquisitionSettings, Dimension, create_stream
 
 settings = AcquisitionSettings(
     root_path="example_5d_image.ome.zarr",
-    array_settings=ArraySettings(
-        dimensions=[
-            Dimension(name="t", count=10, chunk_size=1, type="time"),
-            Dimension(name="c", count=2, chunk_size=1, type="channel"),
-            Dimension(name="z", count=5, chunk_size=1, type="space", scale=5),
-            Dimension(name="y", count=256, chunk_size=64, type="space", scale=0.1),
-            Dimension(name="x", count=256, chunk_size=64, type="space", scale=0.1),
-        ],
-        dtype="uint16",
-    ),
+    dimensions=[
+        Dimension(name="t", count=10, chunk_size=1, type="time"),
+        Dimension(name="c", count=2, chunk_size=1, type="channel"),
+        Dimension(name="z", count=5, chunk_size=1, type="space", scale=5),
+        Dimension(name="y", count=256, chunk_size=64, type="space", scale=0.1),
+        Dimension(name="x", count=256, chunk_size=64, type="space", scale=0.1),
+    ],
+    dtype="uint16",
     overwrite=True,
     backend="auto",
 )
@@ -51,15 +75,15 @@ with create_stream(settings) as stream:
 ## High-Level Architecture
 
 ```
-┌─────────────────────┐      ┌─────────────────┐      ┌───────────────────────┐
-│  AcquisitionSchema  │─────▶│   FrameRouter   │─────▶│  ArrayBackend         │
-│                     │      │                 │      │                       │
-│  Declarative        │      │  __next__() ->  │      │  write(pos,idx,frame) │
-│  exp. definition    │      │    (pos, idx)   │      │  finalize()           │
-└─────────────────────┘      └─────────────────┘      └───────────────────────┘
+┌───────────────────────┐      ┌─────────────────┐      ┌───────────────────────┐
+│  AcquisitionSettings  │─────▶│   FrameRouter   │─────▶│  ArrayBackend         │
+│                       │      │                 │      │                       │
+│  Declarative model    │      │  __next__() ->  │      │  write(pos,idx,frame) │
+│  of acquisition order │      │    (pos, idx)   │      │  finalize()           │
+└───────────────────────┘      └─────────────────┘      └───────────────────────┘
 ```
 
-### StorageSchema (`schema.py`)
+### AcquisitionSettings (`schema.py`)
 
 The schema is the **declarative description** of what to create.  In addition to
 other storage details such as data types, chunking, compression, and other
@@ -68,7 +92,9 @@ order in which frames will arrive.
 
 > **Explicit non-goal**: `ome-writers` does *not* attempt to handle non-deterministic
 > acquisition patterns (e.g., event-driven acquisitions where data shape is unknown ahead
-> of time).
+> of time).  However, we do support an unbounded first dimension (e.g., time or whatever).
+> For this case, we recommend a flat 3D structure (e.g., FYX with unbounded F) where F
+> is "any frame", storing metadata for mapping frames to logical dimensions externally.
 
 It answers:
 
@@ -106,9 +132,10 @@ Backends are **format-specific writers** that handle the actual I/O. They:
 
 Supported backends:
 
-- **tensorstore** / **zarr-python** — OME-Zarr v0.5 via yaozarrs (random-access writes)
-- **acquire-zarr** — OME-Zarr v3 (sequential writes only)
-- **tifffile** — OME-TIFF (sequential writes)
+- **tensorstore** — OME-Zarr v0.5 via yaozarrs
+- **zarr-python** — OME-Zarr v0.5 via yaozarrs
+- **acquire-zarr** — OME-Zarr v0.5 via yaozarrs
+- **tifffile** — OME-TIFF
 
 Backends receive indices in storage order and don't need to know about acquisition order.
 
@@ -156,4 +183,4 @@ But we also:
 ## Contributing
 
 We welcome contributions to `ome-writers`!  See our [contributing
-guid](CONTRIBUTING.md) for details.
+guide](CONTRIBUTING.md) for details.
