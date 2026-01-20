@@ -9,7 +9,7 @@ try:
 except PackageNotFoundError:  # pragma: no cover
     __version__ = "uninstalled"
 
-from ._stream import BackendName, create_stream
+from ._stream import create_stream
 from ._util import dims_from_useq
 from .schema import (
     AcquisitionSettings,
@@ -23,7 +23,6 @@ from .schema import (
 
 __all__ = [
     "AcquisitionSettings",
-    "BackendName",
     "Dimension",
     "Plate",
     "Position",
