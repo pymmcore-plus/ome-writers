@@ -1,205 +1,110 @@
-"""Acquire-zarr backend for OME-Zarr v3 (sequential writes only)."""
+"""Yaozarrs-based backends for OME-Zarr v0.5."""
 
 from __future__ import annotations
 
 import gc
-import json
-import platform
-import shutil
-from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-from yaozarrs import v05
+import acquire_zarr as az
 
-from ome_writers._backend import ArrayBackend
+from ._yaozarrs import YaozarrsBackend
 
 if TYPE_CHECKING:
-    import numpy as np
-    from pydantic import BaseModel
+    from collections.abc import Callable, Sequence
+    from pathlib import Path
 
-    from ome_writers._router import FrameRouter, Position, PositionInfo
+    import numpy as np
+
+    from ome_writers._router import PositionInfo
     from ome_writers.schema import AcquisitionSettings, Dimension
 
-try:
-    import acquire_zarr as az
-except ImportError as e:
-    raise ImportError(
-        f"{__name__} requires acquire-zarr: `pip install acquire-zarr`."
-    ) from e
 
-WIN = platform.system() == "Windows"
+class AcquireZarrBackend(YaozarrsBackend):
+    """OME-Zarr backend using yaozarrs for metadata and acquire-zarr for writes.
 
+    Combines:
+    - yaozarrs: Creates OME-NGFF v0.5 compliant group structure and metadata
+    - acquire-zarr: High-performance sequential writes for array data
 
-class AcquireZarrBackend(ArrayBackend):
-    """OME-Zarr v3 backend using acquire-zarr (sequential writes only).
-
-    Acquire-zarr is designed for high-performance streaming acquisition and only
-    supports sequential writes. Frames must be appended in acquisition order.
-    This backend requires storage_order="acquisition" in settings.
+    Requirements:
+    - storage_order="acquisition" (sequential writes only)
+    - Root path must end with .zarr
     """
 
     def __init__(self) -> None:
+        super().__init__()
         self._stream: az.ZarrStream | None = None
-        self._finalized = False
-        self._root_path: Path | None = None
-        self._storage_dims: tuple[Dimension, ...] = ()
-        self._num_positions: int = 0
-        self._is_hcs: bool = False
+        self._az_pos_keys: list[str] = []
+        # hack to deal with the fact that acquire-zarr overwrites zarr.json files
+        # with empty group metadata, even when using output_key="..."
+        self._zarr_json_backup: dict[Path, bytes] = {}
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
-        """Check if settings are compatible with acquire-zarr.
-
-        Acquire-zarr requires:
-        - Root path ending with .zarr
-        - storage_order="acquisition" (sequential writes only)
-        """
-        if not settings.root_path.endswith(".zarr"):  # pragma: no cover
+        if not settings.root_path.endswith(".zarr"):
             return "Root path must end with .zarr for AcquireZarrBackend."
-
         if settings.storage_index_permutation is not None:
             return (
-                "AcquireZarrBackend does not currently support permuted storage order. "
-                "Data may only be written in acquisition order."
+                "AcquireZarrBackend does not support permuted storage order. "
+                "Data must be written in acquisition order."
             )
-
+        if len(settings.array_storage_dimensions) < 3:
+            return (
+                "AcquireZarrBackend requires at least 3 dimensions. "
+                "2D images are not currently supported."
+            )
         return False
 
-    def prepare(self, settings: AcquisitionSettings, router: FrameRouter) -> None:
-        """Initialize acquire-zarr stream."""
-        self._finalized = False
-        self._root_path = Path(settings.root_path).expanduser().resolve()
+    def _get_writer(self) -> Callable[..., _ArrayPlaceholder]:
+        """Return custom writer that collects array configs as placeholders."""
 
-        # Get positions and dimensions from router
-        self._positions = positions = settings.positions
-        self._num_positions = len(positions)
-        self._storage_dims = storage_dims = settings.array_storage_dimensions
+        def custom_writer(
+            path: Path,
+            shape: tuple[int, ...],
+            dtype: Any,
+            chunks: tuple[int, ...],
+            *,
+            shards: tuple[int, ...] | None,
+            overwrite: bool,
+            compression: Any,
+            dimension_names: list[str] | None,
+        ) -> _ArrayPlaceholder:
+            output_key = str(path.relative_to(self._root))
+            return _ArrayPlaceholder(output_key, shape)
 
-        # Handle overwrite
-        if self._root_path.exists():
-            if not settings.overwrite:
-                raise FileExistsError(
-                    f"Directory {self._root_path} already exists. "
-                    "Use overwrite=True to overwrite it."
-                )
-            shutil.rmtree(self._root_path)
+        return custom_writer
 
-        # Convert to az dimensions
-        # special-casing frame dimensions for default chunk sizes
-        # TODO: maybe this should go in schema validation of the dimension list instead?
-        # this can be extremely problematic if chunk_size stays at 1 for frame dims
-        ndims = len(storage_dims)
+    def _post_prepare(self, settings: AcquisitionSettings) -> None:
+        """Create acquire-zarr stream after yaozarrs creates metadata."""
+        assert self._root is not None
+        # Build position -> output_key mapping from placeholder arrays
+        self._az_pos_keys = [arr.output_key for arr in self._arrays]
+
+        # Backup zarr.json files created by yaozarrs before acquire-zarr
+        # potentially overwrites them (will be restored in finalize)
+        for zarr_json in self._root.rglob("zarr.json"):
+            self._zarr_json_backup[zarr_json] = zarr_json.read_bytes()
+
+        # Create acquire-zarr stream
+        ndims = len(settings.array_storage_dimensions)
         az_dims = [
             _to_acquire_dim(dim, frame_dim=(i >= ndims - 2))
-            for i, dim in enumerate(storage_dims)
+            for i, dim in enumerate(settings.array_storage_dimensions)
         ]
 
-        # Acquire-zarr requires at least 3 dimensions. For 2D images (Y, X only),
-        # add a phantom Z dimension with size 1.
-        if len(az_dims) == 2:
-            _inject_phantom_dim(az_dims)
-
-        # Check if this is a plate
-        self._is_hcs = settings.plate is not None
-        if self._is_hcs:
-            # HCS Plate mode
-            self._prepare_plate(settings, positions, az_dims)
-        else:
-            # Non-plate mode (single position or multi-position)
-            self._prepare_non_plate(settings, positions, az_dims)
-
-    def _prepare_non_plate(
-        self, settings: AcquisitionSettings, positions: tuple, az_dims: list
-    ) -> None:
-        """Prepare acquire-zarr stream for non-plate acquisitions."""
-        # Create ArraySettings for each position
-        self._az_pos_keys = []
-        az_arrays = []
-        for pos in positions:
-            # This is a hack to get a multiscales group, rather than a direct array
-            # https://github.com/acquire-project/acquire-zarr/issues/181
-            az_key = pos.name if self._num_positions > 1 else ""
-            # this is a hack to get the proper hierarchy structure.
-            # see https://github.com/acquire-project/acquire-zarr/issues/182
-            downsample = az.DownsamplingMethod.MEAN if self._num_positions > 1 else None
-            self._az_pos_keys.append(az_key)
-            az_arrays.append(
-                az.ArraySettings(
-                    output_key=az_key,
-                    dimensions=az_dims,
-                    data_type=settings.dtype,
-                    downsampling_method=downsample,
-                )
+        self._stream = az.ZarrStream(
+            az.StreamSettings(
+                arrays=[
+                    az.ArraySettings(
+                        output_key=key,
+                        dimensions=az_dims,
+                        data_type=settings.dtype,
+                    )
+                    for key in self._az_pos_keys
+                ],
+                store_path=str(self._root),
+                version=az.ZarrVersion.V3,
             )
-
-        # Create StreamSettings and ZarrStream
-        stream_settings = az.StreamSettings(
-            arrays=az_arrays,
-            store_path=str(self._root_path),
-            version=az.ZarrVersion.V3,
         )
-        self._stream = az.ZarrStream(stream_settings)
-
-    def _prepare_plate(
-        self, settings: AcquisitionSettings, positions: tuple, az_dims: list
-    ) -> None:
-        """Prepare acquire-zarr stream for HCS plate acquisitions."""
-        plate = settings.plate
-        assert plate is not None
-
-        # Create output keys for each position: "row/column/fov_name"
-        # Use empty plate_path so the plate is at the root, not in a subdirectory
-        self._az_pos_keys = [f"{pos.row}/{pos.column}/{pos.name}" for pos in positions]
-
-        # Group positions by (row, column) to create wells
-        # wells_map: {(row, col): [(pos_idx, Position), ...]}
-        wells_map: dict[tuple[str, str], list[tuple[int, Position]]] = {}
-        for idx, pos in enumerate(positions):
-            wells_map.setdefault((pos.row, pos.column), []).append((idx, pos))
-
-        # Create Wells with FieldOfViews
-        az_wells = []
-        for (row, col), pos_list in wells_map.items():
-            fovs = []
-            for _pos_idx, pos in pos_list:
-                # Create ArraySettings for this FOV
-                # Note: output_key should just be the FOV name since the well
-                # structure already defines row/column
-                # Use downsampling to create a multiscales group structure
-                array_settings = az.ArraySettings(
-                    output_key=pos.name,
-                    dimensions=az_dims,
-                    data_type=settings.dtype,
-                    downsampling_method=az.DownsamplingMethod.MEAN,
-                )
-                # Create FieldOfView for each position in this well
-                fov = az.FieldOfView(
-                    path=pos.name,
-                    acquisition_id=0,  # Default acquisition ID
-                    array_settings=array_settings,
-                )
-                fovs.append(fov)
-
-            # Create Well
-            well = az.Well(row_name=row, column_name=col, images=fovs)
-            az_wells.append(well)
-
-        # Create Plate
-        az_plate = az.Plate(
-            path="",  # empty path so the plate is at the root of the store
-            name=plate.name,
-            row_names=plate.row_names,
-            column_names=plate.column_names,
-            wells=az_wells,
-            acquisitions=[az.Acquisition(id=0, name="default")],
-        )
-
-        # Create StreamSettings with plate
-        stream_settings = az.StreamSettings(
-            hcs_plates=[az_plate],
-            store_path=str(self._root_path),
-            version=az.ZarrVersion.V3,
-        )
-        self._stream = az.ZarrStream(stream_settings)
 
     def write(
         self,
@@ -207,70 +112,34 @@ class AcquireZarrBackend(ArrayBackend):
         index: tuple[int, ...],
         frame: np.ndarray,
     ) -> None:
-        """Write frame sequentially.
+        """Write frame sequentially via acquire-zarr stream."""
+        if self._stream is None:
+            raise RuntimeError("Backend not prepared.")
 
-        Notes
-        -----
-        The index parameter is ignored because acquire-zarr is a sequential-only
-        backend. Frames are written via append() in the order they arrive.
-        """
-        # Append sequentially - acquire-zarr doesn't use indices
-        # The key matches the output_key we set in ArraySettings
-        # the check on num positions matches the behavior above in prepare()
-        az_pos_key = self._az_pos_keys[position_info[0]]
-        self._stream.append(frame, key=az_pos_key)  # pyright: ignore (stream will not be None)
+        output_key = self._az_pos_keys[position_info[0]]
+        self._stream.append(frame, key=output_key)
 
     def finalize(self) -> None:
-        """Close stream and patch metadata."""
+        """Close stream and release resources."""
         if not self._finalized and self._stream is not None:
             self._stream.close()
             self._stream = None
             gc.collect()
-            gc.collect()
 
-            self._patch_metadata()
-            self._finalized = True
+            # Restore yaozarrs metadata that acquire-zarr may have overwritten
+            for path, content in self._zarr_json_backup.items():
+                path.write_bytes(content)
+            self._zarr_json_backup.clear()
 
-    def _patch_metadata(self) -> None:
-        """Patch Zarr metadata to NGFF v0.5 compliance.
-
-        In certain scenarios, we need to slightly modify the metadata generated
-        by acquire-zarr to ensure full compliance with OME-NGFF v0.5
-        """
-        if self._root_path is None:  # pragma: no cover
-            return
-
-        if not self._is_hcs and self._num_positions > 1:
-            # create valid bioformats2raw series group
-            # Create root zarr.json with bioformats2raw.layout
-            _create_zarr3_group(
-                self._root_path, v05.Bf2Raw.model_validate({"bioformats2raw.layout": 3})
-            )
-
-            # Create OME/zarr.json with series list
-            ome_path = self._root_path / "OME"
-            _create_zarr3_group(
-                ome_path, v05.Series(series=[p.name for p in self._positions])
-            )
+        super().finalize()
 
 
-def _create_zarr3_group(
-    dest_path: Path,
-    ome_model: BaseModel,
-    indent: int = 2,
-) -> None:
-    """Create a zarr group directory with optional OME metadata in zarr.json."""
-    dest_path.mkdir(parents=True, exist_ok=True)
-    zarr_json = {
-        "zarr_format": 3,
-        "node_type": "group",
-        "attributes": {"ome": ome_model.model_dump(mode="json", exclude_none=True)},
-    }
-    (dest_path / "zarr.json").write_text(json.dumps(zarr_json, indent=indent))
+# -----------------------------------------------------------------------------
 
 
 def _to_acquire_dim(dim: Dimension, frame_dim: bool) -> az.Dimension:
     """Convert a Dimension to az.Dimension."""
+
     # Map dimension type to az DimensionType
     dim_type_map = {
         "time": az.DimensionType.TIME,
@@ -283,25 +152,27 @@ def _to_acquire_dim(dim: Dimension, frame_dim: bool) -> az.Dimension:
     else:
         chunk_size = dim.count if frame_dim else 1
 
+    kind = dim_type_map.get(dim.type or "", az.DimensionType.OTHER)
     return az.Dimension(
         name=dim.name,
-        kind=dim_type_map.get(dim.type, az.DimensionType.OTHER),  # pyright: ignore[reportCallIssue]
+        kind=kind,
         array_size_px=dim.count or 1,
         chunk_size_px=chunk_size,
         shard_size_chunks=dim.shard_size or 1,
     )
 
 
-def _inject_phantom_dim(az_dims: list[az.Dimension]) -> None:
-    # code to deal with the fact that acquire-zarr doesn't directly support 2D images
-    # https://github.com/acquire-project/acquire-zarr/issues/183
-    az_dims.insert(
-        0,
-        az.Dimension(
-            name="_singleton",
-            kind=az.DimensionType.TIME,
-            array_size_px=1,
-            chunk_size_px=1,
-            shard_size_chunks=1,
-        ),
-    )
+class _ArrayPlaceholder:
+    """Placeholder returned by custom writer - writes are routed through ZarrStream."""
+
+    def __init__(self, output_key: str, shape: tuple[int, ...]) -> None:
+        self.output_key = output_key
+        self.shape = list(shape)
+
+    def resize(self, new_shape: Sequence[int]) -> None:
+        self.shape = list(new_shape)
+        # no updates needed to acquire-zarr stream, it already supports appending
+        # to the first dimension
+
+    def __setitem__(self, index: Any, value: Any) -> None:
+        pass  # No-op - actual writes go through ZarrStream

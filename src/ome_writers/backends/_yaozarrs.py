@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import gc
 import json
 import warnings
+from abc import abstractmethod
 from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -11,8 +13,9 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from ome_writers._backend import ArrayBackend
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
+    import acquire_zarr
     import numpy as np
 
     from ome_writers._router import FrameRouter, PositionInfo
@@ -35,14 +38,25 @@ class YaozarrsBackend(ArrayBackend):
     yaozarrs writer to use (e.g., "zarr", "tensorstore").
     """
 
-    writer: Literal["zarr", "tensorstore"]
-
     def __init__(self) -> None:
         self._arrays: list[Any] = []
         self._image_group_paths: list[str] = []  # Parallel to _arrays, for metadata
         self._metadata_cache: dict[str, dict] = {}  # group path -> attrs dict
         self._finalized = False
         self._root: Path | None = None
+
+    @abstractmethod
+    def _get_writer(self) -> Literal["zarr", "tensorstore"] | Callable[..., Any]:
+        """Return the writer to use for array creation.
+
+        Subclasses can override to provide a custom CreateArrayFunc.
+        """
+
+    def _post_prepare(self, settings: AcquisitionSettings) -> None:
+        """Hook called after yaozarrs creates the structure, before metadata caching.
+
+        Subclasses can override to do additional setup (e.g., create streams).
+        """
 
     def prepare(self, settings: AcquisitionSettings, router: FrameRouter) -> None:
         """Initialize OME-Zarr storage structure."""
@@ -62,6 +76,9 @@ class YaozarrsBackend(ArrayBackend):
         # shapes/dtypes across positions)
         image = _build_yaozarrs_image_model(storage_dims)
 
+        # Get writer from hook (subclasses can override)
+        writer = self._get_writer()
+
         # Plate mode
         if settings.plate is not None:
             # mapping of {(row, column): [(position_index, Position), ...]}
@@ -77,7 +94,7 @@ class YaozarrsBackend(ArrayBackend):
                 overwrite=settings.overwrite,
                 chunks=chunks,
                 shards=shards,
-                writer=self.writer,
+                writer=writer,
             )
 
             for (row, col), pos_list in well_positions.items():
@@ -104,7 +121,7 @@ class YaozarrsBackend(ArrayBackend):
                 overwrite=settings.overwrite,
                 chunks=chunks,
                 shards=shards,
-                writer=self.writer,
+                writer=writer,  # type: ignore[arg-type]
             )
             self._image_group_paths = ["."]
             self._arrays = [all_arrays["0"]]
@@ -116,7 +133,7 @@ class YaozarrsBackend(ArrayBackend):
                 overwrite=settings.overwrite,
                 chunks=chunks,
                 shards=shards,
-                writer=self.writer,
+                writer=writer,
             )
             for pos in positions:
                 builder.add_series(pos.name, image, [(shape, dtype)])
@@ -126,6 +143,9 @@ class YaozarrsBackend(ArrayBackend):
             self._arrays = [
                 all_arrays[f"{parent}/0"] for parent in self._image_group_paths
             ]
+
+        # Post-prepare hook (subclasses can do additional work)
+        self._post_prepare(settings)
 
         # Cache metadata immediately after creation
         # This is used later for get_metadata() and update_metadata()
@@ -248,7 +268,8 @@ class YaozarrsBackend(ArrayBackend):
 class ZarrBackend(YaozarrsBackend):
     """OME-Zarr writer using zarr-python via yaozarrs."""
 
-    writer = "zarr"
+    def _get_writer(self) -> Literal["zarr"]:
+        return "zarr"
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         if not settings.root_path.endswith(".zarr"):  # pragma: no cover
@@ -259,7 +280,8 @@ class ZarrBackend(YaozarrsBackend):
 class TensorstoreBackend(YaozarrsBackend):
     """OME-Zarr writer using tensorstore via yaozarrs."""
 
-    writer = "tensorstore"
+    def _get_writer(self) -> Literal["tensorstore"]:
+        return "tensorstore"
 
     def __init__(self) -> None:
         super().__init__()
