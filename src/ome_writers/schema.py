@@ -84,6 +84,7 @@ class StandardAxis(str, Enum):
         positions: list[str | Position] | None = None,
         chunk_size: int | None = None,
         shard_size: int | None = None,
+        scale: float | None = None,
     ) -> Dimension | PositionDimension:
         """Convert to Dimension or PositionDimension with given count."""
         if self == StandardAxis.POSITION:
@@ -106,6 +107,7 @@ class StandardAxis(str, Enum):
             unit=self.unit(),
             chunk_size=chunk_size,
             shard_size=shard_size,
+            scale=scale,
         )
 
 
@@ -219,6 +221,22 @@ class PositionDimension(_BaseModel):
     def names(self) -> list[str]:
         """Position names in acquisition order."""
         return [p.name for p in self.positions]
+
+    @property
+    def unit(self) -> None:
+        """Unit is always None for PositionDimension.
+
+        Provided for symmetry with Dimension.
+        """
+        return None
+
+    @property
+    def scale(self) -> Literal[1]:
+        """Scale is always None for PositionDimension.
+
+        Provided for symmetry with Dimension.
+        """
+        return 1
 
 
 def _validate_dims_list(
