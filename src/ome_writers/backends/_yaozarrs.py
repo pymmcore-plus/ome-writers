@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import gc
 import json
 import warnings
 from abc import abstractmethod
@@ -15,7 +14,6 @@ from ome_writers._backend import ArrayBackend
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    import acquire_zarr
     import numpy as np
 
     from ome_writers._router import FrameRouter, PositionInfo
