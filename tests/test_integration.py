@@ -1,11 +1,11 @@
 """Full integration testing, from schema declaration to on-disk file verification."""
 
 from __future__ import annotations
-import time
 
 import importlib.util
 import math
 import re
+import time
 from pathlib import Path
 from typing import TypeAlias, cast
 
