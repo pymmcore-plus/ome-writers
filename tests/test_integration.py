@@ -1,6 +1,7 @@
 """Full integration testing, from schema declaration to on-disk file verification."""
 
 from __future__ import annotations
+import time
 
 import importlib.util
 import math
@@ -287,6 +288,7 @@ def test_overwrite_safety(tmp_path: Path, any_backend: str) -> None:
         "Directory modification time changed despite failed overwrite"
     )
 
+    time.sleep(0.2)  # ensure mtime difference on Windows
     # add back overwrite=True to settings and verify it works
     settings = settings.model_copy(update={"overwrite": True})
     with create_stream(settings) as stream:
