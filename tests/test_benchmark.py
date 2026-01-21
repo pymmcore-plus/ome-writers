@@ -58,17 +58,19 @@ BENCHMARK_CASES = [
         ),
         id="3d_chunking",
     ),
-    # Time-lapse 5D
-    AcquisitionSettings(
-        root_path="tmp",
-        dimensions=[
-            D(name="t", count=10, chunk_size=1, type="time"),
-            D(name="c", count=2, chunk_size=1, type="channel"),
-            D(name="z", count=5, chunk_size=1, type="space"),
-            D(name="y", count=1024, chunk_size=128, type="space"),
-            D(name="x", count=1024, chunk_size=128, type="space"),
-        ],
-        dtype="uint16",
+    pytest.param(
+        AcquisitionSettings(
+            root_path="tmp",
+            dimensions=[
+                D(name="t", count=10, chunk_size=1, type="time"),
+                D(name="c", count=2, chunk_size=1, type="channel"),
+                D(name="z", count=5, chunk_size=1, type="space"),
+                D(name="y", count=1024, chunk_size=128, type="space"),
+                D(name="x", count=1024, chunk_size=128, type="space"),
+            ],
+            dtype="uint16",
+        ),
+        id="t10_c2_z5_xy1024",
     ),
 ]
 
