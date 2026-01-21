@@ -114,6 +114,12 @@ jobs:
           run: uv run --no-sync pytest tests/test_bench.py --codspeed -v
           mode: walltime
 
+      - name: Run memory benchmarks
+        uses: CodSpeedHQ/action@v4
+        with:
+          run: uv run --no-sync pytest tests/test_bench.py --codspeed -v
+          mode: memory
+
   build-and-inspect-package:
     name: Build & inspect package.
     needs: test

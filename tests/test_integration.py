@@ -493,3 +493,161 @@ def _validate_array_zarr(
     )
 
     _validate_expected_frames(array0, expected_frames)
+
+
+# ---------------------- Chunk Buffering Tests ----------------------
+
+
+@pytest.mark.parametrize("backend", ["zarr", "tensorstore"])
+def test_chunked_write_correctness(backend: str, tmp_path: Path) -> None:
+    """Verify chunk buffering produces correct output."""
+    # Skip if backend not available
+    if backend == "tensorstore" and importlib.util.find_spec("tensorstore") is None:
+        pytest.skip("tensorstore not available")
+
+    # 3D chunking case: z=16 with chunk_size=4
+    case = AcquisitionSettings(
+        root_path=str(tmp_path / "chunked.ome.zarr"),
+        dimensions=[
+            D(name="z", count=16, chunk_size=4, type="space"),
+            D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
+            D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
+        ],
+        dtype="uint16",
+        backend=backend,
+    )
+
+    frame_shape = (64, 64)
+    num_frames = 16
+
+    # Write frames
+    with create_stream(case) as stream:
+        for f in range(num_frames):
+            frame_data = np.full(frame_shape, f, dtype=case.dtype)
+            stream.append(frame_data)
+
+    # Verify data correctness
+    expected_frames = _build_expected_frames(case, num_frames)
+    _assert_valid_ome_zarr(case, case.array_storage_dimensions, expected_frames)
+
+
+@pytest.mark.parametrize("backend", ["zarr", "tensorstore"])
+def test_chunked_write_with_transposition(backend: str, tmp_path: Path) -> None:
+    """Test buffering with storage_order != acquisition."""
+    if backend == "tensorstore" and importlib.util.find_spec("tensorstore") is None:
+        pytest.skip("tensorstore not available")
+
+    # Use non-standard dimension order (C before Z) with chunking on both
+    case = AcquisitionSettings(
+        root_path=str(tmp_path / "transposed.ome.zarr"),
+        dimensions=[
+            D(name="t", count=2, type="time"),
+            D(name="z", count=8, chunk_size=4, type="space"),
+            D(name="c", count=4, chunk_size=2, type="channel"),
+            D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
+            D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
+        ],
+        dtype="uint16",
+        backend=backend,
+    )
+
+    frame_shape = (64, 64)
+    num_frames = 2 * 8 * 4  # t * z * c
+
+    # Write frames
+    with create_stream(case) as stream:
+        for f in range(num_frames):
+            frame_data = np.full(frame_shape, f, dtype=case.dtype)
+            stream.append(frame_data)
+
+    # Verify data correctness
+    expected_frames = _build_expected_frames(case, num_frames)
+    _assert_valid_ome_zarr(case, case.array_storage_dimensions, expected_frames)
+
+
+def test_partial_chunks_at_finalize(tmp_path: Path) -> None:
+    """Test that incomplete chunks flush correctly."""
+    # z=17 with chunk_size=4 -> last chunk has only 1 frame
+    case = AcquisitionSettings(
+        root_path=str(tmp_path / "partial.ome.zarr"),
+        dimensions=[
+            D(name="z", count=17, chunk_size=4, type="space"),
+            D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
+            D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
+        ],
+        dtype="uint16",
+        backend="zarr",
+    )
+
+    frame_shape = (64, 64)
+    num_frames = 17
+
+    # Write all frames
+    with create_stream(case) as stream:
+        for f in range(num_frames):
+            frame_data = np.full(frame_shape, f, dtype=case.dtype)
+            stream.append(frame_data)
+
+    # Verify all frames were written correctly, including partial chunk
+    expected_frames = _build_expected_frames(case, num_frames)
+    _assert_valid_ome_zarr(case, case.array_storage_dimensions, expected_frames)
+
+
+def test_no_buffering_when_chunk_size_one(tmp_path: Path) -> None:
+    """Verify no buffering when all chunk_size=1."""
+    case = AcquisitionSettings(
+        root_path=str(tmp_path / "no_buffering.ome.zarr"),
+        dimensions=[
+            D(name="z", count=4, chunk_size=1, type="space"),
+            D(name="c", count=2, chunk_size=1, type="channel"),
+            D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
+            D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
+        ],
+        dtype="uint16",
+        backend="zarr",
+    )
+
+    frame_shape = (64, 64)
+    num_frames = 4 * 2  # z * c
+
+    # Write frames
+    with create_stream(case) as stream:
+        for f in range(num_frames):
+            frame_data = np.full(frame_shape, f, dtype=case.dtype)
+            stream.append(frame_data)
+
+    # Verify correctness
+    expected_frames = _build_expected_frames(case, num_frames)
+    _assert_valid_ome_zarr(case, case.array_storage_dimensions, expected_frames)
+
+
+@pytest.mark.parametrize("backend", ["zarr", "tensorstore"])
+def test_buffering_with_multiposition(backend: str, tmp_path: Path) -> None:
+    """Test chunk buffering with multiple positions."""
+    if backend == "tensorstore" and importlib.util.find_spec("tensorstore") is None:
+        pytest.skip("tensorstore not available")
+
+    case = AcquisitionSettings(
+        root_path=str(tmp_path / "multipos_chunked.ome.zarr"),
+        dimensions=[
+            PositionDimension(positions=["Pos0", "Pos1"]),
+            D(name="z", count=8, chunk_size=4, type="space"),
+            D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
+            D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
+        ],
+        dtype="uint16",
+        backend=backend,
+    )
+
+    frame_shape = (64, 64)
+    num_frames = 2 * 8  # positions * z
+
+    # Write frames
+    with create_stream(case) as stream:
+        for f in range(num_frames):
+            frame_data = np.full(frame_shape, f, dtype=case.dtype)
+            stream.append(frame_data)
+
+    # Verify correctness for all positions
+    expected_frames = _build_expected_frames(case, num_frames)
+    _assert_valid_ome_zarr(case, case.array_storage_dimensions, expected_frames)
