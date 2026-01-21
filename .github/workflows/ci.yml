@@ -112,7 +112,7 @@ jobs:
         uses: CodSpeedHQ/action@v4
         with:
           run: uv run --no-sync pytest tests/test_bench.py --codspeed -v
-          mode: simulation
+          mode: walltime
 
   build-and-inspect-package:
     name: Build & inspect package.
