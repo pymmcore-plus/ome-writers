@@ -111,8 +111,8 @@ jobs:
       - name: Run benchmarks
         uses: CodSpeedHQ/action@v4
         with:
-          run: uv run --no-sync pytest --codspeed -v
-          mode: instrumentation
+          run: uv run --no-sync pytest tests/test_bench.py --codspeed -v
+          mode: simulation
 
   build-and-inspect-package:
     name: Build & inspect package.

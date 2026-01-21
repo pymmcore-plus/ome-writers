@@ -153,12 +153,6 @@ reportAttributeAccessIssue = false # tough with pydantic
 minversion = "7.0"
 testpaths = ["tests"]
 filterwarnings = ["error", "ignore:Failing to pass a value:DeprecationWarning"]
-addopts = [
-    "--benchmark-columns=min,mean,stddev,rounds",
-    "--benchmark-min-rounds=5",
-    "--benchmark-skip",                           # Skip benchmarks by default
-    "--benchmark-group-by=group",                 # Group by custom group set in test
-]
 markers = [
     "benchmark: marks tests as benchmarks (deselect with '-m \"not benchmark\"')",
 ]
