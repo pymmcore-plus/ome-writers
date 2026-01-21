@@ -68,7 +68,9 @@ class AcquireZarrBackend(YaozarrsBackend):
             compression: Any,
             dimension_names: list[str] | None,
         ) -> _ArrayPlaceholder:
-            output_key = str(path.relative_to(self._root))
+            # as_posix is critical on windows to ensure forward slashes
+            # which is what acquire-zarr expects
+            output_key = path.relative_to(self._root).as_posix()
             return _ArrayPlaceholder(output_key, shape)
 
         return custom_writer
