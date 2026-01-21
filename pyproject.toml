@@ -44,7 +44,6 @@ all = ["ome-writers[tensorstore,zarr,acquire-zarr,tifffile]"]
 test = [
     "pytest>=8.4.2",
     "pytest-cov>=7.0.0",
-    "pytest-benchmark>=5.1.0",
     "yaozarrs[io]>=0.2.0",
     "pytest-xdist>=3.8.0",
     "useq-schema>=0.8.2",
@@ -64,7 +63,11 @@ acquire-zarr = [
     "tensorstore>=0.1.78",       # just for read validation in tests
 ]
 tifffile = [{ include-group = 'test' }, "ome-writers[tifffile]"]
-
+test-codspeed = [
+    { include-group = "test" },
+    "ome-writers[all]",
+    "pytest-codspeed",
+]
 dev = [
     { include-group = "test" },
     { include-group = 'tensorstore' },
@@ -76,6 +79,7 @@ dev = [
     "pyright>=1.1.405",
     "rich>=14.1.0",
     "ruff>=0.13.0",
+    "pytest-benchmark>=5.1.0",
     "prek>=0.2.28",
     "ty>=0.0.12",
     "useq-schema>=0.8.2",
@@ -152,8 +156,8 @@ filterwarnings = ["error", "ignore:Failing to pass a value:DeprecationWarning"]
 addopts = [
     "--benchmark-columns=min,mean,stddev,rounds",
     "--benchmark-min-rounds=5",
-    "--benchmark-skip",  # Skip benchmarks by default
-    "--benchmark-group-by=group",  # Group by custom group set in test
+    "--benchmark-skip",                           # Skip benchmarks by default
+    "--benchmark-group-by=group",                 # Group by custom group set in test
 ]
 markers = [
     "benchmark: marks tests as benchmarks (deselect with '-m \"not benchmark\"')",
