@@ -37,6 +37,7 @@ class AcquireZarrBackend(YaozarrsBackend):
         self._az_pos_keys: list[str] = []
         # hack to deal with the fact that acquire-zarr overwrites zarr.json files
         # with empty group metadata, even when using output_key="..."
+        # see https://github.com/acquire-project/acquire-zarr/issues/186
         self._zarr_json_backup: dict[Path, bytes] = {}
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
@@ -83,6 +84,7 @@ class AcquireZarrBackend(YaozarrsBackend):
 
         # Backup zarr.json files created by yaozarrs before acquire-zarr
         # potentially overwrites them (will be restored in finalize)
+        # https://github.com/acquire-project/acquire-zarr/issues/186
         for zarr_json in self._root.rglob("zarr.json"):
             self._zarr_json_backup[zarr_json] = zarr_json.read_bytes()
 

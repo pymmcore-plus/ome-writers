@@ -1,5 +1,3 @@
-"""Yaozarrs-based backends for OME-Zarr v0.5."""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal
