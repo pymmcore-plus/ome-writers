@@ -46,17 +46,23 @@ jobs:
       - name: Install the project
         run: uv sync --no-dev --group test-codspeed
 
-      - name: Run benchmarks
+      - name: Run walltime benchmarks
         uses: CodSpeedHQ/action@v4
         with:
-          run: uv run --no-sync pytest tests/test_bench.py --codspeed -v
           mode: walltime
+          run: uv run --no-sync pytest tests/test_bench.py --codspeed -v
+
+      - name: Run simulated CPI benchmarks
+        uses: CodSpeedHQ/action@v4
+        with:
+          mode: simulation
+          run: uv run --no-sync pytest tests/test_bench.py --codspeed -v
 
       - name: Run memory benchmarks
         uses: CodSpeedHQ/action@v4
         with:
-          run: uv run --no-sync pytest tests/test_bench.py --codspeed -v
           mode: memory
+          run: uv run --no-sync pytest tests/test_bench.py --codspeed -v
 
   test:
     name: ${{ matrix.platform }} py${{ matrix.python-version }} ${{ matrix.group }} ${{ matrix.resolution }}

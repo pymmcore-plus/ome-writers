@@ -158,6 +158,7 @@ filterwarnings = [
     "error",
     "ignore:Failing to pass a value:DeprecationWarning",
     "ignore:Benchmarks are automatically disabled because xdist plugin is active:",
+    "ignore:Valgrind instrument ignores rounds:UserWarning",
 ]
 
 
