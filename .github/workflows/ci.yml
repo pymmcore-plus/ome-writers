@@ -97,7 +97,9 @@ jobs:
       codecov_token: ${{ secrets.CODECOV_TOKEN }}
 
   benchmarks:
-    runs-on: windows-latest
+    # while windows performance is usually what we care about,
+    # codspeed currently only supports ubuntu runners
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v7
