@@ -141,7 +141,6 @@ class AcquireZarrBackend(YaozarrsBackend):
 
 def _to_acquire_dim(dim: Dimension, frame_dim: bool) -> az.Dimension:
     """Convert a Dimension to az.Dimension."""
-
     # Map dimension type to az DimensionType
     dim_type_map = {
         "time": az.DimensionType.TIME,
