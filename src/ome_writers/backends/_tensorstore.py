@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     import numpy as np
+    from tensorstore import Future
 
     from ome_writers.schema import AcquisitionSettings
 
@@ -20,7 +21,7 @@ class TensorstoreBackend(YaozarrsBackend):
 
     def __init__(self) -> None:
         super().__init__()
-        self._futures: list[Any] = []
+        self._futures: list[Future] = []
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         if not settings.root_path.endswith(".zarr"):  # pragma: no cover
@@ -32,19 +33,14 @@ class TensorstoreBackend(YaozarrsBackend):
         self._futures.append(array[index].write(frame))
 
     def _write_chunk(
-        self,
-        array: Any,  # tensorstore.TensorStore
-        start_index: tuple[int, ...],
-        chunk_data: np.ndarray,
+        self, array: Any, start_index: tuple[int, ...], chunk_data: np.ndarray
     ) -> None:
         """Write chunk asynchronously with future tracking."""
-        chunk_shape = chunk_data.shape
         slices = tuple(
             slice(start, start + size)
-            for start, size in zip(start_index, chunk_shape, strict=False)
+            for start, size in zip(start_index, chunk_data.shape, strict=False)
         )
-        # Async write for tensorstore
-        self._futures.append(array[slices].write(chunk_data))
+        self._write(array, slices, chunk_data)
 
     def _resize(self, array: Any, new_shape: Sequence[int]) -> None:
         """Resize array to new shape, using exclusive_max for tensorstore."""

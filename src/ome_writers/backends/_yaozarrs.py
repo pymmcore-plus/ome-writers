@@ -228,8 +228,10 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         index: tuple[int, ...],
         frame: np.ndarray,
     ) -> None:
-        """Write frame using chunk buffering."""
-        # Add frame to buffer
+        """Write frame using chunk buffering.
+
+        If desired, subclasses can override this to customize buffering behavior.
+        """
         chunk_coords = buffer.add_frame(index, frame)
 
         # If chunk is complete, flush it
@@ -242,16 +244,13 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
     ) -> None:
         """Write a complete chunk to the array.
 
-        This is the key method that writes entire chunks at once,
-        reducing I/O operations significantly.
+        This is called when the chunk buffer indicates a chunk is complete and ready
+        to be flushed to storage.
         """
-        # Build slice for the chunk region
-        chunk_shape = chunk_data.shape
         slices = tuple(
             slice(start, start + size)
-            for start, size in zip(start_index, chunk_shape, strict=False)
+            for start, size in zip(start_index, chunk_data.shape, strict=False)
         )
-        # Write entire chunk in one operation
         array[slices] = chunk_data
 
     def get_metadata(self) -> dict[str, dict]:
