@@ -32,6 +32,32 @@ jobs:
       - run: uv run prek --all-files
       - run: uv run pyright
 
+  benchmarks:
+    # while windows performance is usually what we care about,
+    # codspeed currently only supports ubuntu runners
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - name: Install the project
+        run: uv sync --no-dev --group test-codspeed
+
+      - name: Run benchmarks
+        uses: CodSpeedHQ/action@v4
+        with:
+          run: uv run --no-sync pytest tests/test_bench.py --codspeed -v
+          mode: walltime
+
+      - name: Run memory benchmarks
+        uses: CodSpeedHQ/action@v4
+        with:
+          run: uv run --no-sync pytest tests/test_bench.py --codspeed -v
+          mode: memory
+
   test:
     name: ${{ matrix.platform }} py${{ matrix.python-version }} ${{ matrix.group }} ${{ matrix.resolution }}
     runs-on: ${{ matrix.platform }}
@@ -95,32 +121,6 @@ jobs:
     uses: pyapp-kit/workflows/.github/workflows/upload-coverage.yml@v2
     secrets:
       codecov_token: ${{ secrets.CODECOV_TOKEN }}
-
-  benchmarks:
-    # while windows performance is usually what we care about,
-    # codspeed currently only supports ubuntu runners
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-          python-version: "3.13"
-
-      - name: Install the project
-        run: uv sync --no-dev --group test-codspeed
-
-      - name: Run benchmarks
-        uses: CodSpeedHQ/action@v4
-        with:
-          run: uv run --no-sync pytest tests/test_bench.py --codspeed -v
-          mode: walltime
-
-      - name: Run memory benchmarks
-        uses: CodSpeedHQ/action@v4
-        with:
-          run: uv run --no-sync pytest tests/test_bench.py --codspeed -v
-          mode: memory
 
   build-and-inspect-package:
     name: Build & inspect package.
