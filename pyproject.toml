@@ -63,7 +63,11 @@ acquire-zarr = [
     "tensorstore>=0.1.78",       # just for read validation in tests
 ]
 tifffile = [{ include-group = 'test' }, "ome-writers[tifffile]"]
-
+test-codspeed = [
+    { include-group = "test" },
+    "ome-writers[all]",
+    "pytest-codspeed",
+]
 dev = [
     { include-group = "test" },
     { include-group = 'tensorstore' },
@@ -75,9 +79,11 @@ dev = [
     "pyright>=1.1.405",
     "rich>=14.1.0",
     "ruff>=0.13.0",
+    "pytest-benchmark>=5.1.0",
     "prek>=0.2.28",
     "ty>=0.0.12",
     "useq-schema>=0.8.2",
+    "pytest-xdist>=3.8.0",
 ]
 
 [project.urls]
@@ -119,6 +125,7 @@ ignore = [
     "D401",   # First line should be in imperative mood (remove to opt in)
 ]
 
+
 [tool.ruff.lint.per-file-ignores]
 "tests/*.py" = ["D", "S"]
 
@@ -147,7 +154,13 @@ reportAttributeAccessIssue = false # tough with pydantic
 [tool.pytest.ini_options]
 minversion = "7.0"
 testpaths = ["tests"]
-filterwarnings = ["error", "ignore:Failing to pass a value:DeprecationWarning"]
+filterwarnings = [
+    "error",
+    "ignore:Failing to pass a value:DeprecationWarning",
+    "ignore:Benchmarks are automatically disabled because xdist plugin is active:",
+    "ignore:Valgrind instrument ignores rounds:UserWarning",
+]
+
 
 # https://coverage.readthedocs.io/
 [tool.coverage.report]

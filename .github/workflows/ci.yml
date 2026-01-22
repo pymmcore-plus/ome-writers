@@ -32,6 +32,25 @@ jobs:
       - run: uv run prek --all-files
       - run: uv run pyright
 
+  benchmarks:
+    # using bare-metal runner for more consistent benchmark results
+    # this has time limit
+    runs-on: codspeed-macro
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install the project
+        run: pip install . --group test-codspeed
+
+      - name: Run walltime benchmarks
+        uses: CodSpeedHQ/action@v4
+        with:
+          mode: walltime
+          run: pytest tests/test_bench.py --codspeed -v
+
   test:
     name: ${{ matrix.platform }} py${{ matrix.python-version }} ${{ matrix.group }} ${{ matrix.resolution }}
     runs-on: ${{ matrix.platform }}
