@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
     import numpy as np
 
-    from ._backend import ArrayBackend
+    from .backends._backend import ArrayBackend
     from .schema import AcquisitionSettings
 
 __all__ = ["OMEStream", "create_stream"]
@@ -109,14 +109,14 @@ def _is_tensorstore_available() -> bool:
 BACKENDS: list[BackendMetadata] = [
     BackendMetadata(
         name="zarr",
-        module_path="ome_writers.backends._yaozarrs",
+        module_path="ome_writers.backends._zarr_python",
         class_name="ZarrBackend",
         format="zarr",
         is_available=_is_zarr_available,
     ),
     BackendMetadata(
         name="tensorstore",
-        module_path="ome_writers.backends._yaozarrs",
+        module_path="ome_writers.backends._tensorstore",
         class_name="TensorstoreBackend",
         format="zarr",
         is_available=_is_tensorstore_available,
