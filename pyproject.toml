@@ -24,44 +24,60 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Typing :: Typed",
 ]
-dependencies = ["numpy>=2", "typing-extensions>=4.10.0"]
+dependencies = ["numpy>=2", "typing-extensions>=4.10.0", "yaozarrs>=0.2.0"]
 
 [project.optional-dependencies]
-tensorstore = ["tensorstore>=0.1.69,!=0.1.72"]
-acquire-zarr = ["acquire-zarr>=0.5.2"]
+tensorstore = [
+    "yaozarrs[write-tensorstore]>=0.2.0",
+    "tensorstore>=0.1.80; python_version >= '3.11'",
+]
+zarr = ["yaozarrs[write-zarr]>=0.2.0"]
+acquire-zarr = ["acquire-zarr>=0.6.0; python_version < '3.14'"]
 tifffile = ["tifffile>=2024.8.30", "ome-types>=0.6.1", "pydantic>=2.8"]
+all = ["ome-writers[tensorstore,zarr,acquire-zarr,tifffile]"]
 
 [dependency-groups]
 # used for all tests
-test = ["pytest>=8.4.2", "pytest-cov>=7.0.0", "yaozarrs[io]>=0.0.1", "zarr>=3; python_version >= '3.11'"]
+test = [
+    "pytest>=8.4.2",
+    "pytest-cov>=7.0.0",
+    "yaozarrs[io]>=0.2.0",
+    "pytest-xdist>=3.8.0",
+    "useq-schema>=0.8.2",
+]
 # these mirror the extras above
 # but with additional dependencies for testing
 # these are the groups used on CI
-tensorstore = [{ include-group = 'test' }, "ome-writers[tensorstore]"]
+tensorstore = [
+    { include-group = 'test' },
+    "ome-writers[tensorstore]",
+    "tensorstore-stubs>=0.1.2",
+]
+zarr = [{ include-group = 'test' }, "ome-writers[zarr]"]
 acquire-zarr = [
     { include-group = 'test' },
     "ome-writers[acquire-zarr]",
-    "zarr>=3; python_version >= '3.11'",
+    "tensorstore>=0.1.78",       # just for read validation in tests
 ]
 tifffile = [{ include-group = 'test' }, "ome-writers[tifffile]"]
-pymmcore = [
-    { include-group = 'test' },
-    "pymmcore-plus>=0.15.0",
-    "ome-writers[tensorstore,acquire-zarr,tifffile]",
-]
+
 dev = [
-    { include-group = "pymmcore" },
+    { include-group = "test" },
+    { include-group = 'tensorstore' },
+    { include-group = 'zarr' },
+    { include-group = 'acquire-zarr' },
+    { include-group = 'tifffile' },
     "ipython>=8.37.0",
-    "mypy>=1.18.1",
     "pdbpp>=0.11.7 ; sys_platform != 'win32'",
     "pyright>=1.1.405",
     "rich>=14.1.0",
     "ruff>=0.13.0",
-    "tensorstore-stubs>=0.1.2",
-    "pre-commit>=4.1.0",
-    "pytest-xdist>=3.8.0",
+    "prek>=0.2.28",
+    "ty>=0.0.12",
+    "useq-schema>=0.8.2",
 ]
 
 [project.urls]
@@ -83,10 +99,10 @@ unsafe-fixes = true
 [tool.ruff.lint]
 pydocstyle = { convention = "numpy" }
 select = [
-    "E",    # style errors
-    "W",    # style warnings
-    "F",    # flakes
-    "D",    # pydocstyle
+    "E", # style errors
+    "W", # style warnings
+    "F", # flakes
+    # "D",    # pydocstyle
     "D417", # Missing argument descriptions in Docstrings
     "I",    # isort
     "UP",   # pyupgrade
@@ -124,6 +140,8 @@ pretty = true
 include = ["src"]
 pythonVersion = "3.10"
 enableExperimentalFeatures = true
+reportArgumentType = false         # tough with pydantic type casting.
+reportAttributeAccessIssue = false # tough with pydantic 
 
 # https://docs.pytest.org/
 [tool.pytest.ini_options]
@@ -139,7 +157,6 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "@overload",
     "except ImportError",
-    "\\.\\.\\.",
     "raise NotImplementedError()",
     "pass",
 ]
@@ -151,4 +168,11 @@ source = ["ome_writers"]
 ignore = [".pre-commit-config.yaml", ".ruff_cache/**/*", "tests/**/*"]
 
 [tool.typos.default]
-extend-ignore-identifiers-re = ["(?i)nd2?.*", "(?i)ome"]
+extend-ignore-identifiers-re = ["(?i)nd2?.*", "(?i)ome", "FOV"]
+
+[tool.ty.environment]
+python = "./.venv"
+
+[tool.ty.rules]
+invalid-argument-type = "ignore"
+unresolved-import = "ignore"

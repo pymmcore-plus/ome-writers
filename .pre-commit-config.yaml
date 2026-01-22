@@ -2,6 +2,8 @@ ci:
   autoupdate_schedule: monthly
   autofix_commit_msg: "style(pre-commit.ci): auto fixes [...]"
   autoupdate_commit_msg: "ci(pre-commit.ci): autoupdate"
+  skip:
+    - ty
 
 repos:
   - repo: https://github.com/abravalheri/validate-pyproject
@@ -26,16 +28,10 @@ repos:
       - id: ruff-check
       - id: ruff-format
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.19.1
+  - repo: local
     hooks:
-      - id: mypy
-        files: "^src/"
-        # you have to add the things you want to type check against here
-        additional_dependencies:
-          - numpy
-          - typing-extensions
-          - tensorstore-stubs
-          - tifffile
-          - ome-types
-          - acquire-zarr
+      - id: ty
+        name: ty check
+        entry: ty check --project .
+        language: python
+        pass_filenames: false

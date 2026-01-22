@@ -1,0 +1,36 @@
+# TODO
+
+- explicitly mention any/all magic
+- figure out magic defaults for chunking (i.e. if chunk_size is None, do we pick 1, or pick based on if it's in frame?)
+- fix storage_order api (name "ngff" is too specific, and has a TODO)
+- dtype string needs to be validated
+- compression needs to be passed through
+- document auto-backend selection, and refactor selection
+- consider root_path more.  what about remote?
+- test cases where you don't append all frames (partial datasets)
+- test cases where an exception happens during writing (is file left in consistent state?)
+- possibly add append(None) API to skip frames
+
+
+Missing Test Cases
+
+1. Error paths:
+- What happens if stream.append() is called after context exit?
+- What if frame shape doesn't match expected shape?
+- What if wrong dtype is passed?
+- What if append is called too many times (exceed count)?
+
+1. Edge cases:
+- Very large dimension counts (stress test)?
+
+1. Concurrency:
+- No tests for concurrent access (multiple streams?)
+- Thread safety of backends?
+
+1. Storage order permutations:
+- Only one storage_order test case (TZC→TCZ)
+- What about explicit list order?
+- What about spatial dimension permutations (XYZ vs ZYX)?
+
+1. Backend-specific:
+- No test for TiffBackend's update_metadata() feature

@@ -114,3 +114,4 @@ uv.lock
 example*.zarr
 example*.tiff
 example_*
+output.ome.zarr

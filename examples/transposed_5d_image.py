@@ -1,0 +1,48 @@
+"""Basic example of using ome_writers to write a single 5D image.
+
+Where storage format differs from acquisition order.
+"""
+
+import sys
+from typing import cast
+
+import numpy as np
+
+from ome_writers import AcquisitionSettings, Dimension, create_stream
+
+# "tiff", "zarr", "tensorstore", "auto"
+BACKEND = "auto" if len(sys.argv) < 2 else sys.argv[1]
+# --------
+
+suffix = ".ome.tiff" if BACKEND == "tiff" else ".ome.zarr"
+settings = AcquisitionSettings(
+    root_path=f"example_transposed_5d_image{suffix}",
+    dimensions=[
+        Dimension(name="t", count=2, chunk_size=1, type="time"),
+        Dimension(name="z", count=4, chunk_size=1, type="space", scale=5),
+        Dimension(name="c", count=3, chunk_size=1, type="channel"),
+        Dimension(name="y", count=256, chunk_size=64, type="space", scale=0.1),
+        Dimension(name="x", count=256, chunk_size=64, type="space", scale=0.1),
+    ],
+    dtype="uint16",
+    overwrite=True,
+    storage_order=["t", "c", "z", "y", "x"],  # aka, ome-zarr standard order
+    backend=BACKEND,
+)
+
+shape = cast("tuple[int, ...]", settings.shape)
+with create_stream(settings) as stream:
+    for i in range(np.prod(shape[:-2])):
+        frame = np.full(shape[-2:], i, dtype=settings.dtype)
+        stream.append(frame)
+
+
+if settings.format == "zarr":
+    # Validate the output
+    try:
+        import yaozarrs
+
+        yaozarrs.validate_zarr_store(settings.root_path)
+        print("✓ Zarr store is valid")
+    except ImportError:
+        print("⚠ yaozarrs not installed; skipping validation")
