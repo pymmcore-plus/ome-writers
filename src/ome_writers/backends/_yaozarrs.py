@@ -59,19 +59,6 @@ class YaozarrsBackend(ArrayBackend):
         Subclasses can override to do additional setup (e.g., create streams).
         """
 
-    @abstractmethod
-    def _get_writer(self) -> Literal["zarr", "tensorstore"] | Callable[..., Any]:
-        """Return the writer to use for array creation.
-
-        Subclasses can override to provide a custom CreateArrayFunc.
-        """
-
-    def _post_prepare(self, settings: AcquisitionSettings) -> None:
-        """Hook called after yaozarrs creates the structure, before metadata caching.
-
-        Subclasses can override to do additional setup (e.g., create streams).
-        """
-
     def prepare(self, settings: AcquisitionSettings, router: FrameRouter) -> None:
         """Initialize OME-Zarr storage structure."""
 

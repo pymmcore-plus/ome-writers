@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
     import numpy as np
 
-    from ome_writers._backend import ArrayBackend
+    from ome_writers.backends._backend import ArrayBackend
     from ome_writers.schema import AcquisitionSettings
 
 __all__ = ["OMEStream", "create_stream"]
