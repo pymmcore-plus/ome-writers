@@ -9,9 +9,9 @@ try:
 except PackageNotFoundError:  # pragma: no cover
     __version__ = "uninstalled"
 
-from ome_writers._stream import create_stream
-from ome_writers._util import dims_from_useq
-from ome_writers.schema import (
+from ._stream import create_stream
+from ._util import dims_from_useq
+from .schema import (
     AcquisitionSettings,
     Dimension,
     Plate,
