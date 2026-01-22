@@ -17,9 +17,13 @@ settings = AcquisitionSettings(
     dimensions=[
         Dimension(name="t", count=2, chunk_size=1, type="time"),
         Dimension(name="c", count=3, chunk_size=1, type="channel"),
-        Dimension(name="z", count=4, chunk_size=1, type="space", scale=5),
-        Dimension(name="y", count=256, chunk_size=64, type="space", scale=0.1),
-        Dimension(name="x", count=256, chunk_size=64, type="space", scale=0.1),
+        Dimension(name="z", count=4, chunk_size=1, type="space", scale=5, unit="µm"),
+        Dimension(
+            name="y", count=256, chunk_size=64, type="space", scale=0.1, unit="µm"
+        ),
+        Dimension(
+            name="x", count=256, chunk_size=64, type="space", scale=0.1, unit="µm"
+        ),
     ],
     dtype="uint16",
     overwrite=True,
@@ -42,3 +46,13 @@ if settings.format == "zarr":
         print("✓ Zarr store is valid")
     except ImportError:
         print("⚠ yaozarrs not installed; skipping validation")
+
+if settings.format == "tiff":
+    # Validate the output
+    try:
+        from ome_types import from_tiff
+
+        from_tiff(settings.root_path)
+        print("✓ TIFF file is valid")
+    except ImportError:
+        print("⚠ ome_types not installed; skipping validation")

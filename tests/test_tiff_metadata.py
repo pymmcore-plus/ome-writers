@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 try:
     import tifffile
-    from ome_types import from_xml
+    from ome_types import from_tiff, from_xml
 except ImportError:
     pytest.skip("tifffile or ome_types not installed", allow_module_level=True)
 
@@ -155,3 +155,38 @@ def test_update_metadata_with_plates(tmp_path: Path) -> None:
         with tifffile.TiffFile(str(pos_file)) as tif:
             ome_obj = from_xml(tif.ome_metadata)
             assert ome_obj.images[0].name == f"Well A0{pos_idx + 1}"
+
+
+def test_tiff_metadata_physical_sizes_and_acquisition_date(tmp_path: Path) -> None:
+    """Test that physical sizes and acquisition date are correctly written."""
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "test_metadata.ome.tiff"),
+        dimensions=[
+            Dimension(name="c", count=2, type="channel"),
+            Dimension(name="z", count=3, type="space", scale=1.0, unit="µm"),
+            Dimension(name="t", count=1, type="time"),
+            Dimension(name="y", count=64, type="space", scale=0.5, unit="µm"),
+            Dimension(name="x", count=64, type="space", scale=0.5, unit="µm"),
+        ],
+        dtype="uint16",
+        backend="tiff",
+    )
+
+    with create_stream(settings) as stream:
+        for _ in range(6):  # 2 channels * 3 z-slices
+            stream.append(np.random.randint(0, 1000, (64, 64), dtype=np.uint16))
+
+    # Read metadata using from_tiff (validates and parses)
+    ome_obj = from_tiff(str(tmp_path / "test_metadata.ome.tiff"))
+
+    # Verify physical sizes
+    pixels = ome_obj.images[0].pixels
+    assert pixels.physical_size_x == 0.5
+    assert pixels.physical_size_x_unit.value == "µm"
+    assert pixels.physical_size_y == 0.5
+    assert pixels.physical_size_y_unit.value == "µm"
+    assert pixels.physical_size_z == 1.0
+    assert pixels.physical_size_z_unit.value == "µm"
+
+    # Verify acquisition date is present
+    assert ome_obj.images[0].acquisition_date is not None

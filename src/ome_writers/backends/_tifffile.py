@@ -91,6 +91,8 @@ class TiffBackend(ArrayBackend):
         for p_idx, fname in enumerate(fnames):
             # Extract XML for this specific position (single-image OME)
             ome_xml = ome.OME(images=[all_images[p_idx]]).to_xml()
+            # Convert µ to HTML entity for ASCII compatibility
+            ome_xml = ome_xml.replace("µ", "&#x00B5;")
 
             self._file_paths[p_idx] = fname
             self._queues[p_idx] = q = Queue()
@@ -253,7 +255,8 @@ class TiffBackend(ArrayBackend):
             # Update the TIFF file's description tag
             try:
                 ome_xml = ome.OME(images=[image]).to_xml()
-                tifffile.tiffcomment(fname, comment=ome_xml.encode("ascii"))
+                ascii_xml = ome_xml.replace("µ", "&#x00B5;").encode("ascii")
+                tifffile.tiffcomment(fname, comment=ascii_xml)
             except Exception as e:  # pragma: no cover
                 warnings.warn(
                     f"Failed to update OME metadata in {fname}: {e}",
@@ -420,6 +423,8 @@ def _create_ome_image(
     Creates basic OME Image structure. The dimension order is determined
     by the storage dimensions order.
     """
+    from datetime import datetime, timezone
+
     # Build shape dictionary from dimensions
     shape_dict = {d.name.upper(): d.count or 1 for d in dims}
     size_t = shape_dict.get("T", 1)
@@ -432,28 +437,50 @@ def _create_ome_image(
         if order.value.startswith("".join(reversed(shape_dict.keys())))
     )
 
+    # Extract physical size info from dimensions
+    dims_by_name = {d.name.lower(): d for d in dims}
+    pixels_kwargs = {
+        "id": f"Pixels:{image_index}",
+        "dimension_order": dim_order,
+        "size_t": size_t,
+        "size_c": size_c,
+        "size_z": size_z,
+        "size_y": shape_dict.get("Y", 1),
+        "size_x": shape_dict.get("X", 1),
+        "type": dtype,
+        "big_endian": False,
+        "channels": [
+            # NB: samples_per_pixel=1 means grayscale
+            # Adjust as needed for multi-sample RGB images
+            ome.Channel(id=f"Channel:{image_index}:{i}", samples_per_pixel=1)
+            for i in range(size_c)
+        ],
+        "tiff_data_blocks": [ome.TiffData(plane_count=size_t * size_c * size_z)],
+    }
+
+    # Add physical sizes if available
+    for axis in ["x", "y", "z"]:
+        if (dim := dims_by_name.get(axis)) and dim.scale is not None:
+            pixels_kwargs[f"physical_size_{axis}"] = dim.scale
+            if dim.unit:
+                ome_unit = _map_unit_to_ome(dim.unit)
+                if ome_unit:
+                    pixels_kwargs[f"physical_size_{axis}_unit"] = ome_unit
+
     return ome.Image(
         id=f"Image:{image_index}",
-        pixels=ome.Pixels(
-            id=f"Pixels:{image_index}",
-            dimension_order=dim_order,
-            size_t=size_t,
-            size_c=size_c,
-            size_z=size_z,
-            size_y=shape_dict.get("Y", 1),
-            size_x=shape_dict.get("X", 1),
-            type=dtype,
-            big_endian=False,
-            channels=[
-                # NB: samples_per_pixel=1 means grayscale
-                # Adjust as needed for multi-sample RGB images
-                ome.Channel(id=f"Channel:{image_index}:{i}", samples_per_pixel=1)
-                for i in range(size_c)
-            ],
-            tiff_data_blocks=[ome.TiffData(plane_count=size_t * size_c * size_z)],
-        ),
+        acquisition_date=datetime.now(timezone.utc),
+        pixels=ome.Pixels(**pixels_kwargs),
         name=Path(filename).stem,
     )
+
+
+def _map_unit_to_ome(unit: str) -> ome.UnitsLength | None:
+    """Validate and return OME UnitsLength enum value."""
+    try:
+        return ome.UnitsLength(unit)
+    except ValueError:
+        return None
 
 
 def _create_position_specific_ome(position_idx: int, metadata: ome.OME) -> ome.OME:
