@@ -582,3 +582,162 @@ def _validate_array_zarr(
     )
 
     _validate_expected_frames(array0, expected_frames)
+
+
+# -------------------------------------------------------------------
+# Compression propagation tests
+# -------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("compression", ["none"])
+def test_tiff_compression_write(tmp_path: Path, compression: str) -> None:
+    """Test that TIFF files can be written with different compression settings.
+
+    Note: We only test 'none' compression by default because other compression
+    types (LZW, ZSTD, etc.) require the 'imagecodecs' package which may not
+    be installed in all environments.
+    """
+    try:
+        import tifffile
+    except ImportError:
+        pytest.skip("tifffile required for this test")
+
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "compressed.ome.tiff"),
+        dimensions=[
+            D(name="t", count=2, type="time"),
+            D(name="y", count=64, type="space"),
+            D(name="x", count=64, type="space"),
+        ],
+        dtype="uint16",
+        backend="tiff",
+        compression=compression,
+    )
+    frame_shape = (64, 64)
+
+    with create_stream(settings) as stream:
+        for f in range(2):
+            stream.append(np.full(frame_shape, f, dtype="uint16"))
+
+    # Verify the file was written and is readable
+    assert Path(settings.root_path).exists()
+    with tifffile.TiffFile(settings.root_path) as tif:
+        assert len(tif.pages) == 2
+
+
+def test_tiff_compression_lzw_requires_imagecodecs(tmp_path: Path) -> None:
+    """Test that LZW compression gracefully handles missing imagecodecs."""
+    try:
+        import tifffile
+        import imagecodecs  # noqa: F401
+    except ImportError:
+        pytest.skip("imagecodecs and tifffile required for this test")
+
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "compressed_lzw.ome.tiff"),
+        dimensions=[
+            D(name="t", count=2, type="time"),
+            D(name="y", count=64, type="space"),
+            D(name="x", count=64, type="space"),
+        ],
+        dtype="uint16",
+        backend="tiff",
+        compression="lzw",
+    )
+    frame_shape = (64, 64)
+
+    with create_stream(settings) as stream:
+        for f in range(2):
+            stream.append(np.full(frame_shape, f, dtype="uint16"))
+
+    # Verify the file was written and is readable
+    assert Path(settings.root_path).exists()
+    with tifffile.TiffFile(settings.root_path) as tif:
+        assert len(tif.pages) == 2
+        # Verify LZW compression was set
+        page_compression = tif.pages[0].compression
+        assert page_compression.name == "LZW"
+
+
+@pytest.mark.parametrize("compression", ["blosc-zstd", "blosc-lz4", "none"])
+def test_zarr_compression_write(tmp_path: Path, compression: str) -> None:
+    """Test that Zarr files can be written with different compression settings."""
+    try:
+        import zarr  # noqa: F401
+    except ImportError:
+        pytest.skip("zarr-python backend required for this test")
+
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "compressed.zarr"),
+        dimensions=[
+            D(name="t", count=2, type="time"),
+            D(name="y", count=64, type="space"),
+            D(name="x", count=64, type="space"),
+        ],
+        dtype="uint16",
+        backend="zarr",
+        compression=compression,
+    )
+    frame_shape = (64, 64)
+
+    try:
+        stream = create_stream(settings)
+    except ValueError as e:
+        if "not available" in str(e):
+            pytest.skip(str(e))
+        raise
+
+    with stream:
+        for f in range(2):
+            stream.append(np.full(frame_shape, f, dtype="uint16"))
+
+    # Verify the zarr was written and is readable
+    root = Path(settings.root_path)
+    assert root.exists()
+    group = yaozarrs.validate_zarr_store(root)
+    assert group is not None
+
+    # Check that data is correct
+    array0 = group["0"].to_zarr_python()
+    assert array0.shape == (2, 64, 64)
+    assert array0[0, 0, 0] == 0
+    assert array0[1, 0, 0] == 1
+
+
+@pytest.mark.parametrize("compression", ["blosc-zstd", "blosc-lz4", "none"])
+def test_acquire_zarr_compression_write(tmp_path: Path, compression: str) -> None:
+    """Test that acquire-zarr backend handles compression settings."""
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "compressed_az.zarr"),
+        dimensions=[
+            D(name="t", count=2, type="time"),
+            D(name="y", count=64, type="space"),
+            D(name="x", count=64, type="space"),
+        ],
+        dtype="uint16",
+        backend="acquire-zarr",
+        compression=compression,
+    )
+    frame_shape = (64, 64)
+
+    try:
+        stream = create_stream(settings)
+    except ValueError as e:
+        if "not available" in str(e):
+            pytest.skip(str(e))
+        raise
+
+    with stream:
+        for f in range(2):
+            stream.append(np.full(frame_shape, f, dtype="uint16"))
+
+    # Verify the zarr was written
+    root = Path(settings.root_path)
+    assert root.exists()
+
+    # Try to validate, but skip if missing dependencies
+    try:
+        group = yaozarrs.validate_zarr_store(root)
+        assert group is not None
+    except ImportError as e:
+        pytest.skip(f"Missing dependency for validation: {e}")

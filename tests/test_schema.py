@@ -12,6 +12,14 @@ from ome_writers.schema import (
     StandardAxis,
     dims_from_standard_axes,
 )
+from ome_writers.backends._tifffile import TiffBackend, VALID_TIFF_COMPRESSIONS
+from ome_writers.backends._zarr_python import ZarrBackend
+from ome_writers.backends._tensorstore import TensorstoreBackend
+from ome_writers.backends._yaozarrs import VALID_ZARR_COMPRESSIONS
+from ome_writers.backends._acquire_zarr import (
+    AcquireZarrBackend,
+    VALID_ACQUIRE_ZARR_COMPRESSIONS,
+)
 
 
 def test_schema_unique_dimension_names() -> None:
@@ -472,3 +480,203 @@ def test_storage_order_invalid_list() -> None:
             dtype="uint16",
             storage_order=["z", "t", "y", "x"],  # 'z' doesn't exist in index dims
         )
+
+
+# -------------------------------------------------------------------
+# Compression validation tests
+# -------------------------------------------------------------------
+
+
+def test_compression_field_documentation() -> None:
+    """Test that AcquisitionSettings.compression field is properly documented."""
+    settings = AcquisitionSettings(
+        root_path="test.zarr",
+        dimensions=[
+            Dimension(name="y", count=64, type="space"),
+            Dimension(name="x", count=64, type="space"),
+        ],
+        dtype="uint16",
+        compression="blosc-zstd",
+    )
+    assert settings.compression == "blosc-zstd"
+
+    # Test None (default)
+    settings_none = AcquisitionSettings(
+        root_path="test.zarr",
+        dimensions=[
+            Dimension(name="y", count=64, type="space"),
+            Dimension(name="x", count=64, type="space"),
+        ],
+        dtype="uint16",
+    )
+    assert settings_none.compression is None
+
+
+def test_tiff_backend_compression_validation() -> None:
+    """Test TiffBackend compression validation."""
+    backend = TiffBackend()
+
+    # Valid compressions should return False (not incompatible)
+    for compression in VALID_TIFF_COMPRESSIONS:
+        settings = AcquisitionSettings(
+            root_path="/tmp/test.ome.tiff",
+            dimensions=[
+                Dimension(name="y", count=64, type="space"),
+                Dimension(name="x", count=64, type="space"),
+            ],
+            dtype="uint16",
+            compression=compression,
+        )
+        result = backend.is_incompatible(settings)
+        assert result is False, f"Expected False for valid compression '{compression}'"
+
+    # Invalid compression should return error string
+    settings_invalid = AcquisitionSettings(
+        root_path="/tmp/test.ome.tiff",
+        dimensions=[
+            Dimension(name="y", count=64, type="space"),
+            Dimension(name="x", count=64, type="space"),
+        ],
+        dtype="uint16",
+        compression="invalid_compression",
+    )
+    result = backend.is_incompatible(settings_invalid)
+    assert isinstance(result, str)
+    assert "Invalid compression" in result
+    assert "invalid_compression" in result
+
+
+def test_tiff_backend_compression_case_insensitive() -> None:
+    """Test TiffBackend accepts compression in any case."""
+    backend = TiffBackend()
+    for compression in ["LZW", "Lzw", "lzw"]:
+        settings = AcquisitionSettings(
+            root_path="/tmp/test.ome.tiff",
+            dimensions=[
+                Dimension(name="y", count=64, type="space"),
+                Dimension(name="x", count=64, type="space"),
+            ],
+            dtype="uint16",
+            compression=compression,
+        )
+        assert backend.is_incompatible(settings) is False
+
+
+def test_zarr_backend_compression_validation() -> None:
+    """Test ZarrBackend compression validation."""
+    backend = ZarrBackend()
+
+    # Valid compressions should return False (not incompatible)
+    for compression in VALID_ZARR_COMPRESSIONS:
+        settings = AcquisitionSettings(
+            root_path="/tmp/test.zarr",
+            dimensions=[
+                Dimension(name="y", count=64, type="space"),
+                Dimension(name="x", count=64, type="space"),
+            ],
+            dtype="uint16",
+            compression=compression,
+        )
+        result = backend.is_incompatible(settings)
+        assert result is False, f"Expected False for valid compression '{compression}'"
+
+    # Invalid compression should return error string
+    settings_invalid = AcquisitionSettings(
+        root_path="/tmp/test.zarr",
+        dimensions=[
+            Dimension(name="y", count=64, type="space"),
+            Dimension(name="x", count=64, type="space"),
+        ],
+        dtype="uint16",
+        compression="lzw",  # Valid for TIFF but not for Zarr
+    )
+    result = backend.is_incompatible(settings_invalid)
+    assert isinstance(result, str)
+    assert "Invalid compression" in result
+
+
+def test_tensorstore_backend_compression_validation() -> None:
+    """Test TensorstoreBackend compression validation."""
+    backend = TensorstoreBackend()
+
+    # Valid compression
+    settings = AcquisitionSettings(
+        root_path="/tmp/test.zarr",
+        dimensions=[
+            Dimension(name="y", count=64, type="space"),
+            Dimension(name="x", count=64, type="space"),
+        ],
+        dtype="uint16",
+        compression="blosc-lz4",
+    )
+    assert backend.is_incompatible(settings) is False
+
+    # Invalid compression
+    settings_invalid = settings.model_copy(update={"compression": "jpeg"})
+    result = backend.is_incompatible(settings_invalid)
+    assert isinstance(result, str)
+    assert "Invalid compression" in result
+
+
+def test_acquire_zarr_backend_compression_validation() -> None:
+    """Test AcquireZarrBackend has limited compression options."""
+    backend = AcquireZarrBackend()
+
+    # Valid compressions for acquire-zarr
+    for compression in VALID_ACQUIRE_ZARR_COMPRESSIONS:
+        settings = AcquisitionSettings(
+            root_path="/tmp/test.zarr",
+            dimensions=[
+                Dimension(name="t", count=5, type="time"),
+                Dimension(name="y", count=64, type="space"),
+                Dimension(name="x", count=64, type="space"),
+            ],
+            dtype="uint16",
+            compression=compression,
+        )
+        result = backend.is_incompatible(settings)
+        assert result is False, f"Expected False for valid compression '{compression}'"
+
+    # zstd is valid for zarr but NOT for acquire-zarr
+    settings_zstd = AcquisitionSettings(
+        root_path="/tmp/test.zarr",
+        dimensions=[
+            Dimension(name="t", count=5, type="time"),
+            Dimension(name="y", count=64, type="space"),
+            Dimension(name="x", count=64, type="space"),
+        ],
+        dtype="uint16",
+        compression="zstd",
+    )
+    result = backend.is_incompatible(settings_zstd)
+    assert isinstance(result, str)
+    assert "Invalid compression" in result
+
+
+def test_compression_none_is_valid() -> None:
+    """Test that compression=None is valid for all backends."""
+    settings_tiff = AcquisitionSettings(
+        root_path="/tmp/test.ome.tiff",
+        dimensions=[
+            Dimension(name="y", count=64, type="space"),
+            Dimension(name="x", count=64, type="space"),
+        ],
+        dtype="uint16",
+        compression=None,
+    )
+    settings_zarr = settings_tiff.model_copy(update={"root_path": "/tmp/test.zarr"})
+    settings_zarr_3d = AcquisitionSettings(
+        root_path="/tmp/test.zarr",
+        dimensions=[
+            Dimension(name="t", count=5, type="time"),
+            Dimension(name="y", count=64, type="space"),
+            Dimension(name="x", count=64, type="space"),
+        ],
+        dtype="uint16",
+        compression=None,
+    )
+
+    assert TiffBackend().is_incompatible(settings_tiff) is False
+    assert ZarrBackend().is_incompatible(settings_zarr) is False
+    assert TensorstoreBackend().is_incompatible(settings_zarr) is False
+    assert AcquireZarrBackend().is_incompatible(settings_zarr_3d) is False

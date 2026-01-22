@@ -4,7 +4,7 @@
 - figure out magic defaults for chunking (i.e. if chunk_size is None, do we pick 1, or pick based on if it's in frame?)
 - fix storage_order api (name "ngff" is too specific, and has a TODO)
 - dtype string needs to be validated
-- compression needs to be passed through
+- ~~compression needs to be passed through~~ (DONE: #40)
 - document auto-backend selection, and refactor selection
 - consider root_path more.  what about remote?
 - test cases where you don't append all frames (partial datasets)

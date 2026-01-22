@@ -26,6 +26,9 @@ class TensorstoreBackend(YaozarrsBackend):
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         if not settings.root_path.endswith(".zarr"):  # pragma: no cover
             return "Root path must end with .zarr for TensorstoreBackend."
+        # Validate compression setting
+        if err := self._validate_compression(settings.compression):
+            return err
         return False
 
     def _write(self, array: Any, index: tuple[int, ...], frame: np.ndarray) -> None:

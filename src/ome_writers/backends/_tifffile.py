@@ -23,11 +23,27 @@ if TYPE_CHECKING:
 try:
     import ome_types.model as ome
     import tifffile
+    from tifffile import COMPRESSION
 except ImportError as e:
     raise ImportError(
         f"{__name__} requires tifffile and ome-types: "
         "`pip install ome-writers[tifffile]`."
     ) from e
+
+# Mapping of user-facing compression names to tifffile COMPRESSION enum values
+# See schema.py for TiffCompression TypeAlias
+TIFF_COMPRESSION_MAP: dict[str, int] = {
+    "lzw": COMPRESSION.LZW,
+    "deflate": COMPRESSION.ADOBE_DEFLATE,
+    "zstd": COMPRESSION.ZSTD,
+    "jpeg": COMPRESSION.JPEG,
+    "packbits": COMPRESSION.PACKBITS,
+    "lzma": COMPRESSION.LZMA,
+    "webp": COMPRESSION.WEBP,
+    "png": COMPRESSION.PNG,
+    "none": COMPRESSION.NONE,
+}
+VALID_TIFF_COMPRESSIONS = frozenset(TIFF_COMPRESSION_MAP.keys())
 
 
 class TiffBackend(ArrayBackend):
@@ -55,6 +71,14 @@ class TiffBackend(ArrayBackend):
                 "Root path must end with .tif, .tiff, .ome.tif, or .ome.tiff "
                 "for TiffBackend."
             )
+        # Validate compression setting
+        if settings.compression is not None:
+            compression = settings.compression.lower()
+            if compression not in VALID_TIFF_COMPRESSIONS:
+                return (
+                    f"Invalid compression '{settings.compression}' for TiffBackend. "
+                    f"Valid options are: {', '.join(sorted(VALID_TIFF_COMPRESSIONS))}."
+                )
         return False
 
     def prepare(self, settings: AcquisitionSettings, router: FrameRouter) -> None:
@@ -71,6 +95,11 @@ class TiffBackend(ArrayBackend):
 
         # Check if any dimension is unbounded
         has_unbounded = any(d.count is None for d in storage_dims)
+
+        # Resolve compression setting to tifffile code
+        compression: int | None = None
+        if settings.compression is not None:
+            compression = TIFF_COMPRESSION_MAP.get(settings.compression.lower())
 
         # Prepare file paths
         fnames = self._prepare_files(root, len(positions), settings.overwrite)
@@ -101,6 +130,7 @@ class TiffBackend(ArrayBackend):
                 image_queue=q,
                 ome_xml=ome_xml,
                 has_unbounded=has_unbounded,
+                compression=compression,
             )
             thread.start()
 
@@ -349,6 +379,7 @@ class WriterThread(threading.Thread):
         ome_xml: str = "",
         pixelsize: float = 1.0,
         has_unbounded: bool = False,
+        compression: int | None = None,
     ) -> None:
         super().__init__(daemon=True, name=f"TiffWriterThread-{next(_thread_counter)}")
         self._path = path
@@ -358,6 +389,7 @@ class WriterThread(threading.Thread):
         self._ome_xml = ome_xml
         self._res = 1 / pixelsize
         self._has_unbounded = has_unbounded
+        self._compression = compression
         self.frames_written = 0  # Track actual frames written for unbounded dims
 
     def run(self) -> None:
@@ -385,6 +417,7 @@ class WriterThread(threading.Thread):
                             resolutionunit=tifffile.RESUNIT.MICROMETER,
                             photometric=tifffile.PHOTOMETRIC.MINISBLACK,
                             description=self._ome_xml if i == 0 else None,
+                            compression=self._compression,
                         )
                 else:
                     # For bounded dimensions, use iterator with shape
@@ -396,6 +429,7 @@ class WriterThread(threading.Thread):
                         resolutionunit=tifffile.RESUNIT.MICROMETER,
                         photometric=tifffile.PHOTOMETRIC.MINISBLACK,
                         description=self._ome_xml,
+                        compression=self._compression,
                     )
         except Exception as e:  # pragma: no cover
             # Suppress over-eager tifffile exception for incomplete writes

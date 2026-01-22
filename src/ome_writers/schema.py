@@ -27,6 +27,16 @@ BackendName: TypeAlias = Literal["acquire-zarr", "tensorstore", "zarr", "tiff"]
 DimensionType: TypeAlias = Literal["space", "time", "channel", "other"]
 StandardAxisKey: TypeAlias = Literal["x", "y", "z", "c", "t", "p"]
 
+# Compression type aliases for different backends
+# TIFF compression uses tifffile's COMPRESSION enum names (lowercase)
+TiffCompression: TypeAlias = Literal[
+    "lzw", "deflate", "zstd", "jpeg", "packbits", "lzma", "webp", "png", "none"
+]
+# Zarr compression uses yaozarrs/zarr-python codec names
+ZarrCompression: TypeAlias = Literal["blosc-zstd", "blosc-lz4", "zstd", "none"]
+# acquire-zarr has a subset of Zarr compression options
+AcquireZarrCompression: TypeAlias = Literal["blosc-zstd", "blosc-lz4", "none"]
+
 
 class _BaseModel(BaseModel):
     """Base model with frozen config."""
@@ -391,7 +401,14 @@ class AcquisitionSettings(_BaseModel):
         description="Data type of the pixel data to be written, e.g. 'uint8', "
         "'uint16', 'float32', etc. Must be a valid numpy DTypeLike string.",
     )
-    compression: str | None = None
+    compression: str | None = Field(
+        default=None,
+        description="Compression algorithm for the storage backend. If None, backend "
+        "defaults are used (typically 'blosc-zstd' for Zarr, uncompressed for TIFF). "
+        "For TIFF format: 'lzw', 'deflate', 'zstd', 'jpeg', 'packbits', 'lzma', 'webp', "
+        "'png', or 'none'. For Zarr format: 'blosc-zstd', 'blosc-lz4', 'zstd', or 'none'. "
+        "Note: acquire-zarr backend only supports 'blosc-zstd', 'blosc-lz4', and 'none'.",
+    )
     # "ome" means "spec-compliant" storage order.
     # It MAY depend on the output format (e.g. OME-Zarr vs OME-TIFF) and
     # version, and backends may have different restrictions.

@@ -18,6 +18,23 @@ if TYPE_CHECKING:
 
     from ome_writers.schema import AcquisitionSettings, Dimension
 
+# Valid compression options for acquire-zarr (subset of yaozarrs options)
+# See schema.py for AcquireZarrCompression TypeAlias
+VALID_ACQUIRE_ZARR_COMPRESSIONS = frozenset(["blosc-zstd", "blosc-lz4", "none"])
+
+# Mapping of compression names to acquire-zarr CompressionSettings
+ACQUIRE_ZARR_COMPRESSION_MAP = {
+    "blosc-zstd": az.CompressionSettings(
+        compressor=az.Compressor.BLOSC1, codec=az.CompressionCodec.BLOSC_ZSTD
+    ),
+    "blosc-lz4": az.CompressionSettings(
+        compressor=az.Compressor.BLOSC1, codec=az.CompressionCodec.BLOSC_LZ4
+    ),
+    "none": az.CompressionSettings(
+        compressor=az.Compressor.NONE, codec=az.CompressionCodec.NONE
+    ),
+}
+
 
 class AcquireZarrBackend(YaozarrsBackend):
     """OME-Zarr backend using yaozarrs for metadata and acquire-zarr for writes.
@@ -31,10 +48,14 @@ class AcquireZarrBackend(YaozarrsBackend):
     - Root path must end with .zarr
     """
 
+    # acquire-zarr supports a subset of yaozarrs compression options
+    _valid_compressions: frozenset[str] = VALID_ACQUIRE_ZARR_COMPRESSIONS
+
     def __init__(self) -> None:
         super().__init__()
         self._stream: az.ZarrStream | None = None
         self._az_pos_keys: list[str] = []
+        self._compression_settings: az.CompressionSettings | None = None
         # hack to deal with the fact that acquire-zarr overwrites zarr.json files
         # with empty group metadata, even when using output_key="..."
         # see https://github.com/acquire-project/acquire-zarr/issues/186
@@ -53,6 +74,9 @@ class AcquireZarrBackend(YaozarrsBackend):
                 "AcquireZarrBackend requires at least 3 dimensions. "
                 "2D images are not currently supported."
             )
+        # Validate compression setting
+        if err := self._validate_compression(settings.compression):
+            return err
         return False
 
     def _get_writer(self) -> Callable[..., _ArrayPlaceholder]:
@@ -80,6 +104,10 @@ class AcquireZarrBackend(YaozarrsBackend):
         for zarr_json in self._root.rglob("zarr.json"):
             self._zarr_json_backup[zarr_json] = zarr_json.read_bytes()
 
+        # Resolve compression to acquire-zarr settings
+        compression_name = self._resolve_compression(settings.compression)
+        self._compression_settings = ACQUIRE_ZARR_COMPRESSION_MAP.get(compression_name)
+
         # Create acquire-zarr stream
         ndims = len(settings.array_storage_dimensions)
         az_dims = [
@@ -94,6 +122,7 @@ class AcquireZarrBackend(YaozarrsBackend):
                         output_key=key,
                         dimensions=az_dims,
                         data_type=settings.dtype,
+                        compression=self._compression_settings,
                     )
                     for key in self._az_pos_keys
                 ],

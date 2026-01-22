@@ -21,6 +21,10 @@ except ImportError as e:
         "`pip install yaozarrs[write-zarr]`."
     ) from e
 
+# Valid compression names for yaozarrs (matches CompressionName type in yaozarrs)
+# See schema.py for ZarrCompression TypeAlias
+VALID_ZARR_COMPRESSIONS = frozenset(["blosc-zstd", "blosc-lz4", "zstd", "none"])
+
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -53,6 +57,9 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
     yaozarrs writer to use (e.g., "zarr", "tensorstore").
     """
 
+    # Valid compression options for this backend (subclasses can override)
+    _valid_compressions: frozenset[str] = VALID_ZARR_COMPRESSIONS
+
     def __init__(self) -> None:
         self._arrays: list[_AT] = []
         self._image_group_paths: list[str] = []  # Parallel to _arrays, for metadata
@@ -74,6 +81,30 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         Subclasses can override to do additional setup (e.g., create streams).
         """
 
+    def _validate_compression(self, compression: str | None) -> str | Literal[False]:
+        """Validate compression setting for this backend.
+
+        Returns False if valid, or an error message string if invalid.
+        """
+        if compression is None:
+            return False
+        comp_lower = compression.lower()
+        if comp_lower not in self._valid_compressions:
+            return (
+                f"Invalid compression '{compression}' for this backend. "
+                f"Valid options are: {', '.join(sorted(self._valid_compressions))}."
+            )
+        return False
+
+    def _resolve_compression(self, compression: str | None) -> str:
+        """Resolve compression setting to a valid yaozarrs compression name.
+
+        Subclasses can override this to customize compression resolution.
+        """
+        if compression is None:
+            return "blosc-zstd"  # yaozarrs default
+        return compression.lower()
+
     def prepare(self, settings: AcquisitionSettings, router: FrameRouter) -> None:
         """Initialize OME-Zarr storage structure."""
 
@@ -90,6 +121,9 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         # (the underlying assumption is that we currently don't support inhomogeneous
         # shapes/dtypes across positions)
         image = _build_yaozarrs_image_model(storage_dims)
+
+        # Resolve compression setting (use backend default if None)
+        compression = self._resolve_compression(settings.compression)
 
         # Get writer from hook (subclasses can override)
         writer = self._get_writer()
@@ -110,6 +144,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
                 chunks=chunks,
                 shards=shards,
                 writer=writer,
+                compression=compression,
             )
 
             for (row, col), pos_list in well_positions.items():
@@ -137,6 +172,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
                 chunks=chunks,
                 shards=shards,
                 writer=writer,
+                compression=compression,
             )
             self._image_group_paths = ["."]
             self._arrays = [all_arrays["0"]]  # ty: ignore[invalid-assignment]
@@ -149,6 +185,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
                 chunks=chunks,
                 shards=shards,
                 writer=writer,
+                compression=compression,
             )
             for pos in positions:
                 builder.add_series(pos.name, image, [(shape, dtype)])
