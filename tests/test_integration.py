@@ -6,8 +6,10 @@ import importlib.util
 import math
 import re
 import time
+import warnings
 from pathlib import Path
 from typing import TypeAlias, cast
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -20,6 +22,7 @@ from ome_writers import (
     Plate,
     Position,
     PositionDimension,
+    _memory,
     create_stream,
 )
 from ome_writers._router import FrameRouter
@@ -129,6 +132,17 @@ CASES = [
         ],
         dtype="uint16",
     ),
+    # Unbounded with chunk buffering (tests resize with buffering enabled)
+    AcquisitionSettings(
+        root_path="tmp",
+        dimensions=[
+            D(name="t", count=None, chunk_size=1, type="time"),  # unbounded
+            D(name="z", count=8, chunk_size=4, type="space"),  # chunked
+            D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
+            D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
+        ],
+        dtype="uint16",
+    ),
     # Chunk buffering: 3D with chunk_size=4
     AcquisitionSettings(
         root_path="tmp",
@@ -151,7 +165,8 @@ CASES = [
         ],
         dtype="uint16",
     ),
-    # Chunk buffering with partial chunks at finalize (z=17 with chunk_size=4)
+    # Chunk buffering with partial chunks at finalize
+    # (z=17 with non-divisible chunk_size=4)
     AcquisitionSettings(
         root_path="tmp",
         dimensions=[
@@ -342,6 +357,56 @@ def test_overwrite_safety(tmp_path: Path, any_backend: str) -> None:
     assert new_stamp > root_mtime, (
         "Directory modification time not updated on overwrite"
     )
+
+
+def test_chunk_memory_warning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that large chunk buffering triggers memory warning with low memory."""
+    # Mock available memory to be low (2 GB)
+    # Config uses 64 chunks x 33.6MB = 2.15GB
+    # With 80% threshold: 2GB * 0.8 = 1.6GB < 2.15GB → should warn
+    mock_get_memory = Mock(return_value=2_000_000_000)  # 2 GB
+    monkeypatch.setattr(_memory, "_get_available_memory", mock_get_memory)
+    monkeypatch.setattr(_memory.sys, "platform", "win32")  # Pretend we're on Windows
+
+    with pytest.warns(UserWarning, match="Chunk buffering may use"):
+        AcquisitionSettings(
+            root_path=str(tmp_path / "output.ome.zarr"),
+            dimensions=[
+                D(name="z", count=8, chunk_size=4, type="space"),
+                D(name="c", count=64, chunk_size=1, type="channel"),
+                D(name="y", count=2048, chunk_size=64, type="space"),
+                D(name="x", count=2048, chunk_size=64, type="space"),
+            ],
+            dtype="uint16",
+            backend="zarr",
+        )
+
+
+def test_chunk_memory_no_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that chunk buffering doesn't warn with sufficient memory."""
+    # Mock available memory to be high (100 GB)
+    # Config uses 64 chunks x 33.6MB = 2.15GB
+    # With 80% threshold: 100GB * 0.8 = 80GB > 2.15GB → no warning
+    mock_get_memory = Mock(return_value=100_000_000_000)  # 100 GB
+    monkeypatch.setattr(_memory, "_get_available_memory", mock_get_memory)
+    monkeypatch.setattr(_memory.sys, "platform", "win32")  # Pretend we're on Windows
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # Turn warnings into errors
+        # Should not raise
+        AcquisitionSettings(
+            root_path=str(tmp_path / "output.ome.zarr"),
+            dimensions=[
+                D(name="z", count=8, chunk_size=4, type="space"),
+                D(name="c", count=64, chunk_size=1, type="channel"),
+                D(name="y", count=2048, chunk_size=64, type="space"),
+                D(name="x", count=2048, chunk_size=64, type="space"),
+            ],
+            dtype="uint16",
+            backend="zarr",
+        )
 
 
 # ---------------------- Helpers for validation ----------------------

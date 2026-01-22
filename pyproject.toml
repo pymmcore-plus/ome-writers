@@ -83,6 +83,7 @@ dev = [
     "prek>=0.2.28",
     "ty>=0.0.12",
     "useq-schema>=0.8.2",
+    "pytest-xdist>=3.8.0",
 ]
 
 [project.urls]
@@ -154,10 +155,12 @@ reportAttributeAccessIssue = false # tough with pydantic
 [tool.pytest.ini_options]
 minversion = "7.0"
 testpaths = ["tests"]
-filterwarnings = ["error", "ignore:Failing to pass a value:DeprecationWarning"]
-markers = [
-    "benchmark: marks tests as benchmarks (deselect with '-m \"not benchmark\"')",
+filterwarnings = [
+    "error",
+    "ignore:Failing to pass a value:DeprecationWarning",
+    "ignore:Benchmarks are automatically disabled because xdist plugin is active:",
 ]
+
 
 # https://coverage.readthedocs.io/
 [tool.coverage.report]

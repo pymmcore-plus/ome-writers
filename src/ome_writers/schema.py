@@ -18,6 +18,8 @@ from pydantic import (
     model_validator,
 )
 
+from ome_writers._memory import warn_if_high_memory_usage
+
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
@@ -552,6 +554,12 @@ class AcquisitionSettings(_BaseModel):
                     "Plate mode requires a PositionDimension in dimensions."
                 )
 
+        return self
+
+    @model_validator(mode="after")
+    def _warn_chunk_buffer_memory(self) -> AcquisitionSettings:
+        """Warn if chunk buffering may use excessive memory (Windows only)."""
+        warn_if_high_memory_usage(self)
         return self
 
 

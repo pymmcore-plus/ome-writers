@@ -10,12 +10,6 @@ import pytest
 
 from ome_writers import AcquisitionSettings, Dimension, create_stream
 
-if all(
-    x not in {"--codspeed", "--benchmark-only", "tests/test_bench.py"} for x in sys.argv
-):
-    pytest.skip("use --benchmark to run benchmark", allow_module_level=True)
-
-
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -23,7 +17,13 @@ if TYPE_CHECKING:
 
     from ome_writers import OMEStream
 
-pytestmark = pytest.mark.benchmark  # Apply to all tests in this module
+if all(
+    x not in {"--codspeed", "--benchmark-only", "tests/test_bench.py"} for x in sys.argv
+):
+    pytest.skip("use --benchmark to run benchmark", allow_module_level=True)
+
+
+pytestmark = pytest.mark.benchmark
 np.random.seed(0)  # For reproducible benchmarks
 
 D = Dimension

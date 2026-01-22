@@ -122,7 +122,7 @@ class YaozarrsBackend(ArrayBackend):
                 overwrite=settings.overwrite,
                 chunks=chunks,
                 shards=shards,
-                writer=writer,  # type: ignore[arg-type]
+                writer=writer,
             )
             self._image_group_paths = ["."]
             self._arrays = [all_arrays["0"]]
@@ -176,9 +176,6 @@ class YaozarrsBackend(ArrayBackend):
                 )
                 for _ in range(len(positions))
             ]
-
-            # Check for potentially high memory usage and warn
-            self._check_buffer_memory_warning(chunk_shape, frame_shape, dtype)
         else:
             self._chunk_buffers = None
 
@@ -321,8 +318,16 @@ class YaozarrsBackend(ArrayBackend):
 
     def finalize(self) -> None:
         """Flush and release resources."""
-        if not self._finalized:
-            # Flush any remaining partial chunks
+        if not self._finalized:  # pragma: no cover
+            # Flush any remaining partial chunks.
+            # NOTE:
+            # This is defensive code that should never execute in normal operation.
+            # With sequential frame writing via OMEStream.append(), chunks are either:
+            # (1) fully complete and auto-flushed immediately via _write_with_buffering
+            # (2) never started (no frames written yet). This code only executes if
+            # frames are written out-of-order (e.g., direct backend.write() calls) or if
+            # there's a bug in chunk completion logic. It ensures no buffered data is
+            # silently lost during finalization.
             if self._use_chunk_buffering and self._chunk_buffers is not None:
                 for pos_idx, buffer in enumerate(self._chunk_buffers):
                     if self._arrays:  # Arrays may have been cleared already
@@ -364,26 +369,6 @@ class YaozarrsBackend(ArrayBackend):
             if dim.chunk_size is not None and dim.chunk_size > 1:
                 return True
         return False
-
-    def _check_buffer_memory_warning(
-        self,
-        chunk_shape: tuple[int, ...],
-        frame_shape: tuple[int, int],
-        dtype: str,
-    ) -> None:
-        """Warn if chunk buffering may require high memory."""
-        import numpy as np
-
-        bytes_per_chunk = (
-            int(np.prod(chunk_shape + frame_shape)) * np.dtype(dtype).itemsize
-        )
-
-        if bytes_per_chunk > 50_000_000:  # > 50 MB per chunk
-            warnings.warn(
-                f"Chunk buffering will use ~{bytes_per_chunk / 1e6:.1f} MB per active "
-                f"chunk. Consider adjusting chunk sizes to reduce memory usage.",
-                stacklevel=3,
-            )
 
 
 # -----------------------------------------------------------------------------
