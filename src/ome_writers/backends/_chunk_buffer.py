@@ -11,14 +11,23 @@ import numpy as np
 class ChunkBuffer:
     """Manages in-memory chunk buffers for a single position's array.
 
-    Supports multiple active chunks to handle all acquisition patterns,
-    including transposed storage order and non-contiguous chunked dimensions.
+    Most backends will immediately flush incoming frames to storage.  However, if the
+    user has requested chunking along any non-frame dimensions (e.g. 3D ZYX chunks),
+    then frames must be buffered until a full chunk is available for writing. Otherwise,
+    backends like zarr-python and tensorstore will be forced to read-modify-write chunks
+    on every frame write, which is very inefficient.
+
+    This class serves to buffer incoming frames until a full chunk is available, at
+    which point the chunk can be flushed to storage in one operation.  It supports
+    multiple active chunks to handle all acquisition patterns, including transposed
+    storage order and non-contiguous chunked dimensions.
 
     Parameters
     ----------
     index_shape : tuple[int | None, ...]
         Shape of index dimensions (excluding frame dimensions).
-        None values indicate unlimited dimensions.
+        None values indicate unbounded dimensions (in practice, only the first
+        dimension can be unbounded).
     chunk_shape : tuple[int, ...]
         Chunk sizes for each index dimension.
     frame_shape : tuple[int, int]
