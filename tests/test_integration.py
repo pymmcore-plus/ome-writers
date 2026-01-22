@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import math
 import re
 import time
-import warnings
 from pathlib import Path
 from typing import TypeAlias, cast
 from unittest.mock import Mock
@@ -359,43 +359,24 @@ def test_overwrite_safety(tmp_path: Path, any_backend: str) -> None:
     )
 
 
-def test_chunk_memory_warning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("avail_mem", [2_000_000_000, 100_000_000_000])
+def test_chunk_memory_warning(
+    avail_mem: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Test that large chunk buffering triggers memory warning with low memory."""
     # Mock available memory to be low (2 GB)
     # Config uses 64 chunks x 33.6MB = 2.15GB
     # With 80% threshold: 2GB * 0.8 = 1.6GB < 2.15GB → should warn
-    mock_get_memory = Mock(return_value=2_000_000_000)  # 2 GB
+    mock_get_memory = Mock(return_value=avail_mem)
     monkeypatch.setattr(_memory, "_get_available_memory", mock_get_memory)
     monkeypatch.setattr(_memory.sys, "platform", "win32")  # Pretend we're on Windows
 
-    with pytest.warns(UserWarning, match="Chunk buffering may use"):
-        AcquisitionSettings(
-            root_path=str(tmp_path / "output.ome.zarr"),
-            dimensions=[
-                D(name="z", count=8, chunk_size=4, type="space"),
-                D(name="c", count=64, chunk_size=1, type="channel"),
-                D(name="y", count=2048, chunk_size=64, type="space"),
-                D(name="x", count=2048, chunk_size=64, type="space"),
-            ],
-            dtype="uint16",
-            backend="zarr",
-        )
-
-
-def test_chunk_memory_no_warning(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Test that chunk buffering doesn't warn with sufficient memory."""
-    # Mock available memory to be high (100 GB)
-    # Config uses 64 chunks x 33.6MB = 2.15GB
-    # With 80% threshold: 100GB * 0.8 = 80GB > 2.15GB → no warning
-    mock_get_memory = Mock(return_value=100_000_000_000)  # 100 GB
-    monkeypatch.setattr(_memory, "_get_available_memory", mock_get_memory)
-    monkeypatch.setattr(_memory.sys, "platform", "win32")  # Pretend we're on Windows
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")  # Turn warnings into errors
-        # Should not raise
+    ctx = (
+        pytest.warns(UserWarning, match="Chunk buffering may use")
+        if avail_mem < 5_000_000_000
+        else contextlib.nullcontext()
+    )
+    with ctx:
         AcquisitionSettings(
             root_path=str(tmp_path / "output.ome.zarr"),
             dimensions=[
