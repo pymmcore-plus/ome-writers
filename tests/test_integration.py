@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import math
 import re
 import time
 from pathlib import Path
 from typing import TypeAlias, cast
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -20,6 +22,7 @@ from ome_writers import (
     Plate,
     Position,
     PositionDimension,
+    _memory,
     create_stream,
 )
 from ome_writers._router import FrameRouter
@@ -129,6 +132,61 @@ CASES = [
         ],
         dtype="uint16",
     ),
+    # Unbounded with chunk buffering (tests resize with buffering enabled)
+    AcquisitionSettings(
+        root_path="tmp",
+        dimensions=[
+            D(name="t", count=None, chunk_size=1, type="time"),  # unbounded
+            D(name="z", count=8, chunk_size=4, type="space"),  # chunked
+            D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
+            D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
+        ],
+        dtype="uint16",
+    ),
+    # Chunk buffering: 3D with chunk_size=4
+    AcquisitionSettings(
+        root_path="tmp",
+        dimensions=[
+            D(name="z", count=16, chunk_size=4, type="space"),
+            D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
+            D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
+        ],
+        dtype="uint16",
+    ),
+    # Chunk buffering with transposition (storage_order != acquisition)
+    AcquisitionSettings(
+        root_path="tmp",
+        dimensions=[
+            D(name="t", count=2, type="time"),
+            D(name="z", count=8, chunk_size=4, type="space"),
+            D(name="c", count=4, chunk_size=2, type="channel"),
+            D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
+            D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
+        ],
+        dtype="uint16",
+    ),
+    # Chunk buffering with partial chunks at finalize
+    # (z=17 with non-divisible chunk_size=4)
+    AcquisitionSettings(
+        root_path="tmp",
+        dimensions=[
+            D(name="z", count=17, chunk_size=4, type="space"),
+            D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
+            D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
+        ],
+        dtype="uint16",
+    ),
+    # Chunk buffering with multiple positions
+    AcquisitionSettings(
+        root_path="tmp",
+        dimensions=[
+            PositionDimension(positions=["Pos0", "Pos1"]),
+            D(name="z", count=8, chunk_size=4, type="space"),
+            D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
+            D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
+        ],
+        dtype="uint16",
+    ),
 ]
 
 
@@ -156,7 +214,7 @@ def _build_expected_frames(
     """
     router = FrameRouter(case)
     expected_frames: FrameExpectation = {}
-    for frame_num, ((pos_idx, _), storage_idx) in enumerate(router):
+    for frame_num, (pos_idx, storage_idx) in enumerate(router):
         if frame_num >= num_frames:
             break
         if pos_idx not in expected_frames:
@@ -299,6 +357,37 @@ def test_overwrite_safety(tmp_path: Path, any_backend: str) -> None:
     assert new_stamp > root_mtime, (
         "Directory modification time not updated on overwrite"
     )
+
+
+@pytest.mark.parametrize("avail_mem", [2_000_000_000, 100_000_000_000])
+def test_chunk_memory_warning(
+    avail_mem: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that large chunk buffering triggers memory warning with low memory."""
+    # Mock available memory to be low (2 GB)
+    # Config uses 64 chunks x 33.6MB = 2.15GB
+    # With 80% threshold: 2GB * 0.8 = 1.6GB < 2.15GB → should warn
+    mock_get_memory = Mock(return_value=avail_mem)
+    monkeypatch.setattr(_memory, "_get_available_memory", mock_get_memory)
+    monkeypatch.setattr(_memory.sys, "platform", "win32")  # Pretend we're on Windows
+
+    ctx = (
+        pytest.warns(UserWarning, match="Chunk buffering may use")
+        if avail_mem < 5_000_000_000
+        else contextlib.nullcontext()
+    )
+    with ctx:
+        AcquisitionSettings(
+            root_path=str(tmp_path / "output.ome.zarr"),
+            dimensions=[
+                D(name="z", count=8, chunk_size=4, type="space"),
+                D(name="c", count=64, chunk_size=1, type="channel"),
+                D(name="y", count=2048, chunk_size=64, type="space"),
+                D(name="x", count=2048, chunk_size=64, type="space"),
+            ],
+            dtype="uint16",
+            backend="zarr",
+        )
 
 
 # ---------------------- Helpers for validation ----------------------

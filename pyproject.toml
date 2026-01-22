@@ -124,7 +124,8 @@ ignore = [
     "ANN401", # allow the use of Any type
     "D401",   # First line should be in imperative mood (remove to opt in)
 ]
-
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*.py" = ["D", "S"]
@@ -161,7 +162,6 @@ filterwarnings = [
     "ignore:Valgrind instrument ignores rounds:UserWarning",
 ]
 
-
 # https://coverage.readthedocs.io/
 [tool.coverage.report]
 show_missing = true
@@ -189,3 +189,4 @@ python = "./.venv"
 [tool.ty.rules]
 invalid-argument-type = "ignore"
 unresolved-import = "ignore"
+possibly-missing-attribute = "ignore"

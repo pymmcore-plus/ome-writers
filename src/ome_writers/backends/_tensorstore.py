@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal
 
-from ._yaozarrs import YaozarrsBackend
+from ome_writers.backends._yaozarrs import YaozarrsBackend
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     import numpy as np
+    from tensorstore import Future
 
     from ome_writers.schema import AcquisitionSettings
 
@@ -20,7 +21,7 @@ class TensorstoreBackend(YaozarrsBackend):
 
     def __init__(self) -> None:
         super().__init__()
-        self._futures: list[Any] = []
+        self._futures: list[Future] = []
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         if not settings.root_path.endswith(".zarr"):  # pragma: no cover

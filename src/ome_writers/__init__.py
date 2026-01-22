@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
+from typing import TYPE_CHECKING
 
 try:
     __version__ = version("ome-writers")
 except PackageNotFoundError:  # pragma: no cover
     __version__ = "uninstalled"
 
-from ._stream import create_stream
-from ._util import dims_from_useq
-from .schema import (
+if TYPE_CHECKING:
+    # may be imported at top level, but only for type checking
+    from ome_writers._stream import OMEStream as OMEStream
+
+from ome_writers._stream import create_stream
+from ome_writers._util import dims_from_useq
+from ome_writers.schema import (
     AcquisitionSettings,
     Dimension,
     Plate,
