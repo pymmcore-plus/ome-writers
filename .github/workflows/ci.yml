@@ -33,30 +33,23 @@ jobs:
       - run: uv run pyright
 
   benchmarks:
-    # while windows performance is usually what we care about,
-    # codspeed currently only supports ubuntu runners
-    runs-on: ubuntu-latest
+    # using bare-metal runner for more consistent benchmark results
+    # this has time limit
+    runs-on: codspeed-macro
     steps:
       - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/setup-python@v6
         with:
-          enable-cache: true
           python-version: "3.13"
 
       - name: Install the project
-        run: uv sync --no-dev --group test-codspeed
+        run: pip install . --group test-codspeed
 
       - name: Run walltime benchmarks
         uses: CodSpeedHQ/action@v4
         with:
           mode: walltime
-          run: uv run --no-sync pytest tests/test_bench.py --codspeed -v
-
-      - name: Run memory benchmarks
-        uses: CodSpeedHQ/action@v4
-        with:
-          mode: memory
-          run: uv run --no-sync pytest tests/test_bench.py --codspeed -v
+          run: pytest tests/test_bench.py --codspeed -v
 
   test:
     name: ${{ matrix.platform }} py${{ matrix.python-version }} ${{ matrix.group }} ${{ matrix.resolution }}
