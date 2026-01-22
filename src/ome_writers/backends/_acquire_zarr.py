@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 import acquire_zarr as az
 
 from ome_writers.backends._yaozarrs import YaozarrsBackend
+from ome_writers.schema import Dimension
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -58,15 +59,7 @@ class AcquireZarrBackend(YaozarrsBackend):
         """Return custom writer that collects array configs as placeholders."""
 
         def custom_writer(
-            path: Path,
-            shape: tuple[int, ...],
-            dtype: Any,
-            chunks: tuple[int, ...],
-            *,
-            shards: tuple[int, ...] | None,
-            overwrite: bool,
-            compression: Any,
-            dimension_names: list[str] | None,
+            path: Path, shape: tuple[int, ...], *_: Any, **__: Any
         ) -> _ArrayPlaceholder:
             # as_posix is critical on windows to ensure forward slashes
             # which is what acquire-zarr expects
