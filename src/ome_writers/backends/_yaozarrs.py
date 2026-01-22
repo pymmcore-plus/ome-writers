@@ -251,7 +251,11 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
             slice(start, start + size)
             for start, size in zip(start_index, chunk_data.shape, strict=False)
         )
-        array[slices] = chunk_data
+        self._write(array, slices, chunk_data)
+
+    def _write(self, array: _AT, index: tuple[int, ...], frame: np.ndarray) -> None:
+        """Write frame to array at specified index."""
+        array[index] = frame
 
     def get_metadata(self) -> dict[str, dict]:
         """Get metadata from all array groups in the zarr hierarchy.
@@ -342,10 +346,6 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
                     for storage_start, chunk_data in buffer.flush_all_partial():
                         self._write_chunk(array, storage_start, chunk_data)
         self._chunk_buffers = None
-
-    def _write(self, array: _AT, index: tuple[int, ...], frame: np.ndarray) -> None:
-        """Write frame to array at specified index."""
-        array[index] = frame
 
     def _resize(self, array: _AT, new_shape: Sequence[int]) -> None:
         """Resize array to new shape."""

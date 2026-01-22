@@ -32,16 +32,6 @@ class TensorstoreBackend(YaozarrsBackend):
         """Write frame to array at specified index, async for tensorstore."""
         self._futures.append(array[index].write(frame))
 
-    def _write_chunk(
-        self, array: Any, start_index: tuple[int, ...], chunk_data: np.ndarray
-    ) -> None:
-        """Write chunk asynchronously with future tracking."""
-        slices = tuple(
-            slice(start, start + size)
-            for start, size in zip(start_index, chunk_data.shape, strict=False)
-        )
-        self._write(array, slices, chunk_data)
-
     def _resize(self, array: Any, new_shape: Sequence[int]) -> None:
         """Resize array to new shape, using exclusive_max for tensorstore."""
         array.resize(exclusive_max=new_shape).result()
