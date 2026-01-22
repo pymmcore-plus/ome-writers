@@ -3,14 +3,6 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from ome_writers.backends._acquire_zarr import (
-    VALID_ACQUIRE_ZARR_COMPRESSIONS,
-    AcquireZarrBackend,
-)
-from ome_writers.backends._tensorstore import TensorstoreBackend
-from ome_writers.backends._tifffile import VALID_TIFF_COMPRESSIONS, TiffBackend
-from ome_writers.backends._yaozarrs import VALID_ZARR_COMPRESSIONS
-from ome_writers.backends._zarr_python import ZarrBackend
 from ome_writers.schema import (
     AcquisitionSettings,
     Dimension,
@@ -523,6 +515,11 @@ def test_compression_field_documentation() -> None:
 
 def test_tiff_backend_compression_validation() -> None:
     """Test TiffBackend compression validation."""
+    try:
+        from ome_writers.backends._tifffile import VALID_TIFF_COMPRESSIONS, TiffBackend
+    except ImportError:
+        pytest.skip("tifffile backend not available")
+
     backend = TiffBackend()
 
     # Valid compressions should return False (not incompatible)
@@ -557,6 +554,11 @@ def test_tiff_backend_compression_validation() -> None:
 
 def test_tiff_backend_compression_case_insensitive() -> None:
     """Test TiffBackend accepts compression in any case."""
+    try:
+        from ome_writers.backends._tifffile import TiffBackend
+    except ImportError:
+        pytest.skip("tifffile backend not available")
+
     backend = TiffBackend()
     for compression in ["LZW", "Lzw", "lzw"]:
         settings = AcquisitionSettings(
@@ -573,6 +575,12 @@ def test_tiff_backend_compression_case_insensitive() -> None:
 
 def test_zarr_backend_compression_validation() -> None:
     """Test ZarrBackend compression validation."""
+    try:
+        from ome_writers.backends._yaozarrs import VALID_ZARR_COMPRESSIONS
+        from ome_writers.backends._zarr_python import ZarrBackend
+    except ImportError:
+        pytest.skip("zarr backend not available")
+
     backend = ZarrBackend()
 
     # Valid compressions should return False (not incompatible)
@@ -606,6 +614,11 @@ def test_zarr_backend_compression_validation() -> None:
 
 def test_tensorstore_backend_compression_validation() -> None:
     """Test TensorstoreBackend compression validation."""
+    try:
+        from ome_writers.backends._tensorstore import TensorstoreBackend
+    except ImportError:
+        pytest.skip("tensorstore backend not available")
+
     backend = TensorstoreBackend()
 
     # Valid compression
@@ -629,6 +642,14 @@ def test_tensorstore_backend_compression_validation() -> None:
 
 def test_acquire_zarr_backend_compression_validation() -> None:
     """Test AcquireZarrBackend has limited compression options."""
+    try:
+        from ome_writers.backends._acquire_zarr import (
+            VALID_ACQUIRE_ZARR_COMPRESSIONS,
+            AcquireZarrBackend,
+        )
+    except ImportError:
+        pytest.skip("acquire-zarr backend not available")
+
     backend = AcquireZarrBackend()
 
     # Valid compressions for acquire-zarr
@@ -685,7 +706,31 @@ def test_compression_none_is_valid() -> None:
         compression=None,
     )
 
-    assert TiffBackend().is_incompatible(settings_tiff) is False
-    assert ZarrBackend().is_incompatible(settings_zarr) is False
-    assert TensorstoreBackend().is_incompatible(settings_zarr) is False
-    assert AcquireZarrBackend().is_incompatible(settings_zarr_3d) is False
+    # Test each backend individually, skipping if not available
+    try:
+        from ome_writers.backends._tifffile import TiffBackend
+
+        assert TiffBackend().is_incompatible(settings_tiff) is False
+    except ImportError:
+        pass
+
+    try:
+        from ome_writers.backends._zarr_python import ZarrBackend
+
+        assert ZarrBackend().is_incompatible(settings_zarr) is False
+    except ImportError:
+        pass
+
+    try:
+        from ome_writers.backends._tensorstore import TensorstoreBackend
+
+        assert TensorstoreBackend().is_incompatible(settings_zarr) is False
+    except ImportError:
+        pass
+
+    try:
+        from ome_writers.backends._acquire_zarr import AcquireZarrBackend
+
+        assert AcquireZarrBackend().is_incompatible(settings_zarr_3d) is False
+    except ImportError:
+        pass
