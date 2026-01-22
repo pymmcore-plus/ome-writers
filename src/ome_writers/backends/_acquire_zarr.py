@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import acquire_zarr as az
 
-from ._yaozarrs import YaozarrsBackend
+from ome_writers.backends._yaozarrs import YaozarrsBackend
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
