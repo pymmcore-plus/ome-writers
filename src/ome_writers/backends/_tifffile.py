@@ -9,7 +9,7 @@ from pathlib import Path
 from queue import Queue
 from typing import TYPE_CHECKING, Literal
 
-from ome_writers._backend import ArrayBackend
+from ome_writers.backends._backend import ArrayBackend
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
