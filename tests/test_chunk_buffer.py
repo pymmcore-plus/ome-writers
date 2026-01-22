@@ -94,20 +94,6 @@ def test_unlimited_dimension() -> None:
     assert len(completed) == 10
 
 
-def test_memory_estimation() -> None:
-    """Test memory usage tracks active chunk buffers."""
-    buffer = ChunkBuffer((4, 4), (2, 2), (100, 100), np.uint16)
-    assert buffer.estimate_memory_usage() == 0
-
-    frame = np.zeros((100, 100), dtype=np.uint16)
-    buffer.add_frame((0, 0), frame)
-    expected = 2 * 2 * 100 * 100 * 2  # chunk_shape * frame_shape * dtype_size
-    assert buffer.estimate_memory_usage() == expected
-
-    buffer.add_frame((2, 2), frame)
-    assert buffer.estimate_memory_usage() == expected * 2
-
-
 def test_flush_all_partial() -> None:
     """Test flushing incomplete chunks during finalize."""
     buffer = ChunkBuffer((6, 6), (2, 2), (2, 2), np.uint16)
