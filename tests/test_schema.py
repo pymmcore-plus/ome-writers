@@ -319,7 +319,7 @@ def test_non_xy_dimension_type_none_warning() -> None:
             ],
             dtype="uint16",
         )
-        assert [d.type for d in settings.dimensions] == ["space", "space"]  # ty: ignore
+        assert [d.type for d in settings.dimensions] == ["space", "space"]
 
 
 def test_tiff_backend_format() -> None:

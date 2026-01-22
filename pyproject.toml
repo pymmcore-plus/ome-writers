@@ -189,3 +189,4 @@ python = "./.venv"
 [tool.ty.rules]
 invalid-argument-type = "ignore"
 unresolved-import = "ignore"
+possibly-missing-attribute = "ignore"
