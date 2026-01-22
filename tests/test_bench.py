@@ -35,13 +35,14 @@ np.random.seed(0)  # For reproducible benchmarks
 D = Dimension
 
 # Benchmark cases: subset of integration test cases focused on common patterns
+# Optimized for CI speed while preserving chunk crossing and async queue behaviors
 BENCHMARK_CASES = [
     pytest.param(
         AcquisitionSettings(
             root_path="tmp",
             dimensions=[
-                D(name="y", count=4096, chunk_size=128, type="space"),
-                D(name="x", count=4096, chunk_size=128, type="space"),
+                D(name="y", count=2048, chunk_size=64, type="space"),
+                D(name="x", count=2048, chunk_size=64, type="space"),
             ],
             dtype="uint16",
         ),
@@ -51,9 +52,9 @@ BENCHMARK_CASES = [
         AcquisitionSettings(
             root_path="tmp",
             dimensions=[
-                D(name="t", count=500, type="time"),
-                D(name="y", count=256, chunk_size=256, type="space"),
-                D(name="x", count=256, chunk_size=256, type="space"),
+                D(name="t", count=200, chunk_size=1, type="time"),
+                D(name="y", count=128, chunk_size=128, type="space"),
+                D(name="x", count=128, chunk_size=128, type="space"),
             ],
             dtype="uint16",
         ),
@@ -63,9 +64,9 @@ BENCHMARK_CASES = [
         AcquisitionSettings(
             root_path="tmp",
             dimensions=[
-                D(name="z", count=128, chunk_size=16, type="space"),
-                D(name="y", count=1024, chunk_size=256, type="space"),
-                D(name="x", count=1024, chunk_size=256, type="space"),
+                D(name="z", count=64, chunk_size=16, type="space"),
+                D(name="y", count=512, chunk_size=128, type="space"),
+                D(name="x", count=512, chunk_size=128, type="space"),
             ],
             dtype="uint16",
         ),
@@ -75,15 +76,15 @@ BENCHMARK_CASES = [
         AcquisitionSettings(
             root_path="tmp",
             dimensions=[
-                D(name="t", count=10, chunk_size=1, type="time"),
+                D(name="t", count=5, chunk_size=1, type="time"),
                 D(name="c", count=2, chunk_size=1, type="channel"),
-                D(name="z", count=5, chunk_size=1, type="space"),
-                D(name="y", count=1024, chunk_size=128, type="space"),
-                D(name="x", count=1024, chunk_size=128, type="space"),
+                D(name="z", count=3, chunk_size=1, type="space"),
+                D(name="y", count=256, chunk_size=128, type="space"),
+                D(name="x", count=256, chunk_size=128, type="space"),
             ],
             dtype="uint16",
         ),
-        id="t10_c2_z5_xy1024",
+        id="t5_c2_z3_xy256",
     ),
 ]
 
