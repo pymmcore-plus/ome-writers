@@ -116,6 +116,10 @@ def test_bench_append(
     tmp_path: Path,
 ) -> None:
     """Benchmark append() loop performance with pre-generated data."""
+    if len(case.array_dimensions) < 3 and backend == "acquire-zarr":
+        pytest.skip("acquire-zarr requires at least 3 array dimensions")
+        return
+
     benchmark.group = _name_case(case)
     settings = case.model_copy(
         update={
