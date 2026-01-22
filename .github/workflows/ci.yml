@@ -52,12 +52,6 @@ jobs:
           mode: walltime
           run: uv run --no-sync pytest tests/test_bench.py --codspeed -v
 
-      - name: Run simulated CPI benchmarks
-        uses: CodSpeedHQ/action@v4
-        with:
-          mode: simulation
-          run: uv run --no-sync pytest tests/test_bench.py --codspeed -v
-
       - name: Run memory benchmarks
         uses: CodSpeedHQ/action@v4
         with:
