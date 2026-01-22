@@ -22,10 +22,10 @@ def warn_if_high_memory_usage(settings: AcquisitionSettings) -> None:
 
     # we only estimate memory on windows for now
     if sys.platform != "win32":
-        return None
+        return None  # pragma: no cover
 
     if (available_memory := _get_available_memory()) is None:
-        return None
+        return None  # pragma: no cover
 
     max_chunks = _max_chunks(settings)
     bytes_per_chunk = _bytes_per_chunk(settings)
@@ -81,7 +81,7 @@ def _max_chunks(settings: AcquisitionSettings) -> int:
             (i for i, d in enumerate(index_dims) if d.name == stor_dim.name), None
         )
         if acq_idx is None:
-            continue
+            continue  # pragma: no cover
         chunks_from_faster = 1
         for faster_acq_dim in index_dims[acq_idx + 1 :]:
             if faster_acq_dim.count and faster_acq_dim.name in storage_pos:

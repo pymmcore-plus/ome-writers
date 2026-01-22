@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
     import numpy as np
 
-    from ome_writers._router import FrameRouter, PositionInfo
+    from ome_writers._router import FrameRouter
     from ome_writers.schema import AcquisitionSettings, Dimension, Plate, Position
 
 try:
@@ -63,8 +63,7 @@ class YaozarrsBackend(ArrayBackend):
         """Initialize OME-Zarr storage structure."""
 
         self._finalized = False
-        root = Path(settings.root_path).expanduser().resolve()
-        self._root = root
+        self._root = root = Path(settings.root_path).expanduser().resolve()
         positions = settings.positions
 
         # Build storage metadata
@@ -181,7 +180,7 @@ class YaozarrsBackend(ArrayBackend):
 
     def write(
         self,
-        position_info: PositionInfo,
+        position_index: int,
         index: tuple[int, ...],
         frame: np.ndarray,
     ) -> None:
@@ -191,8 +190,7 @@ class YaozarrsBackend(ArrayBackend):
         if not self._arrays:  # pragma: no cover
             raise RuntimeError("Backend not prepared. Call prepare() first.")
 
-        pos_idx = position_info[0]
-        array = self._arrays[pos_idx]
+        array = self._arrays[position_index]
 
         # Resize if needed (index may be shorter than shape due to spatial dims)
         new_shape = list(array.shape)
@@ -203,11 +201,11 @@ class YaozarrsBackend(ArrayBackend):
             self._resize(array, new_shape)
             # Update buffer shape if using buffering
             if self._use_chunk_buffering and self._chunk_buffers is not None:
-                self._chunk_buffers[pos_idx].index_shape = new_shape[:-2]
+                self._chunk_buffers[position_index].index_shape = new_shape[:-2]
 
         # Route to buffered or direct write
         if self._use_chunk_buffering:
-            self._write_with_buffering(pos_idx, array, index, frame)
+            self._write_with_buffering(position_index, array, index, frame)
         else:
             self._write(array, index, frame)
 

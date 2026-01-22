@@ -53,8 +53,8 @@ class OMEStream:
             If all frames have been written (for finite dimensions only).
             For unlimited dimensions, never raises StopIteration.
         """
-        pos_info, idx = next(self._iterator)
-        self._backend.write(pos_info, idx, frame)
+        pos_idx, idx = next(self._iterator)
+        self._backend.write(pos_idx, idx, frame)
 
     def get_metadata(self) -> Any:
         """Retrieve metadata from the backend.  Meaning is format-dependent."""

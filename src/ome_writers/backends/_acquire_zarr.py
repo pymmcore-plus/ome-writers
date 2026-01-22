@@ -15,7 +15,6 @@ if TYPE_CHECKING:
 
     import numpy as np
 
-    from ome_writers._router import PositionInfo
     from ome_writers.schema import AcquisitionSettings, Dimension
 
 
@@ -112,7 +111,7 @@ class AcquireZarrBackend(YaozarrsBackend):
 
     def write(
         self,
-        position_info: PositionInfo,
+        position_index: int,
         index: tuple[int, ...],
         frame: np.ndarray,
     ) -> None:
@@ -120,7 +119,7 @@ class AcquireZarrBackend(YaozarrsBackend):
         if self._stream is None:  # pragma: no cover
             raise RuntimeError("Backend not prepared.")
 
-        output_key = self._az_pos_keys[position_info[0]]
+        output_key = self._az_pos_keys[position_index]
         self._stream.append(frame, key=output_key)
 
     def finalize(self) -> None:

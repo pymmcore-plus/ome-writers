@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
     import numpy as np
 
-    from ome_writers._router import FrameRouter, PositionInfo
+    from ome_writers._router import FrameRouter
     from ome_writers.schema import AcquisitionSettings, Dimension
 
 
@@ -106,7 +106,7 @@ class TiffBackend(ArrayBackend):
 
     def write(
         self,
-        position_info: PositionInfo,
+        position_index: int,
         index: tuple[int, ...],
         frame: np.ndarray,
     ) -> None:
@@ -119,8 +119,7 @@ class TiffBackend(ArrayBackend):
         if not self._threads:  # pragma: no cover
             raise RuntimeError("Backend not prepared. Call prepare() first.")
 
-        position_idx = position_info[0]
-        self._queues[position_idx].put(frame)
+        self._queues[position_index].put(frame)
 
     def finalize(self) -> None:
         """Flush and close all TIFF writers."""

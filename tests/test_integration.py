@@ -214,7 +214,7 @@ def _build_expected_frames(
     """
     router = FrameRouter(case)
     expected_frames: FrameExpectation = {}
-    for frame_num, ((pos_idx, _), storage_idx) in enumerate(router):
+    for frame_num, (pos_idx, storage_idx) in enumerate(router):
         if frame_num >= num_frames:
             break
         if pos_idx not in expected_frames:

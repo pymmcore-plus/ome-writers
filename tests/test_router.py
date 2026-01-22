@@ -122,7 +122,7 @@ def test_router_iteration(
     )
     router = FrameRouter(settings)
     # Extract (pos_name, idx) for comparison with expected
-    results = [(pos.name, idx) for (_, pos), idx in router]
+    results = [(settings.positions[pos_idx].name, idx) for pos_idx, idx in router]
     assert results == expected
 
 
@@ -139,7 +139,10 @@ def test_router_storage_order(
         dtype="uint16",
         storage_order=storage_order,
     )
-    results = [(pos.name, idx) for (_, pos), idx in FrameRouter(settings)]
+    results = [
+        (settings.positions[pos_idx].name, idx)
+        for pos_idx, idx in FrameRouter(settings)
+    ]
     assert results == expected
 
 
@@ -171,8 +174,8 @@ def test_router_unlimited_dimension() -> None:
 
     # Iterate manually, collecting first N frames
     results = []
-    for i, (pos_info, idx) in enumerate(router):
-        results.append((pos_info[1].name, idx))
+    for i, (pos_idx, idx) in enumerate(router):
+        results.append((settings.positions[pos_idx].name, idx))
         if i >= 9:  # Stop after 10 frames (5 timepoints x 2 channels)
             break
 
@@ -208,8 +211,8 @@ def test_router_unlimited_with_positions() -> None:
 
     # Get first 6 frames
     results = []
-    for i, (pos_info, idx) in enumerate(router):
-        results.append((pos_info[1].name, idx))
+    for i, (pos_idx, idx) in enumerate(router):
+        results.append((settings.positions[pos_idx].name, idx))
         if i >= 5:
             break
 
@@ -249,7 +252,9 @@ def test_plate_acquisition_patterns() -> None:
         dimensions=dims_from_standard_axes({"p": wells, "t": 3, "y": 64, "x": 64}),
         dtype="uint16",
     )
-    burst_results = [(pos.name, idx) for (_, pos), idx in FrameRouter(burst)]
+    burst_results = [
+        (burst.positions[pos_idx].name, idx) for pos_idx, idx in FrameRouter(burst)
+    ]
     assert burst_results == [
         ("A1", (0,)),
         ("A1", (1,)),
@@ -269,7 +274,10 @@ def test_plate_acquisition_patterns() -> None:
         dimensions=dims_from_standard_axes({"t": 3, "p": wells, "y": 64, "x": 64}),
         dtype="uint16",
     )
-    rr_results = [(pos.name, idx) for (_, pos), idx in FrameRouter(roundrobin)]
+    rr_results = [
+        (roundrobin.positions[pos_idx].name, idx)
+        for pos_idx, idx in FrameRouter(roundrobin)
+    ]
     assert rr_results == [
         ("A1", (0,)),
         ("B1", (0,)),

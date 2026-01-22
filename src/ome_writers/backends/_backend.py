@@ -38,9 +38,9 @@ Example Usage
 ...     raise ValueError(backend.compatibility_error(settings))
 >>>
 >>> backend.prepare(settings, router)
->>> for pos_info, idx in router:
+>>> for pos_idx, idx in router:
 ...     frame = get_next_frame()
-...     backend.write(pos_info, idx, frame)
+...     backend.write(pos_idx, idx, frame)
 >>> backend.finalize()
 """
 
@@ -54,7 +54,7 @@ if TYPE_CHECKING:
 
     import numpy as np
 
-    from ome_writers._router import FrameRouter, PositionInfo
+    from ome_writers._router import FrameRouter
     from ome_writers.schema import AcquisitionSettings
 
 
@@ -120,7 +120,7 @@ class ArrayBackend(ABC):
     @abstractmethod
     def write(
         self,
-        position_info: PositionInfo,
+        position_index: int,
         index: tuple[int, ...],
         frame: np.ndarray,
     ) -> None:
@@ -128,10 +128,8 @@ class ArrayBackend(ABC):
 
         Parameters
         ----------
-        position_info
-            Tuple of (position_index, Position) identifying which position to
-            write to. The index provides unique identity for array lookup, while
-            the Position object contains metadata (name, row, column).
+        position_index
+            Integer identifying which position array to write to.
         index
             N-dimensional index in storage order (excludes Y/X spatial dims).
             Sequential backends may ignore this parameter.
