@@ -95,7 +95,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from .schema import AcquisitionSettings, Position
+from ome_writers.schema import AcquisitionSettings, Position
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

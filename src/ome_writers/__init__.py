@@ -14,9 +14,9 @@ if TYPE_CHECKING:
     # may be imported at top level, but only for type checking
     from ome_writers._stream import OMEStream as OMEStream
 
-from ._stream import create_stream
-from ._util import dims_from_useq
-from .schema import (
+from ome_writers._stream import create_stream
+from ome_writers._util import dims_from_useq
+from ome_writers.schema import (
     AcquisitionSettings,
     Dimension,
     Plate,

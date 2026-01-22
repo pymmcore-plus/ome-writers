@@ -23,7 +23,6 @@ when settings don't match capabilities. For example:
 
 Example Usage
 -------------
->>> from ome_writers.backend import ArrayBackend
 >>> from ome_writers.schema_pydantic import AcquisitionSettings, dims_from_standard_axes
 >>>
 >>> settings = AcquisitionSettings(

@@ -498,13 +498,8 @@ def _validate_array_zarr(
 # ---------------------- Chunk Buffering Tests ----------------------
 
 
-@pytest.mark.parametrize("backend", ["zarr", "tensorstore"])
-def test_chunked_write_correctness(backend: str, tmp_path: Path) -> None:
+def test_chunked_write_correctness(zarr_backend: str, tmp_path: Path) -> None:
     """Verify chunk buffering produces correct output."""
-    # Skip if backend not available
-    if backend == "tensorstore" and importlib.util.find_spec("tensorstore") is None:
-        pytest.skip("tensorstore not available")
-
     # 3D chunking case: z=16 with chunk_size=4
     case = AcquisitionSettings(
         root_path=str(tmp_path / "chunked.ome.zarr"),
@@ -514,7 +509,7 @@ def test_chunked_write_correctness(backend: str, tmp_path: Path) -> None:
             D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
         ],
         dtype="uint16",
-        backend=backend,
+        backend=zarr_backend,
     )
 
     frame_shape = (64, 64)
@@ -531,11 +526,8 @@ def test_chunked_write_correctness(backend: str, tmp_path: Path) -> None:
     _assert_valid_ome_zarr(case, case.array_storage_dimensions, expected_frames)
 
 
-@pytest.mark.parametrize("backend", ["zarr", "tensorstore"])
-def test_chunked_write_with_transposition(backend: str, tmp_path: Path) -> None:
+def test_chunked_write_with_transposition(zarr_backend: str, tmp_path: Path) -> None:
     """Test buffering with storage_order != acquisition."""
-    if backend == "tensorstore" and importlib.util.find_spec("tensorstore") is None:
-        pytest.skip("tensorstore not available")
 
     # Use non-standard dimension order (C before Z) with chunking on both
     case = AcquisitionSettings(
@@ -548,7 +540,7 @@ def test_chunked_write_with_transposition(backend: str, tmp_path: Path) -> None:
             D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
         ],
         dtype="uint16",
-        backend=backend,
+        backend=zarr_backend,
     )
 
     frame_shape = (64, 64)
@@ -565,7 +557,7 @@ def test_chunked_write_with_transposition(backend: str, tmp_path: Path) -> None:
     _assert_valid_ome_zarr(case, case.array_storage_dimensions, expected_frames)
 
 
-def test_partial_chunks_at_finalize(tmp_path: Path) -> None:
+def test_partial_chunks_at_finalize(tmp_path: Path, zarr_backend: str) -> None:
     """Test that incomplete chunks flush correctly."""
     # z=17 with chunk_size=4 -> last chunk has only 1 frame
     case = AcquisitionSettings(
@@ -576,7 +568,7 @@ def test_partial_chunks_at_finalize(tmp_path: Path) -> None:
             D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
         ],
         dtype="uint16",
-        backend="zarr",
+        backend=zarr_backend,
     )
 
     frame_shape = (64, 64)
@@ -593,7 +585,7 @@ def test_partial_chunks_at_finalize(tmp_path: Path) -> None:
     _assert_valid_ome_zarr(case, case.array_storage_dimensions, expected_frames)
 
 
-def test_no_buffering_when_chunk_size_one(tmp_path: Path) -> None:
+def test_no_buffering_when_chunk_size_one(tmp_path: Path, zarr_backend: str) -> None:
     """Verify no buffering when all chunk_size=1."""
     case = AcquisitionSettings(
         root_path=str(tmp_path / "no_buffering.ome.zarr"),
@@ -604,7 +596,7 @@ def test_no_buffering_when_chunk_size_one(tmp_path: Path) -> None:
             D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
         ],
         dtype="uint16",
-        backend="zarr",
+        backend=zarr_backend,
     )
 
     frame_shape = (64, 64)
@@ -621,12 +613,8 @@ def test_no_buffering_when_chunk_size_one(tmp_path: Path) -> None:
     _assert_valid_ome_zarr(case, case.array_storage_dimensions, expected_frames)
 
 
-@pytest.mark.parametrize("backend", ["zarr", "tensorstore"])
-def test_buffering_with_multiposition(backend: str, tmp_path: Path) -> None:
+def test_buffering_with_multiposition(zarr_backend: str, tmp_path: Path) -> None:
     """Test chunk buffering with multiple positions."""
-    if backend == "tensorstore" and importlib.util.find_spec("tensorstore") is None:
-        pytest.skip("tensorstore not available")
-
     case = AcquisitionSettings(
         root_path=str(tmp_path / "multipos_chunked.ome.zarr"),
         dimensions=[
@@ -636,7 +624,7 @@ def test_buffering_with_multiposition(backend: str, tmp_path: Path) -> None:
             D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
         ],
         dtype="uint16",
-        backend=backend,
+        backend=zarr_backend,
     )
 
     frame_shape = (64, 64)
