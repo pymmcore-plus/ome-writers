@@ -36,6 +36,15 @@ class ChunkBuffer:
         Data type for the array.
     """
 
+    __slots__ = (
+        "_active_chunks",
+        "_filled_count",
+        "chunk_shape",
+        "dtype",
+        "frame_shape",
+        "index_shape",
+    )
+
     def __init__(
         self,
         index_shape: tuple[int | None, ...],
