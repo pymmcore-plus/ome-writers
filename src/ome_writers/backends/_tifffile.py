@@ -25,9 +25,12 @@ try:
     import tifffile
     from tifffile import COMPRESSION
 except ImportError as e:
-    raise ImportError(
+    msg = (
         f"{__name__} requires tifffile and ome-types: "
         "`pip install ome-writers[tifffile]`."
+    )
+    raise ImportError(
+        msg,
     ) from e
 
 # Mapping of user-facing compression names to tifffile COMPRESSION enum values
@@ -109,7 +112,7 @@ class TiffBackend(ArrayBackend):
         for p_idx, fname in enumerate(fnames):
             # Generate OME Image for this position
             image = _create_ome_image(
-                storage_dims, dtype, Path(fname).name, image_index=p_idx
+                storage_dims, dtype, Path(fname).name, image_index=p_idx,
             )
             all_images.append(image)
 
@@ -145,9 +148,11 @@ class TiffBackend(ArrayBackend):
         The index parameter is ignored since TIFF writes are sequential.
         """
         if self._finalized:  # pragma: no cover
-            raise RuntimeError("Cannot write after finalize().")
+            msg = "Cannot write after finalize()."
+            raise RuntimeError(msg)
         if not self._threads:  # pragma: no cover
-            raise RuntimeError("Backend not prepared. Call prepare() first.")
+            msg = "Backend not prepared. Call prepare() first."
+            raise RuntimeError(msg)
 
         self._queues[position_index].put(frame)
 
@@ -212,14 +217,18 @@ class TiffBackend(ArrayBackend):
             If called before finalize() completes, or if metadata update fails.
         """
         if not self._finalized:  # pragma: no cover
-            raise RuntimeError(
+            msg = (
                 "update_metadata() must be called after the stream context exits. "
                 "TIFF files must be closed before metadata can be updated."
             )
+            raise RuntimeError(
+                msg,
+            )
 
         if not isinstance(metadata, ome.OME):
+            msg = f"Expected ome_types.model.OME metadata, got {type(metadata)}"
             raise TypeError(
-                f"Expected ome_types.model.OME metadata, got {type(metadata)}"
+                msg,
             )
 
         for position_idx in self._file_paths:
@@ -275,7 +284,7 @@ class TiffBackend(ArrayBackend):
         all_images = []
         for p_idx, fname in self._file_paths.items():
             image = _create_ome_image(
-                corrected_dims, self._dtype, Path(fname).name, image_index=p_idx
+                corrected_dims, self._dtype, Path(fname).name, image_index=p_idx,
             )
             all_images.append(image)
 
@@ -312,20 +321,24 @@ class TiffBackend(ArrayBackend):
             # tifffile.tiffcomment requires ASCII strings
             ascii_xml = position_ome.to_xml().replace("µ", "&#x00B5;").encode("ascii")
         except Exception as e:  # pragma: no cover
-            raise RuntimeError(
+            msg = (
                 f"Failed to create position-specific OME metadata for position "
                 f"{position_idx}: {e}"
+            )
+            raise RuntimeError(
+                msg,
             ) from e
 
         try:
             tifffile.tiffcomment(file_path, comment=ascii_xml)
         except Exception as e:  # pragma: no cover
+            msg = f"Failed to update OME metadata in {file_path}: {e}"
             raise RuntimeError(
-                f"Failed to update OME metadata in {file_path}: {e}"
+                msg,
             ) from e
 
     def _prepare_files(
-        self, path: Path, num_positions: int, overwrite: bool
+        self, path: Path, num_positions: int, overwrite: bool,
     ) -> list[str]:
         """Prepare file paths for each position."""
         path_str = str(path)
@@ -354,9 +367,12 @@ class TiffBackend(ArrayBackend):
             # Handle overwrite
             if p_path.exists():
                 if not overwrite:
-                    raise FileExistsError(
+                    msg = (
                         f"File {p_path} already exists. "
                         "Use overwrite=True to overwrite it."
+                    )
+                    raise FileExistsError(
+                        msg,
                     )
                 p_path.unlink()
 
@@ -446,7 +462,7 @@ _thread_counter = count()
 
 
 def _create_ome_image(
-    dims: tuple[Dimension, ...], dtype: str, filename: str, image_index: int
+    dims: tuple[Dimension, ...], dtype: str, filename: str, image_index: int,
 ) -> ome.Image:
     """Generate OME Image object for TIFF file.
 
@@ -533,7 +549,7 @@ def _well_contains_image(well: ome.Well, target_image_id: str) -> bool:
 
 
 def _create_position_plate(
-    original_plate: ome.Plate, well: ome.Well, target_image_id: str
+    original_plate: ome.Plate, well: ome.Well, target_image_id: str,
 ) -> ome.Plate:
     """Create a new plate containing only the relevant well and sample."""
     # Find the specific well sample for this image

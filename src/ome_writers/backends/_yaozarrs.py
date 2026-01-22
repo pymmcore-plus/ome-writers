@@ -16,9 +16,12 @@ try:
     from yaozarrs import DimSpec, v05
     from yaozarrs.write.v05 import Bf2RawBuilder, PlateBuilder, prepare_image
 except ImportError as e:
-    raise ImportError(
+    msg = (
         f"{__name__} requires yaozarrs with write support: "
         "`pip install yaozarrs[write-zarr]`."
+    )
+    raise ImportError(
+        msg,
     ) from e
 
 # Valid compression names for yaozarrs (matches CompressionName type in yaozarrs)
@@ -107,7 +110,6 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
 
     def prepare(self, settings: AcquisitionSettings, router: FrameRouter) -> None:
         """Initialize OME-Zarr storage structure."""
-
         self._finalized = False
         self._root = root = Path(settings.root_path).expanduser().resolve()
         positions = settings.positions
@@ -236,7 +238,8 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
     ) -> None:
         """Write frame to specified location with auto-resize for unlimited dims."""
         if self._finalized:  # pragma: no cover
-            raise RuntimeError("Cannot write after finalize().")
+            msg = "Cannot write after finalize()."
+            raise RuntimeError(msg)
 
         array = self._arrays[position_index]
 
@@ -253,7 +256,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         # Route to buffered or direct write
         if self._chunk_buffers:
             self._write_with_buffering(
-                self._chunk_buffers[position_index], array, index, frame
+                self._chunk_buffers[position_index], array, index, frame,
             )
         else:
             self._write(array, index, frame)
@@ -277,7 +280,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
             self._write_chunk(array, storage_start, chunk_data)
 
     def _write_chunk(
-        self, array: _AT, start_index: tuple[int, ...], chunk_data: np.ndarray
+        self, array: _AT, start_index: tuple[int, ...], chunk_data: np.ndarray,
     ) -> None:
         """Write a complete chunk to the array.
 
@@ -342,7 +345,8 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
             If backend is not prepared.
         """
         if not self._metadata_cache:  # pragma: no cover
-            raise RuntimeError("Backend not prepared. Call prepare() first.")
+            msg = "Backend not prepared. Call prepare() first."
+            raise RuntimeError(msg)
 
         if self._root is None:  # pragma: no cover
             warnings.warn("Root path is unknown. Cannot update metadata.", stacklevel=2)
@@ -350,7 +354,8 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
 
         for path, attrs in metadata.items():
             if path not in self._metadata_cache:
-                raise KeyError(f"Unknown path: {path}")
+                msg = f"Unknown path: {path}"
+                raise KeyError(msg)
 
             if (zarr_json := self._root / path / "zarr.json").exists():
                 data = cast("dict", json.loads(zarr_json.read_text()))
@@ -461,7 +466,7 @@ def _build_yaozarrs_image_model(dims: list[Dimension]) -> v05.Image:
 
 
 def _build_yaozarrs_plate_model(
-    plate: Plate, well_positions: dict[tuple[str, str], list[tuple[int, Position]]]
+    plate: Plate, well_positions: dict[tuple[str, str], list[tuple[int, Position]]],
 ) -> v05.Plate:
     """Build yaozarrs v05 Plate metadata from ome-writers Plate schema."""
     return v05.Plate(
@@ -477,5 +482,5 @@ def _build_yaozarrs_plate_model(
                 )
                 for row, col in well_positions
             ],
-        )
+        ),
     )

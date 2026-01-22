@@ -106,7 +106,7 @@ CASES = [
                     Position(name="fov0", row="A", column="1"),
                     Position(name="fov0", row="C", column="4"),
                     Position(name="fov1", row="C", column="4"),
-                ]
+                ],
             ),
             D(name="c", count=2, chunk_size=1, type="channel"),
             D(name="z", count=4, chunk_size=1, type="space"),
@@ -204,7 +204,7 @@ FrameExpectation: TypeAlias = dict[int, StorageIdxToFrame]
 
 
 def _build_expected_frames(
-    case: AcquisitionSettings, num_frames: int
+    case: AcquisitionSettings, num_frames: int,
 ) -> FrameExpectation:
     """Build expected frame value mapping using FrameRouter.
 
@@ -241,7 +241,7 @@ def test_cases(case: AcquisitionSettings, any_backend: str, tmp_path: Path) -> N
         update={
             "root_path": str(tmp_path / f"output{ext}"),
             "backend": any_backend,
-        }
+        },
     )
     dims = case.dimensions
     # currently, we enforce that the last 2 dimensions are the frame dimensions
@@ -292,7 +292,7 @@ def test_auto_backend(tmp_path: Path, fmt: str) -> None:
         update={
             "root_path": str(tmp_path / f"output.ome{suffix}"),
             "backend": "auto",
-        }
+        },
     )
     frame_shape = tuple(d.count for d in settings.dimensions[-2:])
     try:
@@ -337,10 +337,9 @@ def test_overwrite_safety(tmp_path: Path, any_backend: str) -> None:
     root_mtime = root_path.stat().st_mtime
 
     # Second write should fail due to existing data
-    with pytest.raises(FileExistsError):
-        with create_stream(settings) as stream:
-            for _ in range(2):
-                stream.append(np.empty((64, 64), dtype=settings.dtype))
+    with pytest.raises(FileExistsError), create_stream(settings) as stream:
+        for _ in range(2):
+            stream.append(np.empty((64, 64), dtype=settings.dtype))
 
     assert root_path.stat().st_mtime == root_mtime, (
         "Directory modification time changed despite failed overwrite"
@@ -361,7 +360,7 @@ def test_overwrite_safety(tmp_path: Path, any_backend: str) -> None:
 
 @pytest.mark.parametrize("avail_mem", [2_000_000_000, 100_000_000_000])
 def test_chunk_memory_warning(
-    avail_mem: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    avail_mem: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Test that large chunk buffering triggers memory warning with low memory."""
     # Mock available memory to be low (2 GB)

@@ -30,7 +30,7 @@ StandardAxisKey: TypeAlias = Literal["x", "y", "z", "c", "t", "p"]
 # Compression type aliases for different backends
 # TIFF compression uses tifffile's COMPRESSION enum names (lowercase)
 TiffCompression: TypeAlias = Literal[
-    "lzw", "deflate", "zstd", "jpeg", "packbits", "lzma", "webp", "png", "none"
+    "lzw", "deflate", "zstd", "jpeg", "packbits", "lzma", "webp", "png", "none",
 ]
 # Zarr compression uses yaozarrs/zarr-python codec names
 ZarrCompression: TypeAlias = Literal["blosc-zstd", "blosc-lz4", "zstd", "none"]
@@ -405,9 +405,9 @@ class AcquisitionSettings(_BaseModel):
         default=None,
         description="Compression algorithm for the storage backend. If None, backend "
         "defaults are used (typically 'blosc-zstd' for Zarr, uncompressed for TIFF). "
-        "For TIFF format: 'lzw', 'deflate', 'zstd', 'jpeg', 'packbits', 'lzma', 'webp', "
-        "'png', or 'none'. For Zarr format: 'blosc-zstd', 'blosc-lz4', 'zstd', or 'none'. "
-        "Note: acquire-zarr backend only supports 'blosc-zstd', 'blosc-lz4', and 'none'.",
+        "TIFF: 'lzw', 'deflate', 'zstd', 'jpeg', 'packbits', 'lzma', 'webp', 'png', "
+        "'none'. Zarr: 'blosc-zstd', 'blosc-lz4', 'zstd', 'none'. "
+        "acquire-zarr only supports 'blosc-zstd', 'blosc-lz4', 'none'.",
     )
     # "ome" means "spec-compliant" storage order.
     # It MAY depend on the output format (e.g. OME-Zarr vs OME-TIFF) and

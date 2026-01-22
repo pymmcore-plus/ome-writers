@@ -25,13 +25,13 @@ VALID_ACQUIRE_ZARR_COMPRESSIONS = frozenset(["blosc-zstd", "blosc-lz4", "none"])
 # Mapping of compression names to acquire-zarr CompressionSettings
 ACQUIRE_ZARR_COMPRESSION_MAP = {
     "blosc-zstd": az.CompressionSettings(
-        compressor=az.Compressor.BLOSC1, codec=az.CompressionCodec.BLOSC_ZSTD
+        compressor=az.Compressor.BLOSC1, codec=az.CompressionCodec.BLOSC_ZSTD,
     ),
     "blosc-lz4": az.CompressionSettings(
-        compressor=az.Compressor.BLOSC1, codec=az.CompressionCodec.BLOSC_LZ4
+        compressor=az.Compressor.BLOSC1, codec=az.CompressionCodec.BLOSC_LZ4,
     ),
     "none": az.CompressionSettings(
-        compressor=az.Compressor.NONE, codec=az.CompressionCodec.NONE
+        compressor=az.Compressor.NONE, codec=az.CompressionCodec.NONE,
     ),
 }
 
@@ -83,7 +83,7 @@ class AcquireZarrBackend(YaozarrsBackend):
         """Return custom writer that collects array configs as placeholders."""
 
         def custom_writer(
-            path: Path, shape: tuple[int, ...], *_: Any, **__: Any
+            path: Path, shape: tuple[int, ...], *_: Any, **__: Any,
         ) -> _ArrayPlaceholder:
             # as_posix is critical on windows to ensure forward slashes
             # which is what acquire-zarr expects
@@ -128,7 +128,7 @@ class AcquireZarrBackend(YaozarrsBackend):
                 ],
                 store_path=str(self._root),
                 version=az.ZarrVersion.V3,
-            )
+            ),
         )
 
     def write(
@@ -139,7 +139,8 @@ class AcquireZarrBackend(YaozarrsBackend):
     ) -> None:
         """Write frame sequentially via acquire-zarr stream."""
         if self._stream is None:  # pragma: no cover
-            raise RuntimeError("Backend not prepared.")
+            msg = "Backend not prepared."
+            raise RuntimeError(msg)
 
         output_key = self._az_pos_keys[position_index]
         self._stream.append(frame, key=output_key)
