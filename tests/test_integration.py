@@ -628,8 +628,8 @@ def test_tiff_compression_write(tmp_path: Path, compression: str) -> None:
 def test_tiff_compression_lzw_requires_imagecodecs(tmp_path: Path) -> None:
     """Test that LZW compression gracefully handles missing imagecodecs."""
     try:
-        import tifffile
         import imagecodecs  # noqa: F401
+        import tifffile
     except ImportError:
         pytest.skip("imagecodecs and tifffile required for this test")
 

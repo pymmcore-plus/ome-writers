@@ -3,6 +3,14 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from ome_writers.backends._acquire_zarr import (
+    VALID_ACQUIRE_ZARR_COMPRESSIONS,
+    AcquireZarrBackend,
+)
+from ome_writers.backends._tensorstore import TensorstoreBackend
+from ome_writers.backends._tifffile import VALID_TIFF_COMPRESSIONS, TiffBackend
+from ome_writers.backends._yaozarrs import VALID_ZARR_COMPRESSIONS
+from ome_writers.backends._zarr_python import ZarrBackend
 from ome_writers.schema import (
     AcquisitionSettings,
     Dimension,
@@ -11,14 +19,6 @@ from ome_writers.schema import (
     PositionDimension,
     StandardAxis,
     dims_from_standard_axes,
-)
-from ome_writers.backends._tifffile import TiffBackend, VALID_TIFF_COMPRESSIONS
-from ome_writers.backends._zarr_python import ZarrBackend
-from ome_writers.backends._tensorstore import TensorstoreBackend
-from ome_writers.backends._yaozarrs import VALID_ZARR_COMPRESSIONS
-from ome_writers.backends._acquire_zarr import (
-    AcquireZarrBackend,
-    VALID_ACQUIRE_ZARR_COMPRESSIONS,
 )
 
 
