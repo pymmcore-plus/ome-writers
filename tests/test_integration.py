@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import contextlib
 import importlib.util
-import math
 import re
 import time
 from pathlib import Path
-from typing import TypeAlias, cast
+from typing import TypeAlias
 from unittest.mock import Mock
 
 import numpy as np
@@ -25,7 +24,7 @@ from ome_writers import (
     _memory,
     create_stream,
 )
-from ome_writers._router import FrameRouter
+from tests._frame_encoder import validate_encoded_frame_values, write_encoded_data
 
 # NOTES:
 # - All root_paths will be replaced with temporary directories during testing.
@@ -42,7 +41,7 @@ CASES = [
     AcquisitionSettings(
         root_path="tmp",
         dimensions=[
-            D(name="c", count=3, type="channel"),
+            D(name="c", count=2, type="channel"),
             D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
             D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
         ],
@@ -203,35 +202,6 @@ StorageIdxToFrame: TypeAlias = dict[tuple[int, ...], int]
 FrameExpectation: TypeAlias = dict[int, StorageIdxToFrame]
 
 
-def _build_expected_frames(
-    case: AcquisitionSettings, num_frames: int
-) -> FrameExpectation:
-    """Build expected frame value mapping using FrameRouter.
-
-    Returns a mapping of {position index -> {storage index -> frame number}}.
-
-    This assumes that the data is written as np.full(..., fill_value=frame_number).
-    """
-    router = FrameRouter(case)
-    expected_frames: FrameExpectation = {}
-    for frame_num, (pos_idx, storage_idx) in enumerate(router):
-        if frame_num >= num_frames:
-            break
-        if pos_idx not in expected_frames:
-            expected_frames[pos_idx] = {}
-        expected_frames[pos_idx][storage_idx] = frame_num
-    return expected_frames
-
-
-def _validate_expected_frames(
-    arr: np.ndarray,
-    expected_frames: StorageIdxToFrame,
-) -> None:
-    """Validate that the array contains the expected frame values."""
-    for s_idx, expected_val in expected_frames.items():
-        assert np.all(arr[s_idx][0] == expected_val)
-
-
 @pytest.mark.parametrize("case", CASES, ids=_name_case)
 def test_cases(case: AcquisitionSettings, any_backend: str, tmp_path: Path) -> None:
     is_tiff = any_backend == "tiff"
@@ -243,45 +213,21 @@ def test_cases(case: AcquisitionSettings, any_backend: str, tmp_path: Path) -> N
             "backend": any_backend,
         }
     )
-    dims = case.dimensions
-    # currently, we enforce that the last 2 dimensions are the frame dimensions
-    frame_shape = cast("tuple[int, ...]", tuple(d.count for d in dims[-2:]))
 
     # -------------- Write out all frames --------------
 
-    if (num_frames := case.num_frames) is None:
-        # unbounded, use a fixed number for testing
-        num_frames = math.prod((d.count or UNBOUNDED_FRAME_COUNT) for d in dims[:-2])
-
-    # Build expected frame value map using router
-
-    stored_array_dims = [d.model_copy() for d in case.array_storage_dimensions]
-
     try:
-        stream = create_stream(case)
+        write_encoded_data(case, real_unbounded_count=UNBOUNDED_FRAME_COUNT)
     except NotImplementedError as e:
         if re.match("Backend .* does not support settings", str(e)):
             pytest.xfail(f"Backend does not support this configuration: {e}")
             return
         raise
 
-    with stream:
-        # Create deep copies to avoid mutating the original Dimension objects
-        for f in range(num_frames):
-            frame_data = np.full(frame_shape, f, dtype=case.dtype)
-            stream.append(frame_data)
-
-    # -------------- Validate the result --------------
-    # it's always the first dimension that is possibly unbounded
-    # patch the stored_array_dims to match our expectations for validation
-    if stored_array_dims[0].count is None:
-        stored_array_dims[0].count = UNBOUNDED_FRAME_COUNT
-
-    expected_frames = _build_expected_frames(case, num_frames)
     if is_tiff:
-        _assert_valid_ome_tiff(case, stored_array_dims, expected_frames)
+        _assert_valid_ome_tiff(case)
     else:
-        _assert_valid_ome_zarr(case, stored_array_dims, expected_frames)
+        _assert_valid_ome_zarr(case)
 
 
 @pytest.mark.parametrize("fmt", ["tiff", "zarr"])
@@ -393,11 +339,7 @@ def test_chunk_memory_warning(
 # ---------------------- Helpers for validation ----------------------
 
 
-def _assert_valid_ome_tiff(
-    case: AcquisitionSettings,
-    stored_array_dims: list[Dimension],
-    expected_frames: dict[int, dict[tuple[int, ...], int]],
-) -> None:
+def _assert_valid_ome_tiff(case: AcquisitionSettings) -> None:
     try:
         import ome_types
         import tifffile
@@ -420,6 +362,7 @@ def _assert_valid_ome_tiff(
     assert len(file_paths) == num_positions
 
     # Validate each TIFF file
+    storage_dims = case.array_storage_dimensions
     for pos_idx, file_path in enumerate(file_paths):
         assert file_path.exists(), f"Expected TIFF file not found: {file_path}"
 
@@ -432,11 +375,13 @@ def _assert_valid_ome_tiff(
         pixels = ome_metadata.images[0].pixels
 
         # Validate basic dimensional properties
-        expected_shape = {d.name.upper(): d.count for d in stored_array_dims}
+        expected_shape = {
+            d.name.upper(): d.count or UNBOUNDED_FRAME_COUNT for d in storage_dims
+        }
 
         # Reverse because OME dimension order has fastest-varying dimension on right,
         # but storage order has slowest-varying dimension first
-        expected_order = "".join(d.name.upper() for d in reversed(stored_array_dims))
+        expected_order = "".join(d.name.upper() for d in reversed(storage_dims))
         assert pixels.dimension_order.value.startswith(expected_order)
 
         assert pixels.size_x == expected_shape.get("X", 1)
@@ -449,29 +394,14 @@ def _assert_valid_ome_tiff(
         assert pixels.type.numpy_dtype == case.dtype
 
         # Verify we can read the actual TIFF data
-        with tifffile.TiffFile(file_path) as tif:
-            # Just verify the file is readable and has the expected number of pages
-            expected_pages = pixels.size_t * pixels.size_c * pixels.size_z
-            assert len(tif.pages) == expected_pages, (
-                f"Expected {expected_pages} pages, got {len(tif.pages)}"
-            )
-
-            # Validate frame values
-            expected = expected_frames.get(pos_idx, {})
-            if expected:
-                shape_tuple = tuple(d.count for d in stored_array_dims[:-2])
-                shape = cast("tuple[int, ...]", shape_tuple)
-                for s_idx, expected_val in expected.items():
-                    page_num = int(np.ravel_multi_index(s_idx, shape))
-                    page_data = tif.pages[page_num].asarray()
-                    assert page_data.mean() == expected_val
+        data = tifffile.imread(file_path)
+        assert np.prod(data.shape[:-2]) == pixels.size_t * pixels.size_c * pixels.size_z
+        validate_encoded_frame_values(
+            data, [d.name for d in storage_dims[:-2]], pos_idx
+        )
 
 
-def _assert_valid_ome_zarr(
-    case: AcquisitionSettings,
-    stored_array_dims: list[Dimension],
-    expected_frames: FrameExpectation,
-) -> None:
+def _assert_valid_ome_zarr(case: AcquisitionSettings) -> None:
     root = Path(case.root_path)
     group = yaozarrs.validate_zarr_store(root)
     ome_meta = group.ome_metadata()
@@ -497,6 +427,7 @@ def _assert_valid_ome_zarr(
 
     assert len(image_paths) == num_positions
 
+    storage_dims = case.array_storage_dimensions
     for pos_idx, image_path in enumerate(image_paths):
         group = yaozarrs.open_group(image_path)
         image = group.ome_metadata()
@@ -508,24 +439,23 @@ def _assert_valid_ome_zarr(
         # we're validating on disk data with tensorstore rather than zarr-python
         # due to zarr-python's dropped support for python versions that are still
         # before EOL (i.e. SPEC-0)
-        expected = expected_frames[pos_idx]
         if importlib.util.find_spec("tensorstore") is not None:
             _validate_array_tensorstore(
                 group,
-                stored_array_dims,
+                storage_dims,
                 case.dtype,
-                expected,
-                az_hack=case.backend == "acquire-zarr" and len(stored_array_dims) == 2,
+                pos_idx,
+                az_hack=case.backend == "acquire-zarr" and len(storage_dims) == 2,
             )
         else:
-            _validate_array_zarr(group, stored_array_dims, case.dtype, expected)
+            _validate_array_zarr(group, storage_dims, case.dtype, pos_idx)
 
 
 def _validate_array_tensorstore(
     group: yaozarrs.ZarrGroup,
     storage_dims: list[D],
     dtype: str,
-    expected_frames: StorageIdxToFrame,
+    pos_idx: int,
     az_hack: bool = False,
 ) -> None:
     """Validate an array stored on disk using tensorstore."""
@@ -546,7 +476,7 @@ def _validate_array_tensorstore(
         stored_labels = stored_labels[1:]
         stored_chunk_shape = stored_chunk_shape[1:]  # ty: ignore
 
-    assert stored_shape == tuple(d.count for d in storage_dims)
+    assert stored_shape == tuple(d.count or UNBOUNDED_FRAME_COUNT for d in storage_dims)
     assert array0.dtype == np.dtype(dtype)
     assert stored_labels == [d.name for d in storage_dims]
 
@@ -556,14 +486,16 @@ def _validate_array_tensorstore(
         f"expected {expected_chunk_shape}, got {stored_chunk_shape}"
     )
 
-    _validate_expected_frames(array0.read().result(), expected_frames)
+    validate_encoded_frame_values(
+        array0.read().result(), [d.name for d in storage_dims[:-2]], pos_idx
+    )
 
 
 def _validate_array_zarr(
     group: yaozarrs.ZarrGroup,
     storage_dims: list[D],
     dtype: str,
-    expected_frames: dict[tuple[int, ...], int],
+    pos_idx: int,
 ) -> None:
     """Validate an array stored on disk using zarr-python."""
     import zarr
@@ -572,7 +504,7 @@ def _validate_array_zarr(
     assert isinstance(array0, zarr.Array)
 
     # check on disk shape, dtype
-    assert array0.shape == tuple(d.count for d in storage_dims)
+    assert array0.shape == tuple(d.count or UNBOUNDED_FRAME_COUNT for d in storage_dims)
     assert str(array0.dtype) == dtype
 
     # validate chunking
@@ -581,4 +513,6 @@ def _validate_array_zarr(
         f"expected {expected_chunk_shape}, got {array0.chunks}"
     )
 
-    _validate_expected_frames(array0, expected_frames)
+    validate_encoded_frame_values(
+        array0[:], [d.name for d in storage_dims[:-2]], pos_idx
+    )
