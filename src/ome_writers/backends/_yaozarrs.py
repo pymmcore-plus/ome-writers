@@ -256,7 +256,10 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         # Route to buffered or direct write
         if self._chunk_buffers:
             self._write_with_buffering(
-                self._chunk_buffers[position_index], array, index, frame,
+                self._chunk_buffers[position_index],
+                array,
+                index,
+                frame,
             )
         else:
             self._write(array, index, frame)
@@ -280,7 +283,10 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
             self._write_chunk(array, storage_start, chunk_data)
 
     def _write_chunk(
-        self, array: _AT, start_index: tuple[int, ...], chunk_data: np.ndarray,
+        self,
+        array: _AT,
+        start_index: tuple[int, ...],
+        chunk_data: np.ndarray,
     ) -> None:
         """Write a complete chunk to the array.
 
@@ -466,7 +472,8 @@ def _build_yaozarrs_image_model(dims: list[Dimension]) -> v05.Image:
 
 
 def _build_yaozarrs_plate_model(
-    plate: Plate, well_positions: dict[tuple[str, str], list[tuple[int, Position]]],
+    plate: Plate,
+    well_positions: dict[tuple[str, str], list[tuple[int, Position]]],
 ) -> v05.Plate:
     """Build yaozarrs v05 Plate metadata from ome-writers Plate schema."""
     return v05.Plate(

@@ -30,7 +30,15 @@ StandardAxisKey: TypeAlias = Literal["x", "y", "z", "c", "t", "p"]
 # Compression type aliases for different backends
 # TIFF compression uses tifffile's COMPRESSION enum names (lowercase)
 TiffCompression: TypeAlias = Literal[
-    "lzw", "deflate", "zstd", "jpeg", "packbits", "lzma", "webp", "png", "none",
+    "lzw",
+    "deflate",
+    "zstd",
+    "jpeg",
+    "packbits",
+    "lzma",
+    "webp",
+    "png",
+    "none",
 ]
 # Zarr compression uses yaozarrs/zarr-python codec names
 ZarrCompression: TypeAlias = Literal["blosc-zstd", "blosc-lz4", "zstd", "none"]

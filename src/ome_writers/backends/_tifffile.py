@@ -112,7 +112,10 @@ class TiffBackend(ArrayBackend):
         for p_idx, fname in enumerate(fnames):
             # Generate OME Image for this position
             image = _create_ome_image(
-                storage_dims, dtype, Path(fname).name, image_index=p_idx,
+                storage_dims,
+                dtype,
+                Path(fname).name,
+                image_index=p_idx,
             )
             all_images.append(image)
 
@@ -284,7 +287,10 @@ class TiffBackend(ArrayBackend):
         all_images = []
         for p_idx, fname in self._file_paths.items():
             image = _create_ome_image(
-                corrected_dims, self._dtype, Path(fname).name, image_index=p_idx,
+                corrected_dims,
+                self._dtype,
+                Path(fname).name,
+                image_index=p_idx,
             )
             all_images.append(image)
 
@@ -338,7 +344,10 @@ class TiffBackend(ArrayBackend):
             ) from e
 
     def _prepare_files(
-        self, path: Path, num_positions: int, overwrite: bool,
+        self,
+        path: Path,
+        num_positions: int,
+        overwrite: bool,
     ) -> list[str]:
         """Prepare file paths for each position."""
         path_str = str(path)
@@ -462,7 +471,10 @@ _thread_counter = count()
 
 
 def _create_ome_image(
-    dims: tuple[Dimension, ...], dtype: str, filename: str, image_index: int,
+    dims: tuple[Dimension, ...],
+    dtype: str,
+    filename: str,
+    image_index: int,
 ) -> ome.Image:
     """Generate OME Image object for TIFF file.
 
@@ -549,7 +561,9 @@ def _well_contains_image(well: ome.Well, target_image_id: str) -> bool:
 
 
 def _create_position_plate(
-    original_plate: ome.Plate, well: ome.Well, target_image_id: str,
+    original_plate: ome.Plate,
+    well: ome.Well,
+    target_image_id: str,
 ) -> ome.Plate:
     """Create a new plate containing only the relevant well and sample."""
     # Find the specific well sample for this image

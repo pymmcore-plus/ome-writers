@@ -204,7 +204,8 @@ FrameExpectation: TypeAlias = dict[int, StorageIdxToFrame]
 
 
 def _build_expected_frames(
-    case: AcquisitionSettings, num_frames: int,
+    case: AcquisitionSettings,
+    num_frames: int,
 ) -> FrameExpectation:
     """Build expected frame value mapping using FrameRouter.
 
@@ -360,7 +361,9 @@ def test_overwrite_safety(tmp_path: Path, any_backend: str) -> None:
 
 @pytest.mark.parametrize("avail_mem", [2_000_000_000, 100_000_000_000])
 def test_chunk_memory_warning(
-    avail_mem: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    avail_mem: int,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Test that large chunk buffering triggers memory warning with low memory."""
     # Mock available memory to be low (2 GB)

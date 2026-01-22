@@ -25,13 +25,16 @@ VALID_ACQUIRE_ZARR_COMPRESSIONS = frozenset(["blosc-zstd", "blosc-lz4", "none"])
 # Mapping of compression names to acquire-zarr CompressionSettings
 ACQUIRE_ZARR_COMPRESSION_MAP = {
     "blosc-zstd": az.CompressionSettings(
-        compressor=az.Compressor.BLOSC1, codec=az.CompressionCodec.BLOSC_ZSTD,
+        compressor=az.Compressor.BLOSC1,
+        codec=az.CompressionCodec.BLOSC_ZSTD,
     ),
     "blosc-lz4": az.CompressionSettings(
-        compressor=az.Compressor.BLOSC1, codec=az.CompressionCodec.BLOSC_LZ4,
+        compressor=az.Compressor.BLOSC1,
+        codec=az.CompressionCodec.BLOSC_LZ4,
     ),
     "none": az.CompressionSettings(
-        compressor=az.Compressor.NONE, codec=az.CompressionCodec.NONE,
+        compressor=az.Compressor.NONE,
+        codec=az.CompressionCodec.NONE,
     ),
 }
 
@@ -83,7 +86,10 @@ class AcquireZarrBackend(YaozarrsBackend):
         """Return custom writer that collects array configs as placeholders."""
 
         def custom_writer(
-            path: Path, shape: tuple[int, ...], *_: Any, **__: Any,
+            path: Path,
+            shape: tuple[int, ...],
+            *_: Any,
+            **__: Any,
         ) -> _ArrayPlaceholder:
             # as_posix is critical on windows to ensure forward slashes
             # which is what acquire-zarr expects

@@ -52,7 +52,8 @@ def test_schema_unlimited_first_only() -> None:
 
     # Second dimension unlimited - error
     with pytest.raises(
-        ValidationError, match=" Only the first dimension may be unbounded",
+        ValidationError,
+        match=" Only the first dimension may be unbounded",
     ):
         AcquisitionSettings(
             root_path="test.zarr",
@@ -97,7 +98,8 @@ def test_position_with_plate_context() -> None:
 def test_plate_requires_row_column() -> None:
     """Test that plate mode requires row/column on positions."""
     with pytest.raises(
-        ValueError, match="All positions must have row and column for plate mode",
+        ValueError,
+        match="All positions must have row and column for plate mode",
     ):
         AcquisitionSettings(
             root_path="plate.ome.zarr",
@@ -118,7 +120,8 @@ def test_plate_requires_row_column() -> None:
 
 def test_plate_requires_position_dimension() -> None:
     with pytest.raises(
-        ValueError, match="Plate mode requires a PositionDimension in dimensions",
+        ValueError,
+        match="Plate mode requires a PositionDimension in dimensions",
     ):
         AcquisitionSettings(
             root_path="plate.zarr",
@@ -135,7 +138,8 @@ def test_plate_requires_position_dimension() -> None:
 def test_duplicate_names_rejected() -> None:
     """Test that duplicate position names within the same well are rejected."""
     with pytest.raises(
-        ValueError, match="Position names must be unique within each well",
+        ValueError,
+        match="Position names must be unique within each well",
     ):
         AcquisitionSettings(
             root_path="test.zarr",
@@ -153,7 +157,8 @@ def test_duplicate_names_rejected() -> None:
         )
 
     with pytest.raises(
-        ValueError, match="positions without row/column must have unique names",
+        ValueError,
+        match="positions without row/column must have unique names",
     ):
         AcquisitionSettings(
             root_path="test.zarr",
@@ -224,7 +229,8 @@ def test_invalid_dtype() -> None:
 def test_storage_order_cannot_permute_last_two_dims() -> None:
     """Test that storage_order cannot permute the last two dimensions."""
     with pytest.raises(
-        ValidationError, match="storage_order may not \\(yet\\) permute the last two",
+        ValidationError,
+        match="storage_order may not \\(yet\\) permute the last two",
     ):
         AcquisitionSettings(
             root_path="test.zarr",
@@ -268,7 +274,8 @@ def test_multiple_position_dimensions_error() -> None:
 def test_too_few_dimensions_error() -> None:
     """Test that at least 2 dimensions are required."""
     with pytest.raises(
-        ValueError, match="At least 2 non-position dimensions are required",
+        ValueError,
+        match="At least 2 non-position dimensions are required",
     ):
         AcquisitionSettings(
             root_path="test.zarr",
@@ -282,7 +289,8 @@ def test_too_few_dimensions_error() -> None:
 def test_too_many_dimensions_error() -> None:
     """Test that at most 5 non-position dimensions are allowed."""
     with pytest.raises(
-        ValueError, match="At most 5 non-position dimensions are allowed",
+        ValueError,
+        match="At most 5 non-position dimensions are allowed",
     ):
         AcquisitionSettings(
             root_path="test.zarr",
@@ -301,7 +309,8 @@ def test_too_many_dimensions_error() -> None:
 def test_last_two_must_be_spatial() -> None:
     """Test that the last two dimensions must be spatial."""
     with pytest.raises(
-        ValueError, match="The last two dimensions must be spatial dimensions",
+        ValueError,
+        match="The last two dimensions must be spatial dimensions",
     ):
         AcquisitionSettings(
             root_path="test.zarr",
