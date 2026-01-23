@@ -10,8 +10,6 @@ if TYPE_CHECKING:
     import numpy as np
     from tensorstore import Future
 
-    from ome_writers.schema import AcquisitionSettings
-
 
 class TensorstoreBackend(YaozarrsBackend):
     """OME-Zarr writer using tensorstore via yaozarrs."""
@@ -22,11 +20,6 @@ class TensorstoreBackend(YaozarrsBackend):
     def __init__(self) -> None:
         super().__init__()
         self._futures: list[Future] = []
-
-    def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
-        if not settings.root_path.endswith(".zarr"):  # pragma: no cover
-            return "Root path must end with .zarr for TensorstoreBackend."
-        return False
 
     def _write(self, array: Any, index: tuple[int, ...], frame: np.ndarray) -> None:
         """Write frame to array at specified index, async for tensorstore."""

@@ -43,6 +43,7 @@ class AcquireZarrBackend(YaozarrsBackend):
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         if not settings.root_path.endswith(".zarr"):  # pragma: no cover
             return "Root path must end with .zarr for AcquireZarrBackend."
+
         if settings.storage_index_permutation is not None:
             return (
                 "AcquireZarrBackend does not support permuted storage order. "
@@ -53,6 +54,10 @@ class AcquireZarrBackend(YaozarrsBackend):
                 "AcquireZarrBackend requires at least 3 dimensions. "
                 "2D images are not currently supported."
             )
+        try:
+            self._resolve_compression(settings.compression)
+        except ValueError as e:
+            return str(e)
         return False
 
     def _get_writer(self) -> Callable[..., _ArrayPlaceholder]:
@@ -87,6 +92,7 @@ class AcquireZarrBackend(YaozarrsBackend):
             for i, dim in enumerate(settings.array_storage_dimensions)
         ]
 
+        compression_settings = self._resolve_compression(settings.compression)
         self._stream = az.ZarrStream(
             az.StreamSettings(
                 arrays=[
@@ -94,6 +100,7 @@ class AcquireZarrBackend(YaozarrsBackend):
                         output_key=key,
                         dimensions=az_dims,
                         data_type=settings.dtype,
+                        compression=compression_settings,
                     )
                     for key in self._az_pos_keys
                 ],
@@ -128,6 +135,51 @@ class AcquireZarrBackend(YaozarrsBackend):
             self._zarr_json_backup.clear()
 
         super().finalize()
+
+    def _resolve_compression(
+        self, compression: str | None
+    ) -> az.CompressionSettings | None:
+        """Resolve compression setting for acquire-zarr backend.
+
+        Returns
+        -------
+        az.CompressionSettings | None
+            acquire-zarr compression settings
+        """
+        if compression in ("none", None):
+            # this seems like it should work... but it causes a ton of errors:
+            # return az.CompressionSettings(
+            #     compressor=az.Compressor.NONE,
+            #     codec=az.CompressionCodec.NONE,
+            # )
+            return None
+
+        if compression == "blosc-zstd":
+            return az.CompressionSettings(
+                compressor=az.Compressor.BLOSC1,
+                codec=az.CompressionCodec.BLOSC_ZSTD,
+                level=3,
+                shuffle=1,
+            )
+        if compression == "blosc-lz4":
+            return az.CompressionSettings(
+                compressor=az.Compressor.BLOSC1,
+                codec=az.CompressionCodec.BLOSC_LZ4,
+                level=5,
+                shuffle=1,
+            )
+        # Unsupported compressions
+        if compression == "zstd":
+            raise ValueError(
+                "Standalone 'zstd' compression (without blosc) is not supported by "
+                "acquire-zarr. Use 'blosc-zstd' instead."
+            )
+        if compression == "lzw":
+            raise ValueError(
+                "LZW compression is not supported for Zarr format. "
+                "Use 'blosc-zstd' or 'blosc-lz4' instead."
+            )
+        raise ValueError(f"Unsupported compression for acquire-zarr: {compression}")
 
 
 # -----------------------------------------------------------------------------
