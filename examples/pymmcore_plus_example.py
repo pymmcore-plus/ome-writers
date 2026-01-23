@@ -34,7 +34,7 @@ seq = useq.MDASequence(
 # Setup the AcquisitionSettings, converting the MDASequence to ome-writers Dimensions
 # Derive backend from command line argument (default: auto)
 BACKEND = "auto" if len(sys.argv) < 2 else sys.argv[1]
-suffix = ".ome.tiff" if BACKEND == "tiff" else ".ome.zarr"
+suffix = ".ome.tiff" if BACKEND == "tifffile" else ".ome.zarr"
 
 settings = AcquisitionSettings(
     root_path=f"example_pymmcore_plus{suffix}",
