@@ -74,16 +74,16 @@ def test_position_with_plate_context() -> None:
     """Test Position can carry plate row/column info."""
     pos_dim = PositionDimension(
         positions=[
-            Position(name="A1/0", row="A", column="1"),
-            Position(name="A1/1", row="A", column="1"),
-            Position(name="B2/0", row="B", column="2"),
+            Position(name="A1/0", plate_row="A", plate_column="1"),
+            Position(name="A1/1", plate_row="A", plate_column="1"),
+            Position(name="B2/0", plate_row="B", plate_column="2"),
         ]
     )
 
     assert pos_dim.count == 3
     assert pos_dim.names == ["A1/0", "A1/1", "B2/0"]
-    assert pos_dim.positions[0].row == "A"
-    assert pos_dim.positions[2].column == "2"
+    assert pos_dim.positions[0].plate_row == "A"
+    assert pos_dim.positions[2].plate_column == "2"
 
 
 def test_plate_requires_row_column() -> None:
@@ -134,8 +134,8 @@ def test_duplicate_names_rejected() -> None:
             dimensions=[
                 PositionDimension(
                     positions=[
-                        Position(name="fov0", row="C", column="4"),
-                        Position(name="fov0", row="C", column="4"),
+                        Position(name="fov0", plate_row="C", plate_column="4"),
+                        Position(name="fov0", plate_row="C", plate_column="4"),
                     ]
                 ),
                 Dimension(name="y", count=16, type="space"),
