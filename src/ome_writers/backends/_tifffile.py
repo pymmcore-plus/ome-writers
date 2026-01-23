@@ -393,13 +393,16 @@ class WriterThread(threading.Thread):
                 yield frame
 
         try:
-            with tifffile.TiffWriter(self._path, bigtiff=True, ome=False) as writer:
+            with tifffile.TiffWriter(
+                self._path, bigtiff=True, ome=False, shaped=False
+            ) as writer:
                 if self._has_unbounded:
                     # For unbounded dimensions, write frames individually
                     # to avoid shape mismatch errors
                     for i, frame in enumerate(_queue_iterator()):
                         writer.write(
                             frame,
+                            contiguous=True,
                             dtype=self._dtype,
                             resolution=(self._res, self._res),
                             resolutionunit=tifffile.RESUNIT.MICROMETER,
