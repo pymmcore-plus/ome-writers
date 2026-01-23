@@ -247,7 +247,7 @@ class TiffBackend(ArrayBackend):
 
         # Regenerate OME metadata for each position
         all_images, num_pos = [], len(self._file_paths)
-        for p_idx, fname in self._file_paths.items():
+        for p_idx, fname in sorted(self._file_paths.items()):
             filename, file_uuid = Path(fname).name, self._file_uuids.get(p_idx)
             all_images.append(
                 _create_ome_image(
@@ -259,7 +259,7 @@ class TiffBackend(ArrayBackend):
         self._cached_metadata = ome.OME(images=all_images)
 
         # Write metadata to each file
-        for p_idx, fname in self._file_paths.items():
+        for p_idx, fname in sorted(self._file_paths.items()):
             try:
                 if num_pos > 1:  # multiposition: full OME with all images
                     xml = self._cached_metadata.to_xml()
