@@ -9,13 +9,13 @@ from typing import TYPE_CHECKING, get_args
 import numpy as np
 import pytest
 
-from ome_writers import AcquisitionSettings, Dimension, create_stream, schema
+from ome_writers import AcquisitionSettings, Dimension, _schema, create_stream
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-TIFF_COMPRESSIONS = get_args(schema.TiffCompression)
-ZARR_COMPRESSIONS = get_args(schema.ZarrCompression)
+TIFF_COMPRESSIONS = get_args(_schema.TiffCompression)
+ZARR_COMPRESSIONS = get_args(_schema.ZarrCompression)
 
 
 @pytest.mark.parametrize("compression", TIFF_COMPRESSIONS)
