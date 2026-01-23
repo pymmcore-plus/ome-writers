@@ -4,9 +4,6 @@
 #     "ome-writers[all]",
 #     "pymmcore-plus>=0.16.0",
 # ]
-#
-# [tool.uv.sources]
-# ome-writers = { path = "../" }
 # ///
 """Example of using ome_writers to store data acquired with pymmcore-plus."""
 

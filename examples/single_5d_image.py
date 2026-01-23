@@ -3,9 +3,6 @@
 # dependencies = [
 #     "ome-writers[all]",
 # ]
-#
-# [tool.uv.sources]
-# ome-writers = { path = "../" }
 # ///
 """Basic example of using ome_writers to write a single 5D image."""
 

@@ -3,9 +3,6 @@
 # dependencies = [
 #     "ome-writers[all]",
 # ]
-#
-# [tool.uv.sources]
-# ome-writers = { path = "../" }
 # ///
 """Example of using ome_writers with unbounded first dimension.
 
