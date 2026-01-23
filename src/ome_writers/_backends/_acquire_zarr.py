@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 import acquire_zarr as az
 
-from ome_writers.backends._yaozarrs import YaozarrsBackend
-from ome_writers.schema import Dimension
+from ome_writers._backends._yaozarrs import YaozarrsBackend
+from ome_writers._schema import Dimension
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
     import numpy as np
 
-    from ome_writers.schema import AcquisitionSettings, Dimension
+    from ome_writers._schema import AcquisitionSettings, Dimension
 
 
 class AcquireZarrBackend(YaozarrsBackend):

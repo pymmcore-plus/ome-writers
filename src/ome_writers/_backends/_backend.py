@@ -23,7 +23,10 @@ when settings don't match capabilities. For example:
 
 Example Usage
 -------------
->>> from ome_writers.schema_pydantic import AcquisitionSettings, dims_from_standard_axes
+>>> from ome_writers._schema_pydantic import (
+...     AcquisitionSettings,
+...     dims_from_standard_axes,
+... )
 >>>
 >>> settings = AcquisitionSettings(
 ...     root_path="/data/output.zarr",
@@ -55,7 +58,7 @@ if TYPE_CHECKING:
     import numpy as np
 
     from ome_writers._router import FrameRouter
-    from ome_writers.schema import AcquisitionSettings
+    from ome_writers._schema import AcquisitionSettings
 
 
 class ArrayBackend(ABC):

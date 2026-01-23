@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from ome_writers.backends._yaozarrs import YaozarrsBackend
+from ome_writers._backends._yaozarrs import YaozarrsBackend
 
 
 class ZarrBackend(YaozarrsBackend):
