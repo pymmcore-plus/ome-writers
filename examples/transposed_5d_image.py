@@ -10,12 +10,6 @@ from ome_writers import AcquisitionSettings, Dimension, create_stream
 BACKEND = "auto" if len(sys.argv) < 2 else sys.argv[1]
 suffix = ".ome.tiff" if BACKEND == "tiff" else ".ome.zarr"
 
-# acquire-zarr doesn't currently support permuted storage order
-# https://github.com/acquire-project/acquire-zarr/pull/173
-if BACKEND == "acquire-zarr":
-    print("⊘ Skipping: acquire-zarr backend does not support transposed storage order")
-    sys.exit(0)
-
 # create acquisition settings
 settings = AcquisitionSettings(
     root_path=f"example_transposed_5d_image{suffix}",
