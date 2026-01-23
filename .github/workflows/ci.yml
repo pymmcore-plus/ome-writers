@@ -49,7 +49,7 @@ jobs:
         uses: CodSpeedHQ/action@v4
         with:
           mode: walltime
-          run: pytest tests/test_bench.py --codspeed -v
+          run: pytest tests/test_bench.py --codspeed -v -W ignore
 
   test:
     name: ${{ matrix.platform }} py${{ matrix.python-version }} ${{ matrix.group }} ${{ matrix.resolution }}
@@ -60,10 +60,14 @@ jobs:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
         platform: [ubuntu-latest, macos-latest, windows-latest]
         resolution: [highest, lowest-direct]
-        group: [tifffile, tensorstore, zarr-python, acquire-zarr]
+        group: [tifffile, tensorstore, zarr-python, zarrs-python, acquire-zarr]
         exclude:
           - group: zarr-python
             python-version: "3.10"
+          - group: zarrs-python
+            python-version: "3.10"
+          - group: zarrs-python
+            python-version: "3.11"
         include:
           - group: zarr-python
             python-version: "3.14"

@@ -104,7 +104,11 @@ def _is_zarr_available() -> bool:
     return importlib.util.find_spec("zarr") is not None
 
 
-def _is_tiffile_available() -> bool:
+def _is_zarrs_available() -> bool:
+    return _is_zarr_available() and importlib.util.find_spec("zarrs") is not None
+
+
+def _is_tifffile_available() -> bool:
     return importlib.util.find_spec("tifffile") is not None
 
 
@@ -134,6 +138,14 @@ BACKENDS: list[BackendMetadata] = [
         is_available=_is_acquire_zarr_available,
     ),
     BackendMetadata(
+        name="zarrs-python",
+        module_path="ome_writers._backends._zarr_python",
+        class_name="ZarrsBackend",
+        format="zarr",
+        is_available=_is_zarrs_available,
+        min_python_version=(3, 11),
+    ),
+    BackendMetadata(
         name="zarr-python",
         module_path="ome_writers._backends._zarr_python",
         class_name="ZarrBackend",
@@ -146,7 +158,7 @@ BACKENDS: list[BackendMetadata] = [
         module_path="ome_writers._backends._tifffile",
         class_name="TiffBackend",
         format="tiff",
-        is_available=_is_tiffile_available,
+        is_available=_is_tifffile_available,
     ),
 ]
 VALID_BACKEND_NAMES: list[str] = [b.name for b in BACKENDS] + ["auto"]

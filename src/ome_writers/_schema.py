@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 FileFormat: TypeAlias = Literal["tiff", "zarr"]
 BackendName: TypeAlias = Literal[
-    "acquire-zarr", "tensorstore", "zarr-python", "tifffile"
+    "acquire-zarr", "tensorstore", "zarrs-python", "zarr-python", "tifffile"
 ]
 DimensionType: TypeAlias = Literal["space", "time", "channel", "other"]
 StandardAxisKey: TypeAlias = Literal["x", "y", "z", "c", "t", "p"]
@@ -430,11 +430,11 @@ class AcquisitionSettings(_BaseModel):
     )
     backend: BackendName | Literal["auto"] = Field(
         default="auto",
-        description="Storage backend to use for writing data.  Must be one of "
-        "'acquire-zarr', 'tensorstore', 'zarr-python', 'tifffile', or 'auto'.  "
+        description="Storage backend to use for writing data.  Must be one of 'auto', "
+        "'tensorstore', 'acquire-zarr', 'zarrs-python', 'zarr-python', or 'tifffile'. "
         "If 'auto' (the default), the backend will be chosen based on the `root_path` "
         "extension and available dependencies. Zarr backends are chosen in the order: "
-        "tensorstore, acquire-zarr, then zarr-python.",
+        "tensorstore, acquire-zarr, zarr-python, zarr-python.",
     )
 
     @property
