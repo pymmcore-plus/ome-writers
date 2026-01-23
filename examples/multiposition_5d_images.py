@@ -21,9 +21,9 @@ dimensions = [
     Dimension(name="t", count=2, chunk_size=1, type="time"),
     PositionDimension(positions=["Pos0", "Pos1"]),
     Dimension(name="c", count=3, chunk_size=1, type="channel"),
-    Dimension(name="z", count=4, chunk_size=1, type="space"),
-    Dimension(name="y", count=256, chunk_size=64, type="space"),
-    Dimension(name="x", count=256, chunk_size=64, type="space"),
+    Dimension(name="z", count=4, chunk_size=1, type="space", scale=5, unit="µm"),
+    Dimension(name="y", count=256, chunk_size=64, type="space", scale=0.1, unit="µm"),
+    Dimension(name="x", count=256, chunk_size=64, type="space", scale=0.1, unit="µm"),
 ]
 
 # or... with the helper function:

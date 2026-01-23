@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import math
 import threading
+import uuid
 import warnings
+from datetime import datetime, timezone
 from itertools import count
 from pathlib import Path
 from queue import Queue
@@ -77,8 +80,6 @@ class TiffBackend(ArrayBackend):
         fnames = self._prepare_files(root, len(positions), settings.overwrite)
 
         # Generate UUIDs and OME metadata for all positions
-        import uuid
-
         all_images, num_pos = [], len(positions)
         for p_idx, fname in enumerate(fnames):
             self._file_uuids[p_idx] = file_uuid = str(uuid.uuid4())
@@ -227,8 +228,6 @@ class TiffBackend(ArrayBackend):
         # Calculate the count for the unbounded dimension
         # total_frames = product of all dimension counts (excluding spatial dims Y,X)
         # For unbounded dim: unbounded_count = total_frames / product(other_dims)
-        import math
-
         # Product of all known (non-None) dimension counts except Y,X
         known_product = math.prod(
             d.count for d in self._storage_dims[:-2] if d.count is not None
@@ -250,25 +249,33 @@ class TiffBackend(ArrayBackend):
         # Regenerate OME metadata for each position
         all_images, num_pos = [], len(self._file_paths)
         for p_idx, fname in self._file_paths.items():
-            image = _create_ome_image(
-                corrected_dims,
-                self._dtype,
-                Path(fname).name,
-                p_idx,
-                self._file_uuids.get(p_idx),
-                num_pos,
+            all_images.append(
+                _create_ome_image(
+                    corrected_dims,
+                    self._dtype,
+                    Path(fname).name,
+                    p_idx,
+                    self._file_uuids.get(p_idx),
+                    num_pos,
+                )
             )
-            all_images.append(image)
-            try:  # Update the TIFF file's description tag
-                xml = ome.OME(images=[image]).to_xml().replace("µ", "&#x00B5;")
+
+        # Update cached metadata with corrected dimensions
+        self._cached_metadata = ome.OME(images=all_images)
+
+        # Write metadata to each file
+        for p_idx, fname in self._file_paths.items():
+            try:
+                if num_pos > 1:  # multiposition: full OME with all images
+                    xml = self._cached_metadata.to_xml()
+                else:
+                    xml = ome.OME(images=[all_images[p_idx]]).to_xml()
+                xml = xml.replace("µ", "&#x00B5;")
                 tifffile.tiffcomment(fname, comment=xml.encode("ascii"))
             except Exception as e:  # pragma: no cover
                 warnings.warn(
                     f"Failed to update OME metadata in {fname}: {e}", stacklevel=2
                 )
-
-        # Update cached metadata with corrected dimensions
-        self._cached_metadata = ome.OME(images=all_images)
 
     def _update_position_metadata(self, position_idx: int, metadata: ome.OME) -> None:
         """Update OME metadata for a specific position's TIFF file."""
@@ -428,10 +435,10 @@ def _create_ome_image(
     num_positions: int = 1,
 ) -> ome.Image:
     """Generate OME Image object for TIFF file."""
-    from datetime import datetime, timezone
-
     shape_dict = {d.name.upper(): d.count or 1 for d in dims}
-    size_t, size_c, size_z = (shape_dict.get(k, 1) for k in ("T", "C", "Z"))
+    size_t = shape_dict.get("T", 1)
+    size_c = shape_dict.get("C", 1)
+    size_z = shape_dict.get("Z", 1)
     dim_order = next(
         order
         for order in ome.Pixels_DimensionOrder
