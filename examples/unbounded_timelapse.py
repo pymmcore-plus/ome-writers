@@ -8,22 +8,20 @@ import sys
 
 import numpy as np
 
-from ome_writers import (
-    AcquisitionSettings,
-    Dimension,
-    PositionDimension,
-    create_stream,
-)
+from ome_writers import AcquisitionSettings, Dimension, PositionDimension, create_stream
 
-# "tiff", "zarr", "tensorstore", "auto"
+# Derive backend from command line argument (default: auto)
 BACKEND = "auto" if len(sys.argv) < 2 else sys.argv[1]
-# --------
-
 suffix = ".ome.tiff" if BACKEND == "tiff" else ".ome.zarr"
+
+# create acquisition settings
 settings = AcquisitionSettings(
     root_path=f"example_unbounded{suffix}",
+    # declare dimensions in order of acquisition (slowest to fastest)
     dimensions=[
-        Dimension(name="t", count=None, chunk_size=1, type="time"),  # unbounded
+        # count=None makes this an unbounded dimension
+        # only the first dimension can be unbounded
+        Dimension(name="t", count=None, chunk_size=1, type="time"),
         PositionDimension(positions=["Pos0", "Pos1"]),
         Dimension(name="y", count=256, chunk_size=64, type="space"),
         Dimension(name="x", count=256, chunk_size=64, type="space"),
@@ -33,19 +31,18 @@ settings = AcquisitionSettings(
     backend=BACKEND,
 )
 
-N = 3  # actual count of first dimension (in reality, could be conditional)
-numframes = np.prod(settings.shape[1:-2]) * N
+# actual count of first dimension for the sake of this example
+# (in reality, it would likely be conditional, e.g. in a generator loop)
+actual_count = 3
+numframes = np.prod(settings.shape[1:-2]) * actual_count
+frame_shape = settings.shape[-2:]
+
 with create_stream(settings) as stream:
     for i in range(numframes):
-        stream.append(np.full((256, 256), i, dtype=settings.dtype))
-
+        stream.append(np.full(frame_shape, fill_value=i, dtype=settings.dtype))
 
 if settings.format == "zarr":
-    # Validate the output
-    try:
-        import yaozarrs
+    import yaozarrs
 
-        yaozarrs.validate_zarr_store(settings.root_path)
-        print("✓ Zarr store is valid")
-    except ImportError:
-        print("⚠ yaozarrs not installed; skipping validation")
+    yaozarrs.validate_zarr_store(settings.root_path)
+    print("✓ Zarr store is valid")

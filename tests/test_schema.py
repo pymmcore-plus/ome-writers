@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from ome_writers.schema import (
+from ome_writers._schema import (
     AcquisitionSettings,
     Dimension,
     Plate,

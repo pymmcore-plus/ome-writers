@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal
 
-from ome_writers.backends._yaozarrs import YaozarrsBackend
+from ome_writers._backends._yaozarrs import YaozarrsBackend
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     import numpy as np
     from tensorstore import Future
 
-    from ome_writers.schema import AcquisitionSettings
+    from ome_writers._schema import AcquisitionSettings
 
 
 class TensorstoreBackend(YaozarrsBackend):

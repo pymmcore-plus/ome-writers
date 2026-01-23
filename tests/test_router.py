@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Literal
 import pytest
 
 from ome_writers._router import FrameRouter
-from ome_writers.schema import (
+from ome_writers._schema import (
     AcquisitionSettings,
     Dimension,
     Position,

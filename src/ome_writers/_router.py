@@ -98,7 +98,7 @@ from typing import TYPE_CHECKING, cast
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from ome_writers.schema import AcquisitionSettings
+    from ome_writers._schema import AcquisitionSettings
 
 
 class FrameRouter:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from ome_writers.backends._chunk_buffer import ChunkBuffer
+from ome_writers._backends._chunk_buffer import ChunkBuffer
 
 
 @pytest.mark.parametrize(

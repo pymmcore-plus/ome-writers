@@ -9,8 +9,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
 
-from ome_writers.backends._backend import ArrayBackend
-from ome_writers.backends._chunk_buffer import ChunkBuffer
+from ome_writers._backends._backend import ArrayBackend
+from ome_writers._backends._chunk_buffer import ChunkBuffer
 
 try:
     from yaozarrs import DimSpec, v05
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     import numpy as np
 
     from ome_writers._router import FrameRouter
-    from ome_writers.schema import AcquisitionSettings, Dimension, Plate, Position
+    from ome_writers._schema import AcquisitionSettings, Dimension, Plate, Position
 
     class ArrayLike(Protocol):
         """Protocol for array-like objects that support shape attribute."""
