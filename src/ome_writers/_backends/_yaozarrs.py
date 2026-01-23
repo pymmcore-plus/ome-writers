@@ -122,7 +122,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
             # mapping of {(row, column): [(position_index, Position), ...]}
             well_positions = {}
             for i, pos in enumerate(positions):
-                key = (pos.row, pos.column)
+                key = (pos.plate_row, pos.plate_column)
                 well_positions.setdefault(key, []).append((i, pos))
 
             # Build plate metadata and arrays
@@ -145,7 +145,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
             _, all_arrays = builder.prepare()
             # Map position index to array path and store arrays
             self._image_group_paths = [
-                f"{pos.row}/{pos.column}/{pos.name}" for pos in positions
+                f"{pos.plate_row}/{pos.plate_column}/{pos.name}" for pos in positions
             ]
             self._arrays = [
                 all_arrays[f"{parent}/0"] for parent in self._image_group_paths
