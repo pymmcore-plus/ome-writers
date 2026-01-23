@@ -12,7 +12,7 @@ from ome_writers._stream import create_stream
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Sequence
 
-    from ome_writers.schema import AcquisitionSettings
+    from ome_writers._schema import AcquisitionSettings
 
 # max dimension counts used for encoding/decoding coordinates
 # having this results in a consistent encoding across tests,

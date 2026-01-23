@@ -32,7 +32,7 @@ repos:
   - repo: local
     hooks:
       - id: ty
-        name: ty check
-        entry: ty check --project .
+        name: uv run ty check
+        entry: uv run ty check --project .
         language: python
         pass_filenames: false

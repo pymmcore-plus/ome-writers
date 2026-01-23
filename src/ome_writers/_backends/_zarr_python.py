@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
-from ome_writers.backends._yaozarrs import YaozarrsBackend
+from ome_writers._backends._yaozarrs import YaozarrsBackend
 
 if TYPE_CHECKING:
-    from ome_writers.schema import AcquisitionSettings
+    from ome_writers._schema import AcquisitionSettings
 
 
 class ZarrBackend(YaozarrsBackend):

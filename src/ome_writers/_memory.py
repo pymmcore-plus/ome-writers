@@ -100,7 +100,7 @@ def _bytes_per_chunk(settings: AcquisitionSettings) -> int:
 
 
 def _concurrent_positions(settings: AcquisitionSettings) -> int:
-    from ome_writers.schema import Dimension
+    from ome_writers._schema import Dimension
 
     pos_idx = settings.position_dimension_index
     if pos_idx is not None:
