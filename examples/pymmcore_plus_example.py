@@ -8,7 +8,7 @@
 # [tool.uv.sources]
 # ome-writers = { path = "../" }
 # ///
-"""Example of using ome_writers with useq.MDASequence and pymmcore-plus."""
+"""Example of using ome_writers to store data acquired with pymmcore-plus."""
 
 import sys
 

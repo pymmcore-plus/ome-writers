@@ -7,10 +7,7 @@
 # [tool.uv.sources]
 # ome-writers = { path = "../" }
 # ///
-"""Basic example of using ome_writers to write a single 5D image.
-
-Where storage format differs from acquisition order.
-"""
+"""Example using ome_writers to write a 5D image with transposed storage order."""
 
 import sys
 
