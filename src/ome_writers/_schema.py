@@ -430,11 +430,11 @@ class AcquisitionSettings(_BaseModel):
     )
     backend: BackendName | Literal["auto"] = Field(
         default="auto",
-        description="Storage backend to use for writing data.  May be one of "
-        "'acquire-zarr', 'tensorstore', 'zarr-python', or 'tifffile'.  If 'auto' (the "
-        "default), the backend will be chosen based on the `root_path` extension and "
-        "available dependencies. Zarr backends are chosen in the order: tensorstore, "
-        "acquire-zarr, then zarr-python.",
+        description="Storage backend to use for writing data.  Must be one of "
+        "'acquire-zarr', 'tensorstore', 'zarr-python', 'tifffile', or 'auto'.  "
+        "If 'auto' (the default), the backend will be chosen based on the `root_path` "
+        "extension and available dependencies. Zarr backends are chosen in the order: "
+        "tensorstore, acquire-zarr, then zarr-python.",
     )
 
     @property

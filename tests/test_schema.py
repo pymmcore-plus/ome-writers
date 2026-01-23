@@ -322,7 +322,7 @@ def test_non_xy_dimension_type_none_warning() -> None:
         assert [d.type for d in settings.dimensions] == ["space", "space"]
 
 
-def test_tiff_backend_format() -> None:
+def test_tiff_backend_format(tiff_backend: str) -> None:
     """Test format property returns 'tiff' for tiff backend."""
     settings = AcquisitionSettings(
         root_path="test",
@@ -331,7 +331,7 @@ def test_tiff_backend_format() -> None:
             Dimension(name="x", count=64, type="space"),
         ],
         dtype="uint16",
-        backend="tifffile",
+        backend=tiff_backend,
     )
     assert settings.format == "tiff"
 
@@ -421,7 +421,7 @@ def test_storage_order_acquisition() -> None:
     assert [d.name for d in settings.storage_index_dimensions] == ["z", "c", "t"]
 
 
-def test_storage_order_ome_with_tiff() -> None:
+def test_storage_order_ome_with_tiff(tiff_backend: str) -> None:
     """Test storage_order='ome' with tiff backend."""
     settings = AcquisitionSettings(
         root_path="test.ome.tiff",
@@ -433,7 +433,7 @@ def test_storage_order_ome_with_tiff() -> None:
         ],
         dtype="uint16",
         storage_order="ome",
-        backend="tifffile",
+        backend=tiff_backend,
     )
     # For TIFF, the sort key should use _ome_tiff_sort_key
     assert settings.format == "tiff"
