@@ -12,28 +12,13 @@
 
 import sys
 
+import numpy as np
+import useq
+from pymmcore_plus import CMMCorePlus
+
 from ome_writers import AcquisitionSettings, create_stream, dims_from_useq
 
-try:
-    import useq
-    from pymmcore_plus import CMMCorePlus
-except ImportError as e:
-    raise ImportError(
-        "This example requires pymmcore-plus. Please install it via "
-        "pip install pymmcore-plus"
-    ) from e
-
-
-# use command line argument to select backend:
-# `uv run examples/pymmcore_plus_example.py tiff` for OME-TIFF
-# `uv run examples/pymmcore_plus_example.py tensorstore`  (or `zarr`, `acquire-zarr`)
-BACKEND = "auto" if len(sys.argv) < 2 else sys.argv[1]
-SUFFIX = ".ome.tiff" if BACKEND == "tiff" else ".ome.zarr"
-
-# --------------------------CONFIGURATION SECTION--------------------------#
-
-
-# Initialize pymmcore-plus core and load system configuration
+# Initialize pymmcore-plus core and load system configuration (null = demo config)
 core = CMMCorePlus()
 core.loadSystemConfiguration()
 
@@ -47,12 +32,18 @@ seq = useq.MDASequence(
 )
 
 # Setup the AcquisitionSettings, converting the MDASequence to ome-writers Dimensions
+# Derive backend from command line argument (default: auto)
+BACKEND = "auto" if len(sys.argv) < 2 else sys.argv[1]
+suffix = ".ome.tiff" if BACKEND == "tiff" else ".ome.zarr"
+
 settings = AcquisitionSettings(
-    root_path=f"example_pymmcore_plus{SUFFIX}",
+    root_path=f"example_pymmcore_plus{suffix}",
+    # use dims_from_useq to convert MDASequence to ome_writers.Dimensions
     dimensions=dims_from_useq(
         seq,
         image_width=core.getImageWidth(),
         image_height=core.getImageHeight(),
+        pixel_size_um=core.getPixelSizeUm(),
     ),
     dtype=f"uint{core.getImageBitDepth()}",
     overwrite=True,
@@ -61,6 +52,17 @@ settings = AcquisitionSettings(
 
 # Open the stream and run the sequence
 with create_stream(settings) as stream:
-    # Append frames to the stream on frameReady event
-    core.mda.events.frameReady.connect(lambda frame, *_: stream.append(frame))
+    # Connect frameReady event to append frames to the stream
+    @core.mda.events.frameReady.connect
+    def _on_frame(frame: np.ndarray, event: useq.MDAEvent, metadata: dict) -> None:
+        stream.append(frame)
+
+    # Tell pymmcore-plus to run the useq.MDASequence
     core.mda.run(seq)
+
+
+if settings.format == "zarr":
+    import yaozarrs
+
+    yaozarrs.validate_zarr_store(settings.root_path)
+    print("✓ Zarr store is valid")
