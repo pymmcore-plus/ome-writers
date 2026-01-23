@@ -13,8 +13,8 @@ if TYPE_CHECKING:
 
     import numpy as np
 
-    from ome_writers.backends._backend import ArrayBackend
-    from ome_writers.schema import AcquisitionSettings
+    from ome_writers._backends._backend import ArrayBackend
+    from ome_writers._schema import AcquisitionSettings
 
 __all__ = ["OMEStream", "create_stream"]
 
@@ -109,28 +109,28 @@ def _is_tensorstore_available() -> bool:
 BACKENDS: list[BackendMetadata] = [
     BackendMetadata(
         name="zarr",
-        module_path="ome_writers.backends._zarr_python",
+        module_path="ome_writers._backends._zarr_python",
         class_name="ZarrBackend",
         format="zarr",
         is_available=_is_zarr_available,
     ),
     BackendMetadata(
         name="tensorstore",
-        module_path="ome_writers.backends._tensorstore",
+        module_path="ome_writers._backends._tensorstore",
         class_name="TensorstoreBackend",
         format="zarr",
         is_available=_is_tensorstore_available,
     ),
     BackendMetadata(
         name="tiff",
-        module_path="ome_writers.backends._tifffile",
+        module_path="ome_writers._backends._tifffile",
         class_name="TiffBackend",
         format="tiff",
         is_available=_is_tiffile_available,
     ),
     BackendMetadata(
         name="acquire-zarr",
-        module_path="ome_writers.backends._acquire_zarr",
+        module_path="ome_writers._backends._acquire_zarr",
         class_name="AcquireZarrBackend",
         format="zarr",
         is_available=_is_acquire_zarr_available,

@@ -14,9 +14,7 @@ if TYPE_CHECKING:
     # may be imported at top level, but only for type checking
     from ome_writers._stream import OMEStream as OMEStream
 
-from ome_writers._stream import create_stream
-from ome_writers._util import dims_from_useq
-from ome_writers.schema import (
+from ome_writers._schema import (
     AcquisitionSettings,
     Dimension,
     Plate,
@@ -25,6 +23,8 @@ from ome_writers.schema import (
     StandardAxis,
     dims_from_standard_axes,
 )
+from ome_writers._stream import create_stream
+from ome_writers._util import dims_from_useq
 
 __all__ = [
     "AcquisitionSettings",

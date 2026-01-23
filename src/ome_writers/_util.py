@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, cast
 import numpy as np
 import numpy.typing as npt
 
-from ome_writers.schema import (
+from ome_writers._schema import (
     Dimension,
     PositionDimension,
     StandardAxis,
