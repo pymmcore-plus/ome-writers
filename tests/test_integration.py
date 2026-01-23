@@ -332,7 +332,7 @@ def test_chunk_memory_warning(
                 D(name="x", count=2048, chunk_size=64, type="space"),
             ],
             dtype="uint16",
-            backend="zarr",
+            backend="zarr-python",
         )
 
 

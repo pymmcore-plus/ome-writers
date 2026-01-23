@@ -8,7 +8,7 @@ TIFF_BACKENDS = []
 if importlib.util.find_spec("tensorstore") is not None:
     ZARR_BACKENDS.append("tensorstore")
 if importlib.util.find_spec("zarr") is not None and sys.version_info >= (3, 11):
-    ZARR_BACKENDS.append("zarr")
+    ZARR_BACKENDS.append("zarr-python")
 if importlib.util.find_spec("acquire_zarr") is not None:
     ZARR_BACKENDS.append("acquire-zarr")
 if importlib.util.find_spec("tifffile") is not None:
