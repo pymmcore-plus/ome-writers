@@ -1,9 +1,3 @@
-# /// script
-# requires-python = ">=3.11,<3.14"
-# dependencies = [
-#     "ome-writers[all]",
-# ]
-# ///
 """Example using ome_writers to write a 5D image with transposed storage order."""
 
 import sys

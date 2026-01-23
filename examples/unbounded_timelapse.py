@@ -1,9 +1,3 @@
-# /// script
-# requires-python = ">=3.11,<3.14"
-# dependencies = [
-#     "ome-writers[all]",
-# ]
-# ///
 """Example of using ome_writers with unbounded first dimension.
 
 This simulates visiting two positions for an "unknown" number of timepoints.

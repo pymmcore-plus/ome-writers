@@ -1,9 +1,3 @@
-# /// script
-# requires-python = ">=3.11,<3.14"
-# dependencies = [
-#     "ome-writers[all]",
-# ]
-# ///
 """Basic example of using ome_writers to write OME HCS plate format."""
 
 import sys
