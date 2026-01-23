@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import warnings
 from enum import Enum
-from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeAlias, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeAlias, cast, get_args
 
 import numpy as np
 from annotated_types import Len
@@ -357,6 +357,11 @@ class Plate(_BaseModel):
     )
 
 
+TiffCompression: TypeAlias = Literal["lzw", "none"]
+ZarrCompression: TypeAlias = Literal["blosc-zstd", "blosc-lz4", "zstd", "none"]
+Compression: TypeAlias = TiffCompression | ZarrCompression
+
+
 class AcquisitionSettings(_BaseModel):
     """Top-level acquisition settings.
 
@@ -391,10 +396,13 @@ class AcquisitionSettings(_BaseModel):
         description="Data type of the pixel data to be written, e.g. 'uint8', "
         "'uint16', 'float32', etc. Must be a valid numpy DTypeLike string.",
     )
-    compression: str | None = None
-    # "ome" means "spec-compliant" storage order.
-    # It MAY depend on the output format (e.g. OME-Zarr vs OME-TIFF) and
-    # version, and backends may have different restrictions.
+    compression: Compression | None = Field(
+        default=None,
+        description="Compression algorithm for the storage backend. "
+        "Zarr backends support: 'blosc-zstd', 'blosc-lz4', 'zstd', 'none'. "
+        "TIFF backend supports: 'lzw', 'none'. "
+        "If None, no compression is applied.",
+    )
     storage_order: Literal["acquisition", "ome"] | list[str] = Field(
         default="ome",
         description="Storage order for non-frame dimensions (if different from "
@@ -508,6 +516,28 @@ class AcquisitionSettings(_BaseModel):
         return self.storage_index_dimensions + self.frame_dimensions
 
     # --------- Validators ---------
+
+    @model_validator(mode="after")
+    def _validate_format_compression(self) -> AcquisitionSettings:
+        """Validate compression is supported for selected format."""
+        if self.compression is None:
+            return self
+        if self.format == "tiff":
+            tiff_args = get_args(TiffCompression)
+            if self.compression not in tiff_args:
+                raise ValueError(
+                    f"Compression '{self.compression}' is not supported for OME-TIFF. "
+                    f"Supported: {tiff_args}."
+                )
+        else:
+            zarr_args = get_args(ZarrCompression)
+            if self.compression not in zarr_args:
+                raise ValueError(
+                    f"Compression '{self.compression}' is not supported for OME-Zarr. "
+                    f"Supported: {zarr_args}."
+                )
+
+        return self
 
     @model_validator(mode="after")
     def _validate_storage_order(self) -> AcquisitionSettings:

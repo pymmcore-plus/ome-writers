@@ -45,6 +45,7 @@ class TiffBackend(ArrayBackend):
         self._finalized = False
         self._storage_dims: tuple[Dimension, ...] | None = None
         self._cached_metadata: ome.OME | None = None  # Cache for get_metadata()
+        self._compression: str | None = None
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         """Check if settings are compatible with TIFF backend."""
@@ -55,6 +56,16 @@ class TiffBackend(ArrayBackend):
                 "Root path must end with .tif, .tiff, .ome.tif, or .ome.tiff "
                 "for TiffBackend."
             )
+
+        # for now, assume we use the same compression strings as tifffile
+        if settings.compression not in (None, "none") and not hasattr(
+            tifffile.COMPRESSION, settings.compression.upper()
+        ):  # pragma: no cover
+            supported = {"none"} | set(tifffile.COMPRESSION.__members__.keys())
+            return (
+                f"Compression '{settings.compression}' is not supported by "
+                f"TiffBackend. Supported: {supported}."
+            )
         return False
 
     def prepare(self, settings: AcquisitionSettings, router: FrameRouter) -> None:
@@ -64,6 +75,12 @@ class TiffBackend(ArrayBackend):
         positions = settings.positions
         self._storage_dims = storage_dims = settings.array_storage_dimensions
         self._dtype = settings.dtype
+
+        # Extract and validate compression
+        if settings.compression in (None, "none"):
+            compression = None
+        else:
+            compression = getattr(tifffile.COMPRESSION, settings.compression.upper())
 
         # Compute shape from storage dimensions
         shape = tuple(d.count if d.count is not None else 1 for d in storage_dims)
@@ -101,6 +118,7 @@ class TiffBackend(ArrayBackend):
                 image_queue=q,
                 ome_xml=ome_xml,
                 has_unbounded=has_unbounded,
+                compression=compression,
             )
             thread.start()
 
@@ -349,6 +367,7 @@ class WriterThread(threading.Thread):
         ome_xml: str = "",
         pixelsize: float = 1.0,
         has_unbounded: bool = False,
+        compression: tifffile.COMPRESSION | None = None,
     ) -> None:
         super().__init__(daemon=True, name=f"TiffWriterThread-{next(_thread_counter)}")
         self._path = path
@@ -358,6 +377,7 @@ class WriterThread(threading.Thread):
         self._ome_xml = ome_xml
         self._res = 1 / pixelsize
         self._has_unbounded = has_unbounded
+        self._compression = compression
         self.frames_written = 0  # Track actual frames written for unbounded dims
 
     def run(self) -> None:
@@ -388,6 +408,7 @@ class WriterThread(threading.Thread):
                             resolutionunit=tifffile.RESUNIT.MICROMETER,
                             photometric=tifffile.PHOTOMETRIC.MINISBLACK,
                             description=self._ome_xml if i == 0 else None,
+                            compression=self._compression,
                         )
                 else:
                     # For bounded dimensions, use iterator with shape
@@ -399,6 +420,7 @@ class WriterThread(threading.Thread):
                         resolutionunit=tifffile.RESUNIT.MICROMETER,
                         photometric=tifffile.PHOTOMETRIC.MINISBLACK,
                         description=self._ome_xml,
+                        compression=self._compression,
                     )
         except Exception as e:  # pragma: no cover
             # Suppress over-eager tifffile exception for incomplete writes
