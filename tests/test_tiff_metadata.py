@@ -20,10 +20,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 try:
-    import tifffile
-    from ome_types import from_tiff, from_xml
+    from ome_types import from_tiff
 except ImportError:
-    pytest.skip("tifffile or ome_types not installed", allow_module_level=True)
+    pytest.skip("ome_types not installed", allow_module_level=True)
 
 
 def test_update_metadata_single_file(tmp_path: Path) -> None:
@@ -44,17 +43,16 @@ def test_update_metadata_single_file(tmp_path: Path) -> None:
         for _ in range(2):
             stream.append(np.random.randint(0, 1000, (32, 32), dtype=np.uint16))
 
-    # Update metadata after context exits (TIFF requires files to be closed)
+    # Update metadata after context exits
     metadata = stream.get_metadata()
     metadata.images[0].name = "Updated Image"
     metadata.images[0].pixels.channels[0].name = "Updated Channel"
     stream.update_metadata(metadata)
 
     # Verify on disk
-    with tifffile.TiffFile(str(tmp_path / "test.ome.tiff")) as tif:
-        ome_obj = from_xml(tif.ome_metadata)
-        assert ome_obj.images[0].name == "Updated Image"
-        assert ome_obj.images[0].pixels.channels[0].name == "Updated Channel"
+    ome_obj = from_tiff(str(tmp_path / "test.ome.tiff"))
+    assert ome_obj.images[0].name == "Updated Image"
+    assert ome_obj.images[0].pixels.channels[0].name == "Updated Channel"
 
 
 def test_update_metadata_multiposition(tmp_path: Path) -> None:
@@ -75,19 +73,17 @@ def test_update_metadata_multiposition(tmp_path: Path) -> None:
         for _ in range(4):
             stream.append(np.random.randint(0, 1000, (32, 32), dtype=np.uint16))
 
-    # Update metadata after context exits
+    # Update metadata
     metadata = stream.get_metadata()
     metadata.images[0].name = "Position 0 Updated"
     metadata.images[1].name = "Position 1 Updated"
     stream.update_metadata(metadata)
 
     # Verify each position file
-    base_path = tmp_path / "multipos"
     for pos_idx in range(2):
-        pos_file = base_path.with_name(f"{base_path.name}_p{pos_idx:03d}.ome.tiff")
-        with tifffile.TiffFile(str(pos_file)) as tif:
-            ome_obj = from_xml(tif.ome_metadata)
-            assert ome_obj.images[0].name == f"Position {pos_idx} Updated"
+        pos_file = tmp_path / f"multipos_p{pos_idx:03d}.ome.tiff"
+        ome_obj = from_tiff(str(pos_file))
+        assert ome_obj.images[0].name == f"Position {pos_idx} Updated"
 
 
 def test_update_metadata_error_conditions(tmp_path: Path) -> None:
@@ -114,9 +110,8 @@ def test_update_metadata_error_conditions(tmp_path: Path) -> None:
     metadata.images[0].name = "Fixed"
     stream.update_metadata(metadata)
 
-    with tifffile.TiffFile(str(tmp_path / "error.ome.tiff")) as tif:
-        ome_obj = from_xml(tif.ome_metadata)
-        assert ome_obj.images[0].name == "Fixed"
+    ome_obj = from_tiff(str(tmp_path / "error.ome.tiff"))
+    assert ome_obj.images[0].name == "Fixed"
 
 
 def test_update_metadata_with_plates(tmp_path: Path) -> None:
@@ -142,31 +137,29 @@ def test_update_metadata_with_plates(tmp_path: Path) -> None:
         for _ in range(2):
             stream.append(np.random.randint(0, 1000, (32, 32), dtype=np.uint16))
 
-    # Update metadata after context exits
+    # Update metadata
     metadata = stream.get_metadata()
     metadata.images[0].name = "Well A01"
     metadata.images[1].name = "Well A02"
     stream.update_metadata(metadata)
 
     # Verify each well file has updated name
-    base_path = tmp_path / "plate"
     for pos_idx in range(2):
-        pos_file = base_path.with_name(f"{base_path.name}_p{pos_idx:03d}.ome.tiff")
-        with tifffile.TiffFile(str(pos_file)) as tif:
-            ome_obj = from_xml(tif.ome_metadata)
-            assert ome_obj.images[0].name == f"Well A0{pos_idx + 1}"
+        pos_file = tmp_path / f"plate_p{pos_idx:03d}.ome.tiff"
+        ome_obj = from_tiff(str(pos_file))
+        assert ome_obj.images[0].name == f"Well A0{pos_idx + 1}"
 
 
-def test_tiff_metadata_physical_sizes_and_acquisition_date(tmp_path: Path) -> None:
-    """Test that physical sizes and acquisition date are correctly written."""
+def test_tiff_metadata_physical_sizes_and_names(tmp_path: Path) -> None:
+    """Test physical sizes, acquisition date, and image names."""
     settings = AcquisitionSettings(
         root_path=str(tmp_path / "test_metadata.ome.tiff"),
         dimensions=[
             Dimension(name="c", count=2, type="channel"),
-            Dimension(name="z", count=3, type="space", scale=1.0, unit="µm"),
+            Dimension(name="z", count=3, type="space", scale=1.0, unit="micrometer"),
             Dimension(name="t", count=1, type="time"),
-            Dimension(name="y", count=64, type="space", scale=0.5, unit="µm"),
-            Dimension(name="x", count=64, type="space", scale=0.5, unit="µm"),
+            Dimension(name="y", count=64, type="space", scale=0.5, unit="micrometer"),
+            Dimension(name="x", count=64, type="space", scale=0.5, unit="micrometer"),
         ],
         dtype="uint16",
         backend="tiff",
@@ -176,11 +169,10 @@ def test_tiff_metadata_physical_sizes_and_acquisition_date(tmp_path: Path) -> No
         for _ in range(6):  # 2 channels * 3 z-slices
             stream.append(np.random.randint(0, 1000, (64, 64), dtype=np.uint16))
 
-    # Read metadata using from_tiff (validates and parses)
     ome_obj = from_tiff(str(tmp_path / "test_metadata.ome.tiff"))
-
-    # Verify physical sizes
     pixels = ome_obj.images[0].pixels
+
+    # Verify physical sizes and units
     assert pixels.physical_size_x == 0.5
     assert pixels.physical_size_x_unit.value == "µm"
     assert pixels.physical_size_y == 0.5
@@ -188,28 +180,11 @@ def test_tiff_metadata_physical_sizes_and_acquisition_date(tmp_path: Path) -> No
     assert pixels.physical_size_z == 1.0
     assert pixels.physical_size_z_unit.value == "µm"
 
-    # Verify acquisition date is present
+    # Verify acquisition date
     assert ome_obj.images[0].acquisition_date is not None
 
-
-def test_tiff_metadata_image_names_without_ome_extension(tmp_path: Path) -> None:
-    """Test that image names don't include .ome extension."""
-    # Single position
-    settings = AcquisitionSettings(
-        root_path=str(tmp_path / "test.ome.tiff"),
-        dimensions=[
-            Dimension(name="y", count=32, type="space"),
-            Dimension(name="x", count=32, type="space"),
-        ],
-        dtype="uint16",
-        backend="tiff",
-    )
-
-    with create_stream(settings) as stream:
-        stream.append(np.random.randint(0, 1000, (32, 32), dtype=np.uint16))
-
-    ome_obj = from_tiff(str(tmp_path / "test.ome.tiff"))
-    assert ome_obj.images[0].name == "test"
+    # Verify image name strips .ome extension
+    assert ome_obj.images[0].name == "test_metadata"
     assert not ome_obj.images[0].name.endswith(".ome")
 
 
@@ -220,7 +195,7 @@ def test_tiff_multiposition_detailed_metadata(tmp_path: Path) -> None:
         dimensions=[
             PositionDimension(positions=["Pos0", "Pos1"]),
             Dimension(name="c", count=2, type="channel"),
-            Dimension(name="z", count=3, type="space", scale=1.0, unit="µm"),
+            Dimension(name="z", count=3, type="space", scale=1.0, unit="micrometer"),
             Dimension(name="t", count=1, type="time"),
             Dimension(name="y", count=32, type="space"),
             Dimension(name="x", count=32, type="space"),
