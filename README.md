@@ -31,22 +31,24 @@ one backend extra:
 pip install ome-writers[<backend>]
 ```
 
-Where `<backend>` is a comma-separated list of one or more of the following:
+...where `<backend>` is a comma-separated list of one or more of the following:
 
-- `tensorstore` — Uses [tensorstore](https://github.com/google/tensorstore) and
-  [yaozarrs](https://github.com/tlambert03/yaozarrs) for metadata, supports
+- `tensorstore` — Uses [tensorstore](https://github.com/google/tensorstore), supports
   OME-Zarr v0.5.
 - `acquire-zarr` — Uses
   [acquire-zarr](https://github.com/acquire-project/acquire-zarr), supports
   OME-Zarr v0.5.
-- `zarr` — Uses [zarr-python](https://github.com/zarr-developers/zarr-python)
-  and [yaozarrs](https://github.com/tlambert03/yaozarrs) for metadata, supports
+- `zarr-python` — Uses [zarr-python](https://github.com/zarr-developers/zarr-python), supports
   OME-Zarr v0.5.
 - `tifffile` — Uses [tifffile](https://github.com/cgohlke/tifffile), supports
   OME-TIFF.
 - `all` — install all backends.
 
-(Developers using `uv sync` will end up with all backends installed by default.)
+> [!Note]
+> All zarr-backends use [yaozarrs](https://github.com/tlambert03/yaozarrs) to generate
+> OME-Zarr metadata and create zarr hierarchies (only array-writing is handled by the selected backend).
+
+(Developers using `uv sync` will end up with `all` backends installed by default.)
 
 ## Basic Usage
 
