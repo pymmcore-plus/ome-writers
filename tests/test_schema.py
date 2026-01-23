@@ -331,7 +331,7 @@ def test_tiff_backend_format() -> None:
             Dimension(name="x", count=64, type="space"),
         ],
         dtype="uint16",
-        backend="tiff",
+        backend="tifffile",
     )
     assert settings.format == "tiff"
 
@@ -433,7 +433,7 @@ def test_storage_order_ome_with_tiff() -> None:
         ],
         dtype="uint16",
         storage_order="ome",
-        backend="tiff",
+        backend="tifffile",
     )
     # For TIFF, the sort key should use _ome_tiff_sort_key
     assert settings.format == "tiff"

@@ -37,7 +37,7 @@ def test_update_metadata_single_file(tmp_path: Path) -> None:
             Dimension(name="x", count=32, type="space"),
         ],
         dtype="uint16",
-        backend="tiff",
+        backend="tifffile",
     )
 
     with create_stream(settings) as stream:
@@ -68,7 +68,7 @@ def test_update_metadata_multiposition(tmp_path: Path) -> None:
             Dimension(name="x", count=32, type="space"),
         ],
         dtype="uint16",
-        backend="tiff",
+        backend="tifffile",
     )
 
     with create_stream(settings) as stream:
@@ -99,7 +99,7 @@ def test_update_metadata_error_conditions(tmp_path: Path) -> None:
             Dimension(name="x", count=32, type="space"),
         ],
         dtype="uint16",
-        backend="tiff",
+        backend="tifffile",
     )
 
     with create_stream(settings) as stream:
@@ -134,7 +134,7 @@ def test_update_metadata_with_plates(tmp_path: Path) -> None:
             Dimension(name="x", count=32, type="space"),
         ],
         dtype="uint16",
-        backend="tiff",
+        backend="tifffile",
         plate=Plate(name="Test Plate", row_names=["A"], column_names=["1", "2"]),
     )
 
