@@ -23,7 +23,7 @@ from ome_writers._memory import warn_if_high_memory_usage
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-BackendName: TypeAlias = Literal["acquire-zarr", "tensorstore", "zarr", "tiff"]
+BackendName: TypeAlias = Literal["acquire-zarr", "tensorstore", "zarr-python", "tiff"]
 DimensionType: TypeAlias = Literal["space", "time", "channel", "other"]
 StandardAxisKey: TypeAlias = Literal["x", "y", "z", "c", "t", "p"]
 

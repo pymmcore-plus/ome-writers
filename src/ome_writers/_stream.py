@@ -117,7 +117,7 @@ def _is_tensorstore_available() -> bool:
 
 BACKENDS: list[BackendMetadata] = [
     BackendMetadata(
-        name="zarr",
+        name="zarr-python",
         module_path="ome_writers._backends._zarr_python",
         class_name="ZarrBackend",
         format="zarr",
@@ -206,7 +206,7 @@ def _get_auto_selection_order(target_format: Literal["tiff", "zarr"]) -> list[st
     # For zarr format
     order = ["tensorstore", "acquire-zarr"]
     if sys.version_info >= (3, 11):
-        order.append("zarr")
+        order.append("zarr-python")
     return [name for name in order if name in AVAILABLE_BACKENDS]
 
 
