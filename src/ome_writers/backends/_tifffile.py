@@ -76,39 +76,26 @@ class TiffBackend(ArrayBackend):
         # Prepare file paths
         fnames = self._prepare_files(root, len(positions), settings.overwrite)
 
-        # Generate UUIDs and metadata for all positions
+        # Generate UUIDs and OME metadata for all positions
         import uuid
 
-        all_images = []
+        all_images, num_pos = [], len(positions)
         for p_idx, fname in enumerate(fnames):
-            # Generate UUID for this file
-            file_uuid = str(uuid.uuid4())
-            self._file_uuids[p_idx] = file_uuid
-
-            # Generate OME Image for this position
-            image = _create_ome_image(
-                storage_dims,
-                dtype,
-                Path(fname).name,
-                image_index=p_idx,
-                file_uuid=file_uuid,
-                num_positions=len(positions),
+            self._file_uuids[p_idx] = file_uuid = str(uuid.uuid4())
+            all_images.append(
+                _create_ome_image(
+                    storage_dims, dtype, Path(fname).name, p_idx, file_uuid, num_pos
+                )
             )
-            all_images.append(image)
-
-        # Cache complete OME metadata with all positions
         self._cached_metadata = ome.OME(images=all_images)
 
         # Create writer thread for each position
         for p_idx, fname in enumerate(fnames):
-            # For multiposition: write complete OME with all images
-            # For single position: write single-image OME
-            if len(positions) > 1:
+            if num_pos > 1:  # multiposition: write complete OME with all images
                 ome_xml = self._cached_metadata.to_xml()
             else:
                 ome_xml = ome.OME(images=[all_images[p_idx]]).to_xml()
-            # Convert µ to HTML entity for ASCII compatibility
-            ome_xml = ome_xml.replace("µ", "&#x00B5;")
+            ome_xml = ome_xml.replace("µ", "&#x00B5;")  # ASCII compatibility
 
             self._file_paths[p_idx] = fname
             self._queues[p_idx] = q = Queue()
@@ -261,27 +248,23 @@ class TiffBackend(ArrayBackend):
         )
 
         # Regenerate OME metadata for each position
-        all_images = []
+        all_images, num_pos = [], len(self._file_paths)
         for p_idx, fname in self._file_paths.items():
             image = _create_ome_image(
                 corrected_dims,
                 self._dtype,
                 Path(fname).name,
-                image_index=p_idx,
-                file_uuid=self._file_uuids.get(p_idx),
-                num_positions=len(self._file_paths),
+                p_idx,
+                self._file_uuids.get(p_idx),
+                num_pos,
             )
             all_images.append(image)
-
-            # Update the TIFF file's description tag
-            try:
-                ome_xml = ome.OME(images=[image]).to_xml()
-                ascii_xml = ome_xml.replace("µ", "&#x00B5;").encode("ascii")
-                tifffile.tiffcomment(fname, comment=ascii_xml)
+            try:  # Update the TIFF file's description tag
+                xml = ome.OME(images=[image]).to_xml().replace("µ", "&#x00B5;")
+                tifffile.tiffcomment(fname, comment=xml.encode("ascii"))
             except Exception as e:  # pragma: no cover
                 warnings.warn(
-                    f"Failed to update OME metadata in {fname}: {e}",
-                    stacklevel=2,
+                    f"Failed to update OME metadata in {fname}: {e}", stacklevel=2
                 )
 
         # Update cached metadata with corrected dimensions
@@ -444,118 +427,71 @@ def _create_ome_image(
     file_uuid: str | None = None,
     num_positions: int = 1,
 ) -> ome.Image:
-    """Generate OME Image object for TIFF file.
-
-    Creates basic OME Image structure. The dimension order is determined
-    by the storage dimensions order.
-    """
+    """Generate OME Image object for TIFF file."""
     from datetime import datetime, timezone
 
-    # Build shape dictionary from dimensions
     shape_dict = {d.name.upper(): d.count or 1 for d in dims}
-    size_t = shape_dict.get("T", 1)
-    size_c = shape_dict.get("C", 1)
-    size_z = shape_dict.get("Z", 1)
-    # OME-XML has fasted-varying dimension on the left (rightmost in storage order)
+    size_t, size_c, size_z = (shape_dict.get(k, 1) for k in ("T", "C", "Z"))
     dim_order = next(
         order
         for order in ome.Pixels_DimensionOrder
         if order.value.startswith("".join(reversed(shape_dict.keys())))
     )
-
-    # Extract physical size info from dimensions
     dims_by_name = {d.name.lower(): d for d in dims}
 
-    # Generate TiffData blocks
-    tiff_data_blocks = _create_tiff_data_blocks(
-        size_c, size_z, size_t, filename, file_uuid, num_positions
-    )
+    # Build TiffData: simple for single position, detailed with UUIDs for multi
+    if num_positions == 1:
+        tiff_data_blocks = [ome.TiffData(plane_count=size_t * size_c * size_z)]
+    else:
+        tiff_data_blocks, ifd = [], 0
+        for t in range(size_t):
+            for z in range(size_z):
+                for c in range(size_c):
+                    td = ome.TiffData(
+                        ifd=ifd, plane_count=1, first_c=c, first_z=z, first_t=t
+                    )
+                    if file_uuid:
+                        td.uuid = ome.TiffData.UUID(
+                            value=f"urn:uuid:{file_uuid}", file_name=filename
+                        )
+                    tiff_data_blocks.append(td)
+                    ifd += 1
 
-    pixels_kwargs = {
-        "id": f"Pixels:{image_index}",
-        "dimension_order": dim_order,
-        "size_t": size_t,
-        "size_c": size_c,
-        "size_z": size_z,
-        "size_y": shape_dict.get("Y", 1),
-        "size_x": shape_dict.get("X", 1),
-        "type": dtype,
-        "big_endian": False,
-        "channels": [
+    pixels = ome.Pixels(
+        id=f"Pixels:{image_index}",
+        dimension_order=dim_order,
+        size_t=size_t,
+        size_c=size_c,
+        size_z=size_z,
+        size_y=shape_dict.get("Y", 1),
+        size_x=shape_dict.get("X", 1),
+        type=dtype,
+        big_endian=False,
+        channels=[
             ome.Channel(id=f"Channel:{image_index}:{i}", samples_per_pixel=1)
             for i in range(size_c)
         ],
-        "tiff_data_blocks": tiff_data_blocks,
-    }
-
+        tiff_data_blocks=tiff_data_blocks,
+    )
     # Add physical sizes if available
     for axis in ["x", "y", "z"]:
         if (dim := dims_by_name.get(axis)) and dim.scale is not None:
-            pixels_kwargs[f"physical_size_{axis}"] = dim.scale
+            setattr(pixels, f"physical_size_{axis}", dim.scale)
             if dim.unit:
-                ome_unit = _map_unit_to_ome(dim.unit)
-                if ome_unit:
-                    pixels_kwargs[f"physical_size_{axis}_unit"] = ome_unit
+                try:
+                    setattr(
+                        pixels, f"physical_size_{axis}_unit", ome.UnitsLength(dim.unit)
+                    )
+                except ValueError:
+                    pass
 
-    # Extract name without .ome extension if present
-    name = Path(filename).stem
-    if name.endswith(".ome"):
-        name = name[:-4]
-
+    name = Path(filename).stem.removesuffix(".ome")
     return ome.Image(
         id=f"Image:{image_index}",
         acquisition_date=datetime.now(timezone.utc),
-        pixels=ome.Pixels(**pixels_kwargs),
+        pixels=pixels,
         name=name,
     )
-
-
-def _map_unit_to_ome(unit: str) -> ome.UnitsLength | None:
-    """Validate and return OME UnitsLength enum value."""
-    try:
-        return ome.UnitsLength(unit)
-    except ValueError:
-        return None
-
-
-def _create_tiff_data_blocks(
-    size_c: int,
-    size_z: int,
-    size_t: int,
-    filename: str,
-    file_uuid: str | None,
-    num_positions: int,
-) -> list[ome.TiffData]:
-    """Create TiffData blocks for each plane in the TIFF file.
-
-    For multiposition files, creates detailed TiffData with UUID references.
-    For single position, creates simple TiffData with plane count.
-    """
-    if num_positions == 1:
-        # Single position: simple TiffData with plane count
-        return [ome.TiffData(plane_count=size_t * size_c * size_z)]
-
-    # Multiposition: detailed TiffData blocks with UUID references
-    tiff_data_blocks = []
-    ifd = 0
-    for t in range(size_t):
-        for z in range(size_z):
-            for c in range(size_c):
-                tiff_data = ome.TiffData(
-                    ifd=ifd,
-                    plane_count=1,
-                    first_c=c,
-                    first_z=z,
-                    first_t=t,
-                )
-                if file_uuid:
-                    tiff_data.uuid = ome.TiffData.UUID(
-                        value=f"urn:uuid:{file_uuid}", file_name=filename
-                    )
-                tiff_data_blocks.append(tiff_data)
-                ifd += 1
-
-    return tiff_data_blocks
 
 
 def _create_position_specific_ome(position_idx: int, metadata: ome.OME) -> ome.OME:
