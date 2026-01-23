@@ -36,7 +36,12 @@ tensorstore = [
 ]
 zarr-python = ["yaozarrs[write-zarr]>=0.2.0"]
 acquire-zarr = ["acquire-zarr>=0.6.0; python_version < '3.14'"]
-tifffile = ["tifffile>=2024.8.30", "ome-types>=0.6.1", "pydantic>=2.8"]
+tifffile = [
+    "tifffile>=2024.8.30",
+    "imagecodecs>=2024.9.22",
+    "ome-types>=0.6.1",
+    "pydantic>=2.8",
+]
 all = ["ome-writers[tensorstore,zarr-python,acquire-zarr,tifffile]"]
 
 [dependency-groups]
