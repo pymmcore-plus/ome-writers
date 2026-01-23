@@ -147,6 +147,7 @@ class AcquireZarrBackend(YaozarrsBackend):
             acquire-zarr compression settings
         """
         if compression in ("none", None):
+            # https://github.com/acquire-project/acquire-zarr/pull/187
             # this seems like it should work... but it causes a ton of errors:
             # return az.CompressionSettings(
             #     compressor=az.Compressor.NONE,
