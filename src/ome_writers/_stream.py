@@ -103,6 +103,10 @@ def _is_zarr_available() -> bool:
     return importlib.util.find_spec("zarr") is not None
 
 
+def _is_zarrs_available() -> bool:
+    return _is_zarr_available() and importlib.util.find_spec("zarrs") is not None
+
+
 def _is_tiffile_available() -> bool:
     return importlib.util.find_spec("tifffile") is not None
 
@@ -122,6 +126,13 @@ BACKENDS: list[BackendMetadata] = [
         class_name="ZarrBackend",
         format="zarr",
         is_available=_is_zarr_available,
+    ),
+    BackendMetadata(
+        name="zarrs-python",
+        module_path="ome_writers._backends._zarr_python",
+        class_name="ZarrsBackend",
+        format="zarr",
+        is_available=_is_zarrs_available,
     ),
     BackendMetadata(
         name="tensorstore",
