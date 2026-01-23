@@ -107,7 +107,7 @@ def _is_zarrs_available() -> bool:
     return _is_zarr_available() and importlib.util.find_spec("zarrs") is not None
 
 
-def _is_tiffile_available() -> bool:
+def _is_tifffile_available() -> bool:
     return importlib.util.find_spec("tifffile") is not None
 
 
@@ -146,7 +146,7 @@ BACKENDS: list[BackendMetadata] = [
         module_path="ome_writers._backends._tifffile",
         class_name="TiffBackend",
         format="tiff",
-        is_available=_is_tiffile_available,
+        is_available=_is_tifffile_available,
     ),
     BackendMetadata(
         name="acquire-zarr",

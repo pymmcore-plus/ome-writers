@@ -35,6 +35,10 @@ tensorstore = [
     "tensorstore>=0.1.80; python_version >= '3.11'",
 ]
 zarr-python = ["yaozarrs[write-zarr]>=0.2.0"]
+zarrs-python = [
+    "ome-writers[zarr-python]",
+    "zarrs>=0.2.1; python_version >= '3.11'",
+]
 acquire-zarr = ["acquire-zarr>=0.6.0; python_version < '3.14'"]
 tifffile = [
     "tifffile>=2024.8.30",
@@ -42,7 +46,9 @@ tifffile = [
     "ome-types>=0.6.1",
     "pydantic>=2.8",
 ]
-all = ["ome-writers[tensorstore,zarr-python,acquire-zarr,tifffile]"]
+all = [
+    "ome-writers[tensorstore,zarr-python,zarrs-python,acquire-zarr,tifffile]",
+]
 
 [dependency-groups]
 # used for all tests
@@ -62,6 +68,7 @@ tensorstore = [
     "tensorstore-stubs>=0.1.2",
 ]
 zarr-python = [{ include-group = 'test' }, "ome-writers[zarr-python]"]
+zarrs-python = [{ include-group = 'test' }, "ome-writers[zarrs-python]"]
 acquire-zarr = [
     { include-group = 'test' },
     "ome-writers[acquire-zarr]",

@@ -1,17 +1,18 @@
-import importlib.util
-import sys
-
 import pytest
+
+from ome_writers import _stream
 
 ZARR_BACKENDS = []
 TIFF_BACKENDS = []
-if importlib.util.find_spec("tensorstore") is not None:
+if _stream._is_tensorstore_available():
     ZARR_BACKENDS.append("tensorstore")
-if importlib.util.find_spec("zarr") is not None and sys.version_info >= (3, 11):
+if _stream._is_zarr_available():
     ZARR_BACKENDS.append("zarr-python")
-if importlib.util.find_spec("acquire_zarr") is not None:
+if _stream._is_zarrs_available():
+    ZARR_BACKENDS.append("zarrs-python")
+if _stream._is_acquire_zarr_available():
     ZARR_BACKENDS.append("acquire-zarr")
-if importlib.util.find_spec("tifffile") is not None:
+if _stream._is_tifffile_available():
     TIFF_BACKENDS = ["tiff"]
 
 AVAILABLE_BACKENDS = ZARR_BACKENDS + TIFF_BACKENDS
