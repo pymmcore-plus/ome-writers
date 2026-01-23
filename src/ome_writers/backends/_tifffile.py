@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
     import numpy as np
 
-    from ome_writers._router import FrameRouter, PositionInfo
+    from ome_writers._router import FrameRouter
     from ome_writers.schema import AcquisitionSettings, Dimension
 
 
@@ -112,7 +112,7 @@ class TiffBackend(ArrayBackend):
 
     def write(
         self,
-        position_info: PositionInfo,
+        position_index: int,
         index: tuple[int, ...],
         frame: np.ndarray,
     ) -> None:
@@ -125,8 +125,7 @@ class TiffBackend(ArrayBackend):
         if not self._threads:  # pragma: no cover
             raise RuntimeError("Backend not prepared. Call prepare() first.")
 
-        position_idx = position_info[0]
-        self._queues[position_idx].put(frame)
+        self._queues[position_index].put(frame)
 
     def finalize(self) -> None:
         """Flush and close all TIFF writers."""
@@ -384,13 +383,16 @@ class WriterThread(threading.Thread):
                 yield frame
 
         try:
-            with tifffile.TiffWriter(self._path, bigtiff=True, ome=False) as writer:
+            with tifffile.TiffWriter(
+                self._path, bigtiff=True, ome=False, shaped=False
+            ) as writer:
                 if self._has_unbounded:
                     # For unbounded dimensions, write frames individually
                     # to avoid shape mismatch errors
                     for i, frame in enumerate(_queue_iterator()):
                         writer.write(
                             frame,
+                            contiguous=True,
                             dtype=self._dtype,
                             resolution=(self._res, self._res),
                             resolutionunit=tifffile.RESUNIT.MICROMETER,

@@ -1,0 +1,124 @@
+from __future__ import annotations
+
+import math
+from itertools import islice
+from typing import TYPE_CHECKING
+
+import numpy as np
+
+from ome_writers._router import FrameRouter
+from ome_writers._stream import create_stream
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Mapping, Sequence
+
+    from ome_writers.schema import AcquisitionSettings
+
+# max dimension counts used for encoding/decoding coordinates
+# having this results in a consistent encoding across tests,
+# but implies that no dimension can exceed these sizes
+SIZES_UINT16 = {"c": 4, "p": 8, "t": 64, "z": 32}
+SIZES_UINT8 = {"c": 2, "p": 2, "t": 8, "z": 8}
+
+
+def encode_coord(
+    coords: Mapping[str, int] | None = None,
+    /,
+    sizes: Mapping[str, int] = SIZES_UINT16,
+    **kwargs: int,
+) -> int:
+    """Encode coordinates to unique int using alphabetical radix.
+
+    Examples
+    --------
+    >>> encode_coord(p=0, t=0, c=0, z=0)
+    0
+    >>> encode_coord(p=2, t=20, c=3)
+    1698
+    >>> encode_coord({"p": 2, "t": 20, "c": 3})
+    1698
+    """
+    if math.prod(sizes.values()) > 2**16:
+        raise ValueError("Product of sizes must not exceed 2^16.")
+    coords = dict(coords or {}) | kwargs
+
+    order = ("p", "t", "c", "z")
+    value = 0
+    multiplier = 1
+    for name in sorted(sizes, key=order.index):
+        if (coord := coords.get(name, 0)) >= sizes[name]:
+            raise ValueError(f"{name}={coord} exceeds max {sizes[name] - 1}")
+
+        value += coord * multiplier
+        multiplier *= sizes[name]
+    return value
+
+
+def decode_coord(value: int, sizes: Mapping[str, int] = SIZES_UINT16) -> dict[str, int]:
+    """Decode unique int to coordinates using alphabetical radix.
+
+    Examples
+    --------
+    >>> decode_coord(0)
+    {'p': 0, 't': 0, 'c': 0, 'z': 0}
+    >>> decode_coord(1698)
+    {'p': 2, 't': 20, 'c': 3, 'z': 0}
+    """
+    if math.prod(sizes.values()) > 2**16:
+        raise ValueError("Product of sizes must not exceed 2^16.")
+
+    order = ("p", "t", "c", "z")
+    coords = {}
+    for name in sorted(sizes, key=order.index):
+        coords[name] = value % sizes[name]
+        value //= sizes[name]
+    return coords
+
+
+def sizes_for_dtype(dtype: str) -> dict[str, int]:
+    """Return encoding sizes appropriate for dtype."""
+    if np.dtype(dtype) == np.uint8:
+        return SIZES_UINT8
+    if np.dtype(dtype) == np.uint16:
+        return SIZES_UINT16
+    raise NotImplementedError(f"Unsupported dtype: {dtype}")
+
+
+def frame_generator(
+    settings: AcquisitionSettings, *, real_unbounded_count: int = 2
+) -> Iterator[np.ndarray]:
+    router = FrameRouter(settings)
+    storage_names = tuple(d.name for d in settings.storage_index_dimensions)
+    frame_shape = tuple((d.count or 1) for d in settings.frame_dimensions)
+    total = math.prod(d.count or real_unbounded_count for d in settings.dimensions[:-2])
+    encoding_sizes = sizes_for_dtype(settings.dtype)
+
+    for pos_idx, storage_idx in islice(router, total):
+        coord = {"p": pos_idx, **dict(zip(storage_names, storage_idx, strict=False))}
+        value = encode_coord(coord, sizes=encoding_sizes)
+        yield np.full(frame_shape, value, dtype=settings.dtype)
+
+
+def write_encoded_data(
+    settings: AcquisitionSettings, *, real_unbounded_count: int = 2
+) -> None:
+    """Write data using the provided writer and settings."""
+    frames = frame_generator(settings, real_unbounded_count=real_unbounded_count)
+    with create_stream(settings) as stream:
+        for frame in frames:
+            stream.append(frame)
+
+
+def validate_encoded_frame_values(
+    arr: np.ndarray, storage_names: Sequence[str], pos_idx: int
+) -> None:
+    """Validate array contains correctly encoded coordinate values."""
+    sizes = sizes_for_dtype(arr.dtype)
+
+    for storage_idx in np.ndindex(arr.shape[:-2]):
+        coord = {"p": pos_idx, **dict(zip(storage_names, storage_idx, strict=False))}
+        expected = encode_coord(coord, sizes=sizes)
+        actual = arr[storage_idx][0, 0]  # first pixel of frame
+        assert actual == expected, (
+            f"At {storage_idx}: expected {expected}, got {actual}"
+        )

@@ -24,13 +24,12 @@ The router is the *only* component that understands both orderings:
   - "ome" - canonical OME order (format dependent)
   - list[str] - explicit axis names
 
-The router yields `(position_info, storage_index)` tuples where:
-- `position_info` is a tuple of (position_index, Position) identifying the position
+The router yields `(position_index, storage_index)` tuples where:
+- `position_index` is an integer identifying which position array to write to
 - `storage_index` is the N-dimensional index in storage order
 
 Backends receive storage-order indices directly and don't need to know about
-acquisition order. They can use position_info to access the position index
-(for array lookup) and Position metadata (name, row, column for path building).
+acquisition order. They use the position index for array lookup.
 
 Examples
 --------
@@ -49,14 +48,14 @@ Basic iteration with storage order matching acquisition order:
 ...     dtype="uint16",
 ... )
 >>> router = FrameRouter(settings)
->>> for pos_info, idx in router:
-...     print(f"pos={pos_info}, idx={idx}")
-pos=(0, Position(name='0', row=None, column=None)), idx=(0, 0)
-pos=(0, Position(name='0', row=None, column=None)), idx=(0, 1)
-pos=(0, Position(name='0', row=None, column=None)), idx=(0, 2)
-pos=(0, Position(name='0', row=None, column=None)), idx=(1, 0)
-pos=(0, Position(name='0', row=None, column=None)), idx=(1, 1)
-pos=(0, Position(name='0', row=None, column=None)), idx=(1, 2)
+>>> for pos_idx, idx in router:
+...     print(f"pos={pos_idx}, idx={idx}")
+pos=0, idx=(0, 0)
+pos=0, idx=(0, 1)
+pos=0, idx=(0, 2)
+pos=0, idx=(1, 0)
+pos=0, idx=(1, 1)
+pos=0, idx=(1, 2)
 
 Multi-position with position interleaved (time-lapse across positions):
 
@@ -79,7 +78,8 @@ Multi-position with position interleaved (time-lapse across positions):
 ...     dtype="uint16",
 ... )
 >>> router = FrameRouter(settings)
->>> for (pos_idx, pos), idx in router:
+>>> for pos_idx, idx in router:
+...     pos = settings.positions[pos_idx]
 ...     print(f"pos={pos_idx}:{pos.name}, idx={idx}")
 pos=0:A1, idx=(0, 0)
 pos=0:A1, idx=(0, 1)
@@ -95,13 +95,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from .schema import AcquisitionSettings, Position
-
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-# Type alias for position info: (position_index, Position)
-PositionInfo = tuple[int, Position]
+    from ome_writers.schema import AcquisitionSettings
 
 
 class FrameRouter:
@@ -127,9 +124,9 @@ class FrameRouter:
 
     Yields
     ------
-    tuple[PositionInfo, tuple[int, ...]]
-        (position_info, storage_index) for each frame.
-        - position_info: tuple of (position_index, Position) with index and metadata
+    tuple[int, tuple[int, ...]]
+        (position_index, storage_index) for each frame.
+        - position_index: integer index identifying which position array to write to
         - storage_index: N-dimensional index in storage order (excludes Y/X)
     """
 
@@ -152,7 +149,7 @@ class FrameRouter:
 
         self._reset()
 
-    def __iter__(self) -> Iterator[tuple[PositionInfo, tuple[int, ...]]]:
+    def __iter__(self) -> Iterator[tuple[int, tuple[int, ...]]]:
         """Return iterator, resetting to first frame."""
         self._reset()
         return self
@@ -161,8 +158,8 @@ class FrameRouter:
         self._dim_indices = [0] * self._num_non_frame_dims
         self._finished = False
 
-    def __next__(self) -> tuple[PositionInfo, tuple[int, ...]]:
-        """Yield next (position_info, storage_index) tuple.
+    def __next__(self) -> tuple[int, tuple[int, ...]]:
+        """Yield next (position_index, storage_index) tuple.
 
         This is the primary function of the FrameRouter, mapping acquisition
         order to storage order.
@@ -186,7 +183,7 @@ class FrameRouter:
 
         # Increment indices for next iteration
         self._increment_indices()
-        return (pos_idx, self._positions[pos_idx]), storage_idx
+        return pos_idx, storage_idx
 
     def _increment_indices(self) -> None:
         """Increment dimension indices like nested loops (rightmost varies fastest).

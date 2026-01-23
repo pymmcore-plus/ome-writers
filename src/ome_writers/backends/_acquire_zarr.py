@@ -3,19 +3,19 @@
 from __future__ import annotations
 
 import gc
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 import acquire_zarr as az
 
-from ._yaozarrs import YaozarrsBackend
+from ome_writers.backends._yaozarrs import YaozarrsBackend
+from ome_writers.schema import Dimension
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable
     from pathlib import Path
 
     import numpy as np
 
-    from ome_writers._router import PositionInfo
     from ome_writers.schema import AcquisitionSettings, Dimension
 
 
@@ -41,7 +41,7 @@ class AcquireZarrBackend(YaozarrsBackend):
         self._zarr_json_backup: dict[Path, bytes] = {}
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
-        if not settings.root_path.endswith(".zarr"):
+        if not settings.root_path.endswith(".zarr"):  # pragma: no cover
             return "Root path must end with .zarr for AcquireZarrBackend."
         if settings.storage_index_permutation is not None:
             return (
@@ -59,15 +59,7 @@ class AcquireZarrBackend(YaozarrsBackend):
         """Return custom writer that collects array configs as placeholders."""
 
         def custom_writer(
-            path: Path,
-            shape: tuple[int, ...],
-            dtype: Any,
-            chunks: tuple[int, ...],
-            *,
-            shards: tuple[int, ...] | None,
-            overwrite: bool,
-            compression: Any,
-            dimension_names: list[str] | None,
+            path: Path, shape: tuple[int, ...], *_: Any, **__: Any
         ) -> _ArrayPlaceholder:
             # as_posix is critical on windows to ensure forward slashes
             # which is what acquire-zarr expects
@@ -112,15 +104,15 @@ class AcquireZarrBackend(YaozarrsBackend):
 
     def write(
         self,
-        position_info: PositionInfo,
+        position_index: int,
         index: tuple[int, ...],
         frame: np.ndarray,
     ) -> None:
         """Write frame sequentially via acquire-zarr stream."""
-        if self._stream is None:
+        if self._stream is None:  # pragma: no cover
             raise RuntimeError("Backend not prepared.")
 
-        output_key = self._az_pos_keys[position_info[0]]
+        output_key = self._az_pos_keys[position_index]
         self._stream.append(frame, key=output_key)
 
     def finalize(self) -> None:
@@ -165,17 +157,8 @@ def _to_acquire_dim(dim: Dimension, frame_dim: bool) -> az.Dimension:
     )
 
 
-class _ArrayPlaceholder:
+class _ArrayPlaceholder(NamedTuple):
     """Placeholder returned by custom writer - writes are routed through ZarrStream."""
 
-    def __init__(self, output_key: str, shape: tuple[int, ...]) -> None:
-        self.output_key = output_key
-        self.shape = list(shape)
-
-    def resize(self, new_shape: Sequence[int]) -> None:
-        self.shape = list(new_shape)
-        # no updates needed to acquire-zarr stream, it already supports appending
-        # to the first dimension
-
-    def __setitem__(self, index: Any, value: Any) -> None:
-        pass  # No-op - actual writes go through ZarrStream
+    output_key: str
+    shape: tuple[int, ...]

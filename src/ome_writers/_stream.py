@@ -6,15 +6,15 @@ import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from ._router import FrameRouter
+from ome_writers._router import FrameRouter
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     import numpy as np
 
-    from .backends._backend import ArrayBackend
-    from .schema import AcquisitionSettings
+    from ome_writers.backends._backend import ArrayBackend
+    from ome_writers.schema import AcquisitionSettings
 
 __all__ = ["OMEStream", "create_stream"]
 
@@ -53,8 +53,8 @@ class OMEStream:
             If all frames have been written (for finite dimensions only).
             For unlimited dimensions, never raises StopIteration.
         """
-        pos_info, idx = next(self._iterator)
-        self._backend.write(pos_info, idx, frame)
+        pos_idx, idx = next(self._iterator)
+        self._backend.write(pos_idx, idx, frame)
 
     def get_metadata(self) -> Any:
         """Retrieve metadata from the backend.  Meaning is format-dependent."""

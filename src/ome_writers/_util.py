@@ -6,7 +6,12 @@ from typing import TYPE_CHECKING, cast
 import numpy as np
 import numpy.typing as npt
 
-from .schema import Dimension, PositionDimension, StandardAxis, dims_from_standard_axes
+from ome_writers.schema import (
+    Dimension,
+    PositionDimension,
+    StandardAxis,
+    dims_from_standard_axes,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping

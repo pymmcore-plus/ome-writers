@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import importlib.util
-import math
+import contextlib
 import re
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TypeAlias, cast
+from typing import TypeAlias
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -20,9 +21,10 @@ from ome_writers import (
     Plate,
     Position,
     PositionDimension,
+    _memory,
     create_stream,
 )
-from ome_writers._router import FrameRouter
+from tests._frame_encoder import validate_encoded_frame_values, write_encoded_data
 
 # NOTES:
 # - All root_paths will be replaced with temporary directories during testing.
@@ -39,7 +41,7 @@ CASES = [
     AcquisitionSettings(
         root_path="tmp",
         dimensions=[
-            D(name="c", count=3, type="channel"),
+            D(name="c", count=2, type="channel"),
             D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
             D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
         ],
@@ -129,6 +131,61 @@ CASES = [
         ],
         dtype="uint16",
     ),
+    # Unbounded with chunk buffering (tests resize with buffering enabled)
+    AcquisitionSettings(
+        root_path="tmp",
+        dimensions=[
+            D(name="t", count=None, chunk_size=1, type="time"),  # unbounded
+            D(name="z", count=8, chunk_size=4, type="space"),  # chunked
+            D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
+            D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
+        ],
+        dtype="uint16",
+    ),
+    # Chunk buffering: 3D with chunk_size=4
+    AcquisitionSettings(
+        root_path="tmp",
+        dimensions=[
+            D(name="z", count=16, chunk_size=4, type="space"),
+            D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
+            D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
+        ],
+        dtype="uint16",
+    ),
+    # Chunk buffering with transposition (storage_order != acquisition)
+    AcquisitionSettings(
+        root_path="tmp",
+        dimensions=[
+            D(name="t", count=2, type="time"),
+            D(name="z", count=8, chunk_size=4, type="space"),
+            D(name="c", count=4, chunk_size=2, type="channel"),
+            D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
+            D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
+        ],
+        dtype="uint16",
+    ),
+    # Chunk buffering with partial chunks at finalize
+    # (z=17 with non-divisible chunk_size=4)
+    AcquisitionSettings(
+        root_path="tmp",
+        dimensions=[
+            D(name="z", count=17, chunk_size=4, type="space"),
+            D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
+            D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
+        ],
+        dtype="uint16",
+    ),
+    # Chunk buffering with multiple positions
+    AcquisitionSettings(
+        root_path="tmp",
+        dimensions=[
+            PositionDimension(positions=["Pos0", "Pos1"]),
+            D(name="z", count=8, chunk_size=4, type="space"),
+            D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
+            D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
+        ],
+        dtype="uint16",
+    ),
 ]
 
 
@@ -145,35 +202,6 @@ StorageIdxToFrame: TypeAlias = dict[tuple[int, ...], int]
 FrameExpectation: TypeAlias = dict[int, StorageIdxToFrame]
 
 
-def _build_expected_frames(
-    case: AcquisitionSettings, num_frames: int
-) -> FrameExpectation:
-    """Build expected frame value mapping using FrameRouter.
-
-    Returns a mapping of {position index -> {storage index -> frame number}}.
-
-    This assumes that the data is written as np.full(..., fill_value=frame_number).
-    """
-    router = FrameRouter(case)
-    expected_frames: FrameExpectation = {}
-    for frame_num, ((pos_idx, _), storage_idx) in enumerate(router):
-        if frame_num >= num_frames:
-            break
-        if pos_idx not in expected_frames:
-            expected_frames[pos_idx] = {}
-        expected_frames[pos_idx][storage_idx] = frame_num
-    return expected_frames
-
-
-def _validate_expected_frames(
-    arr: np.ndarray,
-    expected_frames: StorageIdxToFrame,
-) -> None:
-    """Validate that the array contains the expected frame values."""
-    for s_idx, expected_val in expected_frames.items():
-        assert np.all(arr[s_idx][0] == expected_val)
-
-
 @pytest.mark.parametrize("case", CASES, ids=_name_case)
 def test_cases(case: AcquisitionSettings, any_backend: str, tmp_path: Path) -> None:
     is_tiff = any_backend == "tiff"
@@ -185,45 +213,21 @@ def test_cases(case: AcquisitionSettings, any_backend: str, tmp_path: Path) -> N
             "backend": any_backend,
         }
     )
-    dims = case.dimensions
-    # currently, we enforce that the last 2 dimensions are the frame dimensions
-    frame_shape = cast("tuple[int, ...]", tuple(d.count for d in dims[-2:]))
 
     # -------------- Write out all frames --------------
 
-    if (num_frames := case.num_frames) is None:
-        # unbounded, use a fixed number for testing
-        num_frames = math.prod((d.count or UNBOUNDED_FRAME_COUNT) for d in dims[:-2])
-
-    # Build expected frame value map using router
-
-    stored_array_dims = [d.model_copy() for d in case.array_storage_dimensions]
-
     try:
-        stream = create_stream(case)
+        write_encoded_data(case, real_unbounded_count=UNBOUNDED_FRAME_COUNT)
     except NotImplementedError as e:
         if re.match("Backend .* does not support settings", str(e)):
             pytest.xfail(f"Backend does not support this configuration: {e}")
             return
         raise
 
-    with stream:
-        # Create deep copies to avoid mutating the original Dimension objects
-        for f in range(num_frames):
-            frame_data = np.full(frame_shape, f, dtype=case.dtype)
-            stream.append(frame_data)
-
-    # -------------- Validate the result --------------
-    # it's always the first dimension that is possibly unbounded
-    # patch the stored_array_dims to match our expectations for validation
-    if stored_array_dims[0].count is None:
-        stored_array_dims[0].count = UNBOUNDED_FRAME_COUNT
-
-    expected_frames = _build_expected_frames(case, num_frames)
     if is_tiff:
-        _assert_valid_ome_tiff(case, stored_array_dims, expected_frames)
+        _assert_valid_ome_tiff(case)
     else:
-        _assert_valid_ome_zarr(case, stored_array_dims, expected_frames)
+        _assert_valid_ome_zarr(case)
 
 
 @pytest.mark.parametrize("fmt", ["tiff", "zarr"])
@@ -301,195 +305,165 @@ def test_overwrite_safety(tmp_path: Path, any_backend: str) -> None:
     )
 
 
+@pytest.mark.parametrize("avail_mem", [2_000_000_000, 100_000_000_000])
+def test_chunk_memory_warning(
+    avail_mem: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that large chunk buffering triggers memory warning with low memory."""
+    # Mock available memory to be low (2 GB)
+    # Config uses 64 chunks x 33.6MB = 2.15GB
+    # With 80% threshold: 2GB * 0.8 = 1.6GB < 2.15GB → should warn
+    mock_get_memory = Mock(return_value=avail_mem)
+    monkeypatch.setattr(_memory, "_get_available_memory", mock_get_memory)
+    monkeypatch.setattr(_memory.sys, "platform", "win32")  # Pretend we're on Windows
+
+    ctx = (
+        pytest.warns(UserWarning, match="Chunk buffering may use")
+        if avail_mem < 5_000_000_000
+        else contextlib.nullcontext()
+    )
+    with ctx:
+        AcquisitionSettings(
+            root_path=str(tmp_path / "output.ome.zarr"),
+            dimensions=[
+                D(name="z", count=8, chunk_size=4, type="space"),
+                D(name="c", count=64, chunk_size=1, type="channel"),
+                D(name="y", count=2048, chunk_size=64, type="space"),
+                D(name="x", count=2048, chunk_size=64, type="space"),
+            ],
+            dtype="uint16",
+            backend="zarr",
+        )
+
+
 # ---------------------- Helpers for validation ----------------------
 
 
-def _assert_valid_ome_tiff(
-    case: AcquisitionSettings,
-    stored_array_dims: list[Dimension],
-    expected_frames: dict[int, dict[tuple[int, ...], int]],
+@dataclass
+class ArrayData:
+    """Extracted array metadata and data for validation."""
+
+    shape: tuple[int, ...]
+    dtype: np.dtype
+    chunks: tuple[int, ...]
+    data: np.ndarray
+    dim_names: list[str] | None = None
+
+
+def _extract_tifffile(path: Path, storage_dims: list[D]) -> ArrayData:
+    """Extract array metadata and data using tifffile."""
+    import ome_types
+    import tifffile
+
+    ome_metadata = ome_types.from_tiff(path)
+    assert ome_metadata and ome_metadata.images, f"Invalid OME metadata: {path}"
+
+    pixels = ome_metadata.images[0].pixels
+    # Verify dimension order (OME has fastest-varying on right, storage on left)
+    expected_order = "".join(d.name.upper() for d in reversed(storage_dims))
+    assert pixels.dimension_order.value.startswith(expected_order)
+
+    ome_dims = {
+        "T": pixels.size_t,
+        "C": pixels.size_c,
+        "Z": pixels.size_z,
+        "Y": pixels.size_y,
+        "X": pixels.size_x,
+    }
+    shape = tuple(ome_dims[d.name.upper()] for d in storage_dims)
+    chunks = tuple(d.chunk_size or 1 for d in storage_dims)
+
+    return ArrayData(shape, pixels.type.numpy_dtype, chunks, tifffile.imread(path))
+
+
+def _extract_tensorstore(group: yaozarrs.ZarrGroup, az_hack: bool = False) -> ArrayData:
+    """Extract array metadata and data using tensorstore."""
+
+    array0 = group["0"].to_tensorstore()
+    shape = array0.shape
+    dim_names = [d.label for d in array0.domain]  # type: ignore
+    chunks = array0.chunk_layout.read_chunk.shape
+
+    if az_hack:  # Adjust for acquire-zarr phantom dimension
+        assert dim_names[0] == "_singleton"
+        shape, dim_names, chunks = shape[1:], dim_names[1:], chunks[1:]  # ty: ignore
+
+    return ArrayData(shape, array0.dtype, chunks, array0.read().result(), dim_names)
+
+
+def _extract_zarr(group: yaozarrs.ZarrGroup) -> ArrayData:
+    """Extract array metadata and data using zarr-python."""
+    import zarr  # noqa: F401
+
+    array0 = group["0"].to_zarr_python()
+    return ArrayData(array0.shape, np.dtype(array0.dtype), array0.chunks, array0[:])
+
+
+def _assert_array_valid(
+    extracted: ArrayData, storage_dims: list[D], expected_dtype: str, pos_idx: int
 ) -> None:
+    """Validate extracted array data against expected dimensions."""
+    expected_shape = tuple(d.count or UNBOUNDED_FRAME_COUNT for d in storage_dims)
+    expected_chunks = tuple(d.chunk_size or 1 for d in storage_dims)
+    expected_names = [d.name for d in storage_dims]
+
+    assert extracted.shape == expected_shape
+    assert extracted.dtype == np.dtype(expected_dtype)
+    assert extracted.chunks == expected_chunks
+    if extracted.dim_names is not None:
+        assert extracted.dim_names == expected_names
+
+    validate_encoded_frame_values(extracted.data, expected_names[:-2], pos_idx)
+
+
+def _assert_valid_ome_tiff(case: AcquisitionSettings) -> None:
     try:
-        import ome_types
-        import tifffile
+        import ome_types  # noqa: F401
+        import tifffile  # noqa: F401
     except ImportError:
         pytest.skip("ome-types and tifffile are required for OME-TIFF validation")
-        return
 
-    # Collect expected file paths based on position count
-    if (num_positions := len(case.positions)) == 1:
-        # Single file for single position
-        file_paths = [Path(case.root_path)]
-    else:
-        # Multiple files for multiple positions
-        # Follow the naming pattern from TiffBackend._prepare_files
-        file_paths = [
-            Path(case.root_path.replace(".ome.tiff", f"_p{p_idx:03d}.ome.tiff"))
-            for p_idx in range(num_positions)
+    num_pos = len(case.positions)
+    paths = (
+        [Path(case.root_path)]
+        if num_pos == 1
+        else [
+            Path(case.root_path.replace(".ome.tiff", f"_p{i:03d}.ome.tiff"))
+            for i in range(num_pos)
         ]
+    )
 
-    assert len(file_paths) == num_positions
-
-    # Validate each TIFF file
-    for pos_idx, file_path in enumerate(file_paths):
-        assert file_path.exists(), f"Expected TIFF file not found: {file_path}"
-
-        # Read and validate OME metadata
-        ome_metadata = ome_types.from_tiff(file_path)
-        assert ome_metadata is not None, f"Failed to read OME metadata from {file_path}"
-        assert len(ome_metadata.images) > 0, f"No images in OME metadata: {file_path}"
-
-        # Get the first image (each file has one image per position)
-        pixels = ome_metadata.images[0].pixels
-
-        # Validate basic dimensional properties
-        expected_shape = {d.name.upper(): d.count for d in stored_array_dims}
-
-        # Reverse because OME dimension order has fastest-varying dimension on right,
-        # but storage order has slowest-varying dimension first
-        expected_order = "".join(d.name.upper() for d in reversed(stored_array_dims))
-        assert pixels.dimension_order.value.startswith(expected_order)
-
-        assert pixels.size_x == expected_shape.get("X", 1)
-        assert pixels.size_y == expected_shape.get("Y", 1)
-        assert pixels.size_z == expected_shape.get("Z", 1)
-        assert pixels.size_c == expected_shape.get("C", 1)
-        assert pixels.size_t == expected_shape.get("T", 1)
-
-        # Validate dtype (basic check - OME types use uppercase enum names)
-        assert pixels.type.numpy_dtype == case.dtype
-
-        # Verify we can read the actual TIFF data
-        with tifffile.TiffFile(file_path) as tif:
-            # Just verify the file is readable and has the expected number of pages
-            expected_pages = pixels.size_t * pixels.size_c * pixels.size_z
-            assert len(tif.pages) == expected_pages, (
-                f"Expected {expected_pages} pages, got {len(tif.pages)}"
-            )
-
-            # Validate frame values
-            expected = expected_frames.get(pos_idx, {})
-            if expected:
-                shape_tuple = tuple(d.count for d in stored_array_dims[:-2])
-                shape = cast("tuple[int, ...]", shape_tuple)
-                for s_idx, expected_val in expected.items():
-                    page_num = int(np.ravel_multi_index(s_idx, shape))
-                    page_data = tif.pages[page_num].asarray()
-                    assert page_data.mean() == expected_val
+    dims = case.array_storage_dimensions
+    for i, path in enumerate(paths):
+        assert path.exists()
+        _assert_array_valid(_extract_tifffile(path, dims), dims, case.dtype, i)
 
 
-def _assert_valid_ome_zarr(
-    case: AcquisitionSettings,
-    stored_array_dims: list[Dimension],
-    expected_frames: FrameExpectation,
-) -> None:
+def _assert_valid_ome_zarr(case: AcquisitionSettings) -> None:
     root = Path(case.root_path)
     group = yaozarrs.validate_zarr_store(root)
     ome_meta = group.ome_metadata()
 
-    # Assert group type (single image, multi-position, plate)
-    # and collect image paths for further validation
-    image_paths: list[Path] = []
-    num_positions = len(case.positions)
-    # Plate
     if case.plate is not None:
         assert isinstance(ome_meta, v05.Plate)
-        image_paths = [root / p.row / p.column / p.name for p in case.positions]  # ty: ignore[unsupported-operator]
-    # Single image
-    elif num_positions == 1:
+        paths = [root / p.row / p.column / p.name for p in case.positions]  # ty: ignore
+    elif len(case.positions) == 1:
         assert isinstance(ome_meta, v05.Image)
-        image_paths = [root]
-    # Multi-position
+        paths = [root]
     else:
         assert isinstance(ome_meta, v05.Bf2Raw)
         ome_group = yaozarrs.validate_ome_uri(root / "OME")
         assert isinstance(ome_group.attributes.ome, v05.Series)
-        image_paths = [root / pos.name for pos in case.positions]
+        paths = [root / pos.name for pos in case.positions]
 
-    assert len(image_paths) == num_positions
+    dims = case.array_storage_dimensions
+    az_hack = case.backend == "acquire-zarr" and len(dims) == 2
 
-    for pos_idx, image_path in enumerate(image_paths):
-        group = yaozarrs.open_group(image_path)
-        image = group.ome_metadata()
-        assert isinstance(image, v05.Image), (
-            f"Expected Image group at {image_path}, got {type(image)}"
-        )
-
-        # NOTE:
-        # we're validating on disk data with tensorstore rather than zarr-python
-        # due to zarr-python's dropped support for python versions that are still
-        # before EOL (i.e. SPEC-0)
-        expected = expected_frames[pos_idx]
-        if importlib.util.find_spec("tensorstore") is not None:
-            _validate_array_tensorstore(
-                group,
-                stored_array_dims,
-                case.dtype,
-                expected,
-                az_hack=case.backend == "acquire-zarr" and len(stored_array_dims) == 2,
-            )
-        else:
-            _validate_array_zarr(group, stored_array_dims, case.dtype, expected)
-
-
-def _validate_array_tensorstore(
-    group: yaozarrs.ZarrGroup,
-    storage_dims: list[D],
-    dtype: str,
-    expected_frames: StorageIdxToFrame,
-    az_hack: bool = False,
-) -> None:
-    """Validate an array stored on disk using tensorstore."""
-    import tensorstore
-
-    array0 = group["0"].to_tensorstore()
-    assert isinstance(array0, tensorstore.TensorStore)
-
-    # check on disk shape, dtype, dimension order and labels
-    stored_shape = array0.shape
-    stored_labels = [d.label for d in array0.domain]  # type: ignore
-    stored_chunk_shape = array0.chunk_layout.read_chunk.shape
-    if az_hack:
-        # adjust for phantom dimension added by acquire-zarr for 2D images
-        # https://github.com/acquire-project/acquire-zarr/issues/183
-        assert stored_labels[0] == "_singleton", "Hack not present?  Fix tests?"
-        stored_shape = stored_shape[1:]
-        stored_labels = stored_labels[1:]
-        stored_chunk_shape = stored_chunk_shape[1:]  # ty: ignore
-
-    assert stored_shape == tuple(d.count for d in storage_dims)
-    assert array0.dtype == np.dtype(dtype)
-    assert stored_labels == [d.name for d in storage_dims]
-
-    # validate chunking
-    expected_chunk_shape = tuple(d.chunk_size or 1 for d in storage_dims)
-    assert stored_chunk_shape == expected_chunk_shape, (
-        f"expected {expected_chunk_shape}, got {stored_chunk_shape}"
-    )
-
-    _validate_expected_frames(array0.read().result(), expected_frames)
-
-
-def _validate_array_zarr(
-    group: yaozarrs.ZarrGroup,
-    storage_dims: list[D],
-    dtype: str,
-    expected_frames: dict[tuple[int, ...], int],
-) -> None:
-    """Validate an array stored on disk using zarr-python."""
-    import zarr
-
-    array0 = group["0"].to_zarr_python()
-    assert isinstance(array0, zarr.Array)
-
-    # check on disk shape, dtype
-    assert array0.shape == tuple(d.count for d in storage_dims)
-    assert str(array0.dtype) == dtype
-
-    # validate chunking
-    expected_chunk_shape = tuple(d.chunk_size or 1 for d in storage_dims)
-    assert array0.chunks == expected_chunk_shape, (
-        f"expected {expected_chunk_shape}, got {array0.chunks}"
-    )
-
-    _validate_expected_frames(array0, expected_frames)
+    for i, path in enumerate(paths):
+        group = yaozarrs.open_group(path)
+        assert isinstance(group.ome_metadata(), v05.Image)
+        try:
+            data = _extract_tensorstore(group, az_hack)
+        except ImportError:
+            data = _extract_zarr(group)
+        _assert_array_valid(data, dims, case.dtype, i)
