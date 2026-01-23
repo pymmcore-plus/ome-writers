@@ -249,14 +249,10 @@ class TiffBackend(ArrayBackend):
         # Regenerate OME metadata for each position
         all_images, num_pos = [], len(self._file_paths)
         for p_idx, fname in self._file_paths.items():
+            filename, file_uuid = Path(fname).name, self._file_uuids.get(p_idx)
             all_images.append(
                 _create_ome_image(
-                    corrected_dims,
-                    self._dtype,
-                    Path(fname).name,
-                    p_idx,
-                    self._file_uuids.get(p_idx),
-                    num_pos,
+                    corrected_dims, self._dtype, filename, p_idx, file_uuid, num_pos
                 )
             )
 
