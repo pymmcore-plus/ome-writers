@@ -7,7 +7,7 @@ import threading
 import uuid
 import warnings
 from datetime import datetime, timezone
-from itertools import count
+from itertools import count, product
 from pathlib import Path
 from queue import Queue
 from typing import TYPE_CHECKING, Literal
@@ -449,18 +449,25 @@ def _create_ome_image(
         tiff_data_blocks = [ome.TiffData(plane_count=size_t * size_c * size_z)]
     else:
         tiff_data_blocks, ifd = [], 0
-        for t in range(size_t):
-            for z in range(size_z):
-                for c in range(size_c):
-                    td = ome.TiffData(
-                        ifd=ifd, plane_count=1, first_c=c, first_z=z, first_t=t
-                    )
-                    if file_uuid:
-                        td.uuid = ome.TiffData.UUID(
-                            value=f"urn:uuid:{file_uuid}", file_name=filename
-                        )
-                    tiff_data_blocks.append(td)
-                    ifd += 1
+        # Get dimension names in storage order (already provided in dims)
+        dim_names = [d.name.upper() for d in dims[:-2]]  # Exclude Y, X
+        dim_sizes = {"T": size_t, "C": size_c, "Z": size_z}
+        # Build indices for all dimensions in storage order
+        for indices in product(*(range(dim_sizes[name]) for name in dim_names)):
+            coord_map = dict(zip(dim_names, indices, strict=False))
+            td = ome.TiffData(
+                ifd=ifd,
+                plane_count=1,
+                first_c=coord_map.get("C", 0),
+                first_z=coord_map.get("Z", 0),
+                first_t=coord_map.get("T", 0),
+            )
+            if file_uuid:
+                td.uuid = ome.TiffData.UUID(
+                    value=f"urn:uuid:{file_uuid}", file_name=filename
+                )
+            tiff_data_blocks.append(td)
+            ifd += 1
 
     pixels = ome.Pixels(
         id=f"Pixels:{image_index}",
