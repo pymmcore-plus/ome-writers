@@ -190,3 +190,76 @@ def test_tiff_metadata_physical_sizes_and_acquisition_date(tmp_path: Path) -> No
 
     # Verify acquisition date is present
     assert ome_obj.images[0].acquisition_date is not None
+
+
+def test_tiff_metadata_image_names_without_ome_extension(tmp_path: Path) -> None:
+    """Test that image names don't include .ome extension."""
+    # Single position
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "test.ome.tiff"),
+        dimensions=[
+            Dimension(name="y", count=32, type="space"),
+            Dimension(name="x", count=32, type="space"),
+        ],
+        dtype="uint16",
+        backend="tiff",
+    )
+
+    with create_stream(settings) as stream:
+        stream.append(np.random.randint(0, 1000, (32, 32), dtype=np.uint16))
+
+    ome_obj = from_tiff(str(tmp_path / "test.ome.tiff"))
+    assert ome_obj.images[0].name == "test"
+    assert not ome_obj.images[0].name.endswith(".ome")
+
+
+def test_tiff_multiposition_detailed_metadata(tmp_path: Path) -> None:
+    """Test multiposition files have detailed TiffData blocks with UUIDs."""
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "multipos.ome.tiff"),
+        dimensions=[
+            PositionDimension(positions=["Pos0", "Pos1"]),
+            Dimension(name="c", count=2, type="channel"),
+            Dimension(name="z", count=3, type="space", scale=1.0, unit="µm"),
+            Dimension(name="t", count=1, type="time"),
+            Dimension(name="y", count=32, type="space"),
+            Dimension(name="x", count=32, type="space"),
+        ],
+        dtype="uint16",
+        backend="tiff",
+    )
+
+    with create_stream(settings) as stream:
+        for _ in range(12):  # 2 positions * 2 channels * 3 z-slices
+            stream.append(np.random.randint(0, 1000, (32, 32), dtype=np.uint16))
+
+    # Check first position file
+    pos0_file = tmp_path / "multipos_p000.ome.tiff"
+    ome_obj = from_tiff(str(pos0_file))
+
+    # Should contain metadata for both positions
+    assert len(ome_obj.images) == 2
+    assert ome_obj.images[0].id == "Image:0"
+    assert ome_obj.images[1].id == "Image:1"
+
+    # Check detailed TiffData blocks for position 0
+    pixels0 = ome_obj.images[0].pixels
+    assert len(pixels0.tiff_data_blocks) == 6  # 2 channels * 3 z-slices
+
+    # Verify each TiffData has proper structure
+    for idx, tiff_data in enumerate(pixels0.tiff_data_blocks):
+        assert tiff_data.ifd == idx
+        assert tiff_data.plane_count == 1
+        assert tiff_data.uuid is not None
+        assert tiff_data.uuid.value.startswith("urn:uuid:")
+        assert tiff_data.uuid.file_name == "multipos_p000.ome.tiff"
+        # Check FirstC, FirstZ, FirstT are set
+        assert tiff_data.first_c is not None
+        assert tiff_data.first_z is not None
+        assert tiff_data.first_t is not None
+
+    # Verify UUIDs are different between positions
+    pixels1 = ome_obj.images[1].pixels
+    uuid0 = pixels0.tiff_data_blocks[0].uuid.value
+    uuid1 = pixels1.tiff_data_blocks[0].uuid.value
+    assert uuid0 != uuid1

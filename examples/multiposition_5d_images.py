@@ -1,5 +1,6 @@
 """Basic example of using ome_writers to write a single 5D image."""
 
+import contextlib
 import sys
 from typing import cast
 
@@ -56,3 +57,13 @@ if settings.format == "zarr":
         print("✓ Zarr store is valid")
     except ImportError:
         print("⚠ yaozarrs not installed; skipping validation")
+
+if settings.format == "tiff":
+    # Validate the output
+    with contextlib.suppress(ImportError):
+        from ome_types import from_tiff
+
+        files = [f"{settings.root_path[:-9]}_p{pos:03d}.ome.tiff" for pos in range(2)]
+        for idx, file in enumerate(files):
+            from_tiff(file)
+            print(f"✓ TIFF file {idx} is valid")

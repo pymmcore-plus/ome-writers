@@ -42,6 +42,7 @@ class TiffBackend(ArrayBackend):
         self._threads: dict[int, WriterThread] = {}
         self._queues: dict[int, Queue[np.ndarray | None]] = {}
         self._file_paths: dict[int, str] = {}  # Store paths for metadata updates
+        self._file_uuids: dict[int, str] = {}  # Store UUIDs for each file
         self._finalized = False
         self._storage_dims: tuple[Dimension, ...] | None = None
         self._cached_metadata: ome.OME | None = None  # Cache for get_metadata()
@@ -75,12 +76,23 @@ class TiffBackend(ArrayBackend):
         # Prepare file paths
         fnames = self._prepare_files(root, len(positions), settings.overwrite)
 
-        # Generate OME metadata for all positions and cache it
+        # Generate UUIDs and metadata for all positions
+        import uuid
+
         all_images = []
         for p_idx, fname in enumerate(fnames):
+            # Generate UUID for this file
+            file_uuid = str(uuid.uuid4())
+            self._file_uuids[p_idx] = file_uuid
+
             # Generate OME Image for this position
             image = _create_ome_image(
-                storage_dims, dtype, Path(fname).name, image_index=p_idx
+                storage_dims,
+                dtype,
+                Path(fname).name,
+                image_index=p_idx,
+                file_uuid=file_uuid,
+                num_positions=len(positions),
             )
             all_images.append(image)
 
@@ -89,8 +101,12 @@ class TiffBackend(ArrayBackend):
 
         # Create writer thread for each position
         for p_idx, fname in enumerate(fnames):
-            # Extract XML for this specific position (single-image OME)
-            ome_xml = ome.OME(images=[all_images[p_idx]]).to_xml()
+            # For multiposition: write complete OME with all images
+            # For single position: write single-image OME
+            if len(positions) > 1:
+                ome_xml = self._cached_metadata.to_xml()
+            else:
+                ome_xml = ome.OME(images=[all_images[p_idx]]).to_xml()
             # Convert µ to HTML entity for ASCII compatibility
             ome_xml = ome_xml.replace("µ", "&#x00B5;")
 
@@ -248,7 +264,12 @@ class TiffBackend(ArrayBackend):
         all_images = []
         for p_idx, fname in self._file_paths.items():
             image = _create_ome_image(
-                corrected_dims, self._dtype, Path(fname).name, image_index=p_idx
+                corrected_dims,
+                self._dtype,
+                Path(fname).name,
+                image_index=p_idx,
+                file_uuid=self._file_uuids.get(p_idx),
+                num_positions=len(self._file_paths),
             )
             all_images.append(image)
 
@@ -416,7 +437,12 @@ _thread_counter = count()
 
 
 def _create_ome_image(
-    dims: tuple[Dimension, ...], dtype: str, filename: str, image_index: int
+    dims: tuple[Dimension, ...],
+    dtype: str,
+    filename: str,
+    image_index: int,
+    file_uuid: str | None = None,
+    num_positions: int = 1,
 ) -> ome.Image:
     """Generate OME Image object for TIFF file.
 
@@ -439,6 +465,12 @@ def _create_ome_image(
 
     # Extract physical size info from dimensions
     dims_by_name = {d.name.lower(): d for d in dims}
+
+    # Generate TiffData blocks
+    tiff_data_blocks = _create_tiff_data_blocks(
+        size_c, size_z, size_t, filename, file_uuid, num_positions
+    )
+
     pixels_kwargs = {
         "id": f"Pixels:{image_index}",
         "dimension_order": dim_order,
@@ -450,12 +482,10 @@ def _create_ome_image(
         "type": dtype,
         "big_endian": False,
         "channels": [
-            # NB: samples_per_pixel=1 means grayscale
-            # Adjust as needed for multi-sample RGB images
             ome.Channel(id=f"Channel:{image_index}:{i}", samples_per_pixel=1)
             for i in range(size_c)
         ],
-        "tiff_data_blocks": [ome.TiffData(plane_count=size_t * size_c * size_z)],
+        "tiff_data_blocks": tiff_data_blocks,
     }
 
     # Add physical sizes if available
@@ -467,11 +497,16 @@ def _create_ome_image(
                 if ome_unit:
                     pixels_kwargs[f"physical_size_{axis}_unit"] = ome_unit
 
+    # Extract name without .ome extension if present
+    name = Path(filename).stem
+    if name.endswith(".ome"):
+        name = name[:-4]
+
     return ome.Image(
         id=f"Image:{image_index}",
         acquisition_date=datetime.now(timezone.utc),
         pixels=ome.Pixels(**pixels_kwargs),
-        name=Path(filename).stem,
+        name=name,
     )
 
 
@@ -481,6 +516,46 @@ def _map_unit_to_ome(unit: str) -> ome.UnitsLength | None:
         return ome.UnitsLength(unit)
     except ValueError:
         return None
+
+
+def _create_tiff_data_blocks(
+    size_c: int,
+    size_z: int,
+    size_t: int,
+    filename: str,
+    file_uuid: str | None,
+    num_positions: int,
+) -> list[ome.TiffData]:
+    """Create TiffData blocks for each plane in the TIFF file.
+
+    For multiposition files, creates detailed TiffData with UUID references.
+    For single position, creates simple TiffData with plane count.
+    """
+    if num_positions == 1:
+        # Single position: simple TiffData with plane count
+        return [ome.TiffData(plane_count=size_t * size_c * size_z)]
+
+    # Multiposition: detailed TiffData blocks with UUID references
+    tiff_data_blocks = []
+    ifd = 0
+    for t in range(size_t):
+        for z in range(size_z):
+            for c in range(size_c):
+                tiff_data = ome.TiffData(
+                    ifd=ifd,
+                    plane_count=1,
+                    first_c=c,
+                    first_z=z,
+                    first_t=t,
+                )
+                if file_uuid:
+                    tiff_data.uuid = ome.TiffData.UUID(
+                        value=f"urn:uuid:{file_uuid}", file_name=filename
+                    )
+                tiff_data_blocks.append(tiff_data)
+                ifd += 1
+
+    return tiff_data_blocks
 
 
 def _create_position_specific_ome(position_idx: int, metadata: ome.OME) -> ome.OME:
