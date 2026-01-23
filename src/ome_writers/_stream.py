@@ -214,10 +214,9 @@ def _get_auto_selection_order(target_format: Literal["tiff", "zarr"]) -> list[st
     if target_format == "tiff" and "tiff" in AVAILABLE_BACKENDS:
         return ["tiff"]
 
-    # For zarr format
     order = ["tensorstore", "acquire-zarr"]
     if sys.version_info >= (3, 11):
-        order.append("zarr-python")
+        order.extend(["zarrs-python", "zarr-python"])
     return [name for name in order if name in AVAILABLE_BACKENDS]
 
 
