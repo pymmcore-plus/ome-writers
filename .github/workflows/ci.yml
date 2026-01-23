@@ -60,12 +60,12 @@ jobs:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
         platform: [ubuntu-latest, macos-latest, windows-latest]
         resolution: [highest, lowest-direct]
-        group: [tifffile, tensorstore, zarr, acquire-zarr]
+        group: [tifffile, tensorstore, zarr-python, acquire-zarr]
         exclude:
-          - group: zarr
+          - group: zarr-python
             python-version: "3.10"
         include:
-          - group: zarr
+          - group: zarr-python
             python-version: "3.14"
             platform: ubuntu-latest
             resolution: highest
