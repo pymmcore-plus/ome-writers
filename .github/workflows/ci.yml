@@ -115,6 +115,24 @@ jobs:
     secrets:
       codecov_token: ${{ secrets.CODECOV_TOKEN }}
 
+  examples:
+    name: Test examples
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        backend: [tiff, zarr, tensorstore, acquire-zarr]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+      - name: Run Examples
+        # ensure we can `uv run` each example in the examples directory
+        run: |
+          for example in examples/*.py; do
+            uv run python "$example" ${{ matrix.backend }} || exit 1
+          done
+
   build-and-inspect-package:
     name: Build & inspect package.
     needs: test

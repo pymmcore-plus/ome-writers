@@ -27,7 +27,7 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Typing :: Typed",
 ]
-dependencies = ["numpy>=2", "typing-extensions>=4.10.0", "yaozarrs>=0.2.0"]
+dependencies = ["numpy>=2", "typing-extensions>=4.10.0", "yaozarrs[io]>=0.2.0"]
 
 [project.optional-dependencies]
 tensorstore = [
@@ -84,6 +84,11 @@ dev = [
     "ty>=0.0.12",
     "useq-schema>=0.8.2",
     "pytest-xdist>=3.8.0",
+]
+docs = [
+    "griffe-fieldz>=0.4.0",
+    "mkdocstrings-python>=2.0.1",
+    "zensical>=0.0.18",
 ]
 
 [project.urls]
