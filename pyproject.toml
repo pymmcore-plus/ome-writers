@@ -84,6 +84,7 @@ dev = [
     { include-group = "test" },
     { include-group = 'tensorstore' },
     { include-group = 'zarr-python' },
+    { include-group = 'zarrs-python' },
     { include-group = 'acquire-zarr' },
     { include-group = 'tifffile' },
     "ipython>=8.37.0",

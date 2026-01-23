@@ -18,7 +18,9 @@ pip install ome-writers[<backend>]
 - `acquire-zarr` — Uses
   [acquire-zarr](https://github.com/acquire-project/acquire-zarr), supports
   OME-Zarr v0.5.
-- `zarr` — Uses [zarr-python](https://github.com/zarr-developers/zarr-python), supports
+- `zarr-python` — Uses [zarr-python](https://github.com/zarr-developers/zarr-python), supports
+  OME-Zarr v0.5.
+- `zarrs-python` — Uses [zarrs-python](https://github.com/zarrs/zarrs-python), supports
   OME-Zarr v0.5.
 - `tifffile` — Uses [tifffile](https://github.com/cgohlke/tifffile), supports
   OME-TIFF.
