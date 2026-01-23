@@ -20,7 +20,14 @@ __all__ = ["OMEStream", "create_stream"]
 
 
 class OMEStream:
-    """A stream wrapper for writing frames using the router + backend pattern.
+    """Object returned by `create_stream()` for writing OME-TIFF or OME-ZARR data.
+
+    !!! important
+
+        This class should be instantiated via the
+        [`create_stream()`][ome_writers.create_stream] factory
+        function, not directly.  It is made public here only for type checking
+        and usage API documentation.
 
     Outside of `AcquisitionSettings`, this is the main public interface.
 
@@ -29,9 +36,11 @@ class OMEStream:
 
     Usage
     -----
-    >>> with create_stream(settings) as stream:
-    ...     for frame in frames:
-    ...         stream.append(frame)
+    ```python
+    with create_stream(settings) as stream:
+        for frame in frames:
+            stream.append(frame)
+    ```
     """
 
     def __init__(self, backend: ArrayBackend, router: FrameRouter) -> None:
@@ -153,7 +162,8 @@ def create_stream(settings: AcquisitionSettings) -> OMEStream:
     Returns
     -------
     OMEStream
-        A configured stream ready for writing frames via `append()`.
+        A configured stream ready for writing frames via
+        [`append()`][ome_writers.OMEStream.append].
 
     Raises
     ------

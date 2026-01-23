@@ -23,12 +23,13 @@ from ome_writers._schema import (
     StandardAxis,
     dims_from_standard_axes,
 )
-from ome_writers._stream import create_stream
+from ome_writers._stream import OMEStream, create_stream
 from ome_writers._util import dims_from_useq
 
 __all__ = [
     "AcquisitionSettings",
     "Dimension",
+    "OMEStream",
     "Plate",
     "Position",
     "PositionDimension",
