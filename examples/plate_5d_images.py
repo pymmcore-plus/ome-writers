@@ -26,10 +26,11 @@ settings = AcquisitionSettings(
         PositionDimension(
             # order should match stage position traversal during acquisition
             positions=[
-                Position(name="fov0", row="A", column="1"),
-                Position(name="fov0", row="A", column="2"),
-                Position(name="fov0", row="C", column="4"),
-                Position(name="fov1", row="C", column="4"),  # TWO fov in same well
+                Position(name="fov0", plate_row="A", plate_column="1"),
+                Position(name="fov0", plate_row="A", plate_column="2"),
+                # note ... two fovs in same well
+                Position(name="fov0", plate_row="C", plate_column="4"),
+                Position(name="fov1", plate_row="C", plate_column="4"),
             ]
         ),
         Dimension(name="c", count=3, chunk_size=1, type="channel"),

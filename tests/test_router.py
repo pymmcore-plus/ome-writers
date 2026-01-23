@@ -240,9 +240,9 @@ def test_plate_acquisition_patterns() -> None:
         Dimension order: T, P (time outermost)
     """
     wells = [
-        Position(name="A1", row="A", column="1"),
-        Position(name="B1", row="B", column="1"),
-        Position(name="C1", row="C", column="1"),
+        Position(name="A1", plate_row="A", plate_column="1"),
+        Position(name="B1", plate_row="B", plate_column="1"),
+        Position(name="C1", plate_row="C", plate_column="1"),
     ]
 
     # Pattern 1: Burst timelapse at each well (P outermost)

@@ -174,13 +174,13 @@ class Position(_BaseModel):
 
     name: Annotated[str, Len(min_length=1)] = Field(
         description="Unique name for this position. Within a list of positions, "
-        "names must be unique within each `(row, column)` pair.",
+        "names must be unique within each `(plate_row, plate_column)` pair.",
     )
-    row: str | None = Field(
+    plate_row: str | None = Field(
         default=None,
         description="Row name for plate position.",
     )
-    column: str | None = Field(
+    plate_column: str | None = Field(
         default=None,
         description="Column name for plate position.",
     )
@@ -312,7 +312,7 @@ def _validate_unique_names_per_well(positions: list[Position]) -> None:
     # Group positions by (row, column) - only for positions with both defined
     wells = {}
     for pos in positions:
-        key = (pos.row, pos.column)
+        key = (pos.plate_row, pos.plate_column)
         wells.setdefault(key, []).append(pos.name)
 
     # Check for duplicates within each well
@@ -584,7 +584,7 @@ class AcquisitionSettings(_BaseModel):
                     missing = [
                         pos.name
                         for pos in dim.positions
-                        if pos.row is None or pos.column is None
+                        if pos.plate_row is None or pos.plate_column is None
                     ]
                     if missing:
                         raise ValueError(

@@ -126,8 +126,8 @@ def test_update_metadata_with_plates(tmp_path: Path, tiff_backend: str) -> None:
         dimensions=[
             PositionDimension(
                 positions=[
-                    Position(name="Well_A01", row="A", column="1"),
-                    Position(name="Well_A02", row="A", column="2"),
+                    Position(name="Well_A01", plate_row="A", plate_column="1"),
+                    Position(name="Well_A02", plate_row="A", plate_column="2"),
                 ]
             ),
             Dimension(name="y", count=32, type="space"),

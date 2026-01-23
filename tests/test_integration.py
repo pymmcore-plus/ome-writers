@@ -104,9 +104,9 @@ CASES = [
             D(name="t", count=3, chunk_size=1, type="time"),
             PositionDimension(
                 positions=[
-                    Position(name="fov0", row="A", column="1"),
-                    Position(name="fov0", row="C", column="4"),
-                    Position(name="fov1", row="C", column="4"),
+                    Position(name="fov0", plate_row="A", plate_column="1"),
+                    Position(name="fov0", plate_row="C", plate_column="4"),
+                    Position(name="fov1", plate_row="C", plate_column="4"),
                 ]
             ),
             D(name="c", count=2, chunk_size=1, type="channel"),
@@ -445,7 +445,7 @@ def _assert_valid_ome_zarr(case: AcquisitionSettings) -> None:
 
     if case.plate is not None:
         assert isinstance(ome_meta, v05.Plate)
-        paths = [root / p.row / p.column / p.name for p in case.positions]  # ty: ignore
+        paths = [root / p.plate_row / p.plate_column / p.name for p in case.positions]  # ty: ignore
     elif len(case.positions) == 1:
         assert isinstance(ome_meta, v05.Image)
         paths = [root]
