@@ -150,7 +150,9 @@ def test_update_metadata_with_plates(tmp_path: Path, tiff_backend: str) -> None:
         assert ome_obj.images[0].name == f"Well A0{pos_idx + 1}"
 
 
-def test_tiff_metadata_physical_sizes_and_names(tmp_path: Path) -> None:
+def test_tiff_metadata_physical_sizes_and_names(
+    tmp_path: Path, tiff_backend: str
+) -> None:
     """Test physical sizes, acquisition date, and image names."""
     settings = AcquisitionSettings(
         root_path=str(tmp_path / "test_metadata.ome.tiff"),
@@ -162,7 +164,7 @@ def test_tiff_metadata_physical_sizes_and_names(tmp_path: Path) -> None:
             Dimension(name="x", count=64, type="space", scale=0.5, unit="micrometer"),
         ],
         dtype="uint16",
-        backend="tiff",
+        backend=tiff_backend,
     )
 
     with create_stream(settings) as stream:
@@ -188,7 +190,9 @@ def test_tiff_metadata_physical_sizes_and_names(tmp_path: Path) -> None:
     assert not ome_obj.images[0].name.endswith(".ome")
 
 
-def test_tiff_multiposition_detailed_metadata(tmp_path: Path) -> None:
+def test_tiff_multiposition_detailed_metadata(
+    tmp_path: Path, tiff_backend: str
+) -> None:
     """Test multiposition files have detailed TiffData blocks with UUIDs."""
     settings = AcquisitionSettings(
         root_path=str(tmp_path / "multipos.ome.tiff"),
@@ -201,7 +205,7 @@ def test_tiff_multiposition_detailed_metadata(tmp_path: Path) -> None:
             Dimension(name="x", count=32, type="space"),
         ],
         dtype="uint16",
-        backend="tiff",
+        backend=tiff_backend,
     )
 
     with create_stream(settings) as stream:
