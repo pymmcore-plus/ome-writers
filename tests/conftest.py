@@ -4,17 +4,11 @@ from ome_writers import _stream
 
 ZARR_BACKENDS = []
 TIFF_BACKENDS = []
-if _stream._is_tensorstore_available():
-    ZARR_BACKENDS.append("tensorstore")
-if _stream._is_zarr_available():
-    ZARR_BACKENDS.append("zarr-python")
-if _stream._is_zarrs_available():
-    ZARR_BACKENDS.append("zarrs-python")
-if _stream._is_acquire_zarr_available():
-    ZARR_BACKENDS.append("acquire-zarr")
-if _stream._is_tifffile_available():
-    TIFF_BACKENDS = ["tiff"]
-
+for name, meta in _stream.AVAILABLE_BACKENDS.items():
+    if meta.format == "zarr":
+        ZARR_BACKENDS.append(name)
+    elif meta.format == "tiff":
+        TIFF_BACKENDS.append(name)
 AVAILABLE_BACKENDS = ZARR_BACKENDS + TIFF_BACKENDS
 
 

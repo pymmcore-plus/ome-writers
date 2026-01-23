@@ -4,7 +4,7 @@ import importlib
 import importlib.util
 import sys
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from ome_writers._router import FrameRouter
 
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     import numpy as np
 
     from ome_writers._backends._backend import ArrayBackend
-    from ome_writers._schema import AcquisitionSettings
+    from ome_writers._schema import AcquisitionSettings, FileFormat
 
 __all__ = ["OMEStream", "create_stream"]
 
@@ -89,8 +89,9 @@ class BackendMetadata:
     name: str
     module_path: str
     class_name: str
-    format: Literal["tiff", "zarr"]
+    format: FileFormat
     is_available: Callable[[], bool]
+    min_python_version: tuple[int, int] = (3, 0)
 
     def create(self) -> ArrayBackend:
         """Import backend module and instantiate backend class."""
@@ -119,21 +120,9 @@ def _is_tensorstore_available() -> bool:
     return importlib.util.find_spec("tensorstore") is not None
 
 
+# ORDER MATTERS FOR 'auto' SELECTION
+# Backends are tried in in this order, in a format-specific manner
 BACKENDS: list[BackendMetadata] = [
-    BackendMetadata(
-        name="zarr-python",
-        module_path="ome_writers._backends._zarr_python",
-        class_name="ZarrBackend",
-        format="zarr",
-        is_available=_is_zarr_available,
-    ),
-    BackendMetadata(
-        name="zarrs-python",
-        module_path="ome_writers._backends._zarr_python",
-        class_name="ZarrsBackend",
-        format="zarr",
-        is_available=_is_zarrs_available,
-    ),
     BackendMetadata(
         name="tensorstore",
         module_path="ome_writers._backends._tensorstore",
@@ -142,23 +131,41 @@ BACKENDS: list[BackendMetadata] = [
         is_available=_is_tensorstore_available,
     ),
     BackendMetadata(
-        name="tiff",
-        module_path="ome_writers._backends._tifffile",
-        class_name="TiffBackend",
-        format="tiff",
-        is_available=_is_tifffile_available,
-    ),
-    BackendMetadata(
         name="acquire-zarr",
         module_path="ome_writers._backends._acquire_zarr",
         class_name="AcquireZarrBackend",
         format="zarr",
         is_available=_is_acquire_zarr_available,
     ),
+    BackendMetadata(
+        name="zarrs-python",
+        module_path="ome_writers._backends._zarr_python",
+        class_name="ZarrsBackend",
+        format="zarr",
+        is_available=_is_zarrs_available,
+        min_python_version=(3, 11),
+    ),
+    BackendMetadata(
+        name="zarr-python",
+        module_path="ome_writers._backends._zarr_python",
+        class_name="ZarrBackend",
+        format="zarr",
+        is_available=_is_zarr_available,
+        min_python_version=(3, 11),
+    ),
+    BackendMetadata(
+        name="tifffile",
+        module_path="ome_writers._backends._tifffile",
+        class_name="TiffBackend",
+        format="tiff",
+        is_available=_is_tifffile_available,
+    ),
 ]
 VALID_BACKEND_NAMES: list[str] = [b.name for b in BACKENDS] + ["auto"]
 AVAILABLE_BACKENDS: dict[str, BackendMetadata] = {
-    b.name: b for b in BACKENDS if b.is_available()
+    b.name: b
+    for b in BACKENDS
+    if b.is_available() and sys.version_info >= b.min_python_version
 }
 
 
@@ -209,17 +216,6 @@ def create_stream(settings: AcquisitionSettings) -> OMEStream:
     return OMEStream(backend, router)
 
 
-def _get_auto_selection_order(target_format: Literal["tiff", "zarr"]) -> list[str]:
-    """Return ordered list of backend names for 'auto' selection."""
-    if target_format == "tiff" and "tiff" in AVAILABLE_BACKENDS:
-        return ["tiff"]
-
-    order = ["tensorstore", "acquire-zarr"]
-    if sys.version_info >= (3, 11):
-        order.extend(["zarrs-python", "zarr-python"])
-    return [name for name in order if name in AVAILABLE_BACKENDS]
-
-
 def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:
     """Create and prepare the appropriate backend based on settings.
 
@@ -256,7 +252,11 @@ def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:
     # Determine candidates to try
     target_format = settings.format
     if requested_backend == "auto":
-        candidates = _get_auto_selection_order(target_format)
+        candidates = [
+            name
+            for name, meta in AVAILABLE_BACKENDS.items()
+            if meta.format == target_format
+        ]
     else:
         # Single explicit backend - validate format compatibility
         meta = AVAILABLE_BACKENDS[requested_backend]
