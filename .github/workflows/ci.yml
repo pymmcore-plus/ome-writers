@@ -126,11 +126,12 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.13"
+      - uses: pymmcore-plus/setup-mm-test-adapters@main
       - name: Run Examples
         # ensure we can `uv run` each example in the examples directory
         run: |
           for example in examples/*.py; do
-            uv run python "$example" ${{ matrix.backend }} || exit 1
+            uv run --with pymmcore-plus python "$example" ${{ matrix.backend }} || exit 1
           done
 
   build-and-inspect-package:
