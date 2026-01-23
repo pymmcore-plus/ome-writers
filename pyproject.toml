@@ -34,10 +34,15 @@ tensorstore = [
     "yaozarrs[write-tensorstore]>=0.2.0",
     "tensorstore>=0.1.80; python_version >= '3.11'",
 ]
-zarr = ["yaozarrs[write-zarr]>=0.2.0"]
+zarr-python = ["yaozarrs[write-zarr]>=0.2.0"]
 acquire-zarr = ["acquire-zarr>=0.6.0; python_version < '3.14'"]
-tifffile = ["tifffile>=2024.8.30", "ome-types>=0.6.1", "pydantic>=2.8"]
-all = ["ome-writers[tensorstore,zarr,acquire-zarr,tifffile]"]
+tifffile = [
+    "tifffile>=2024.8.30",
+    "imagecodecs>=2024.9.22",
+    "ome-types>=0.6.1",
+    "pydantic>=2.8",
+]
+all = ["ome-writers[tensorstore,zarr-python,acquire-zarr,tifffile]"]
 
 [dependency-groups]
 # used for all tests
@@ -56,7 +61,7 @@ tensorstore = [
     "ome-writers[tensorstore]",
     "tensorstore-stubs>=0.1.2",
 ]
-zarr = [{ include-group = 'test' }, "ome-writers[zarr]"]
+zarr-python = [{ include-group = 'test' }, "ome-writers[zarr-python]"]
 acquire-zarr = [
     { include-group = 'test' },
     "ome-writers[acquire-zarr]",
@@ -71,7 +76,7 @@ test-codspeed = [
 dev = [
     { include-group = "test" },
     { include-group = 'tensorstore' },
-    { include-group = 'zarr' },
+    { include-group = 'zarr-python' },
     { include-group = 'acquire-zarr' },
     { include-group = 'tifffile' },
     "ipython>=8.37.0",

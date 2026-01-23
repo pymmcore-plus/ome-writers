@@ -8,10 +8,9 @@ from ome_writers import AcquisitionSettings, Dimension, create_stream
 
 # Derive backend from command line argument (default: auto)
 BACKEND = "auto" if len(sys.argv) < 2 else sys.argv[1]
-# --------
 
 UM = "micrometer"
-suffix = ".ome.tiff" if BACKEND == "tiff" else ".ome.zarr"
+suffix = ".ome.tiff" if BACKEND == "tifffile" else ".ome.zarr"
 
 # create acquisition settings
 settings = AcquisitionSettings(

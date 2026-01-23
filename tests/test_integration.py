@@ -22,10 +22,12 @@ from ome_writers import (
     Position,
     PositionDimension,
     _memory,
+    _stream,
     create_stream,
 )
 from tests._frame_encoder import validate_encoded_frame_values, write_encoded_data
 
+BACKEND_TO_EXT = {b.name: f".ome.{b.format}" for b in _stream.BACKENDS}
 # NOTES:
 # - All root_paths will be replaced with temporary directories during testing.
 D = Dimension  # alias, for brevity
@@ -204,12 +206,10 @@ FrameExpectation: TypeAlias = dict[int, StorageIdxToFrame]
 
 @pytest.mark.parametrize("case", CASES, ids=_name_case)
 def test_cases(case: AcquisitionSettings, any_backend: str, tmp_path: Path) -> None:
-    is_tiff = any_backend == "tiff"
-    ext = ".ome.tiff" if is_tiff else ".ome.zarr"
     # Use model_copy to avoid cached_property contamination across tests
     case = case.model_copy(
         update={
-            "root_path": str(tmp_path / f"output{ext}"),
+            "root_path": str(tmp_path / f"output{BACKEND_TO_EXT[any_backend]}"),
             "backend": any_backend,
         }
     )
@@ -224,7 +224,7 @@ def test_cases(case: AcquisitionSettings, any_backend: str, tmp_path: Path) -> N
             return
         raise
 
-    if is_tiff:
+    if case.format == "tiff":
         _assert_valid_ome_tiff(case)
     else:
         _assert_valid_ome_zarr(case)
@@ -261,8 +261,7 @@ def test_auto_backend(tmp_path: Path, fmt: str) -> None:
 
 def test_overwrite_safety(tmp_path: Path, any_backend: str) -> None:
     """Test that attempting to overwrite existing files raises an error."""
-    ext = ".ome.tiff" if any_backend == "tiff" else ".ome.zarr"
-    root_path = tmp_path / f"output{ext}"
+    root_path = tmp_path / f"output{BACKEND_TO_EXT[any_backend]}"
     settings = AcquisitionSettings(
         root_path=str(root_path),
         dimensions=[
@@ -332,7 +331,7 @@ def test_chunk_memory_warning(
                 D(name="x", count=2048, chunk_size=64, type="space"),
             ],
             dtype="uint16",
-            backend="zarr",
+            backend="zarr-python",
         )
 
 

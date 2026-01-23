@@ -37,6 +37,10 @@ settings = az.StreamSettings(
         az.ArraySettings(
             dimensions=array_dimensions,
             data_type=DATA.dtype,
+            compression=az.CompressionSettings(
+                compressor=az.Compressor.NONE,
+                codec=az.CompressionCodec.NONE,
+            ),
         )
     ],
     overwrite=True,

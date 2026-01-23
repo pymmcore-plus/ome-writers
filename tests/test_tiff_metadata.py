@@ -25,7 +25,7 @@ except ImportError:
     pytest.skip("ome_types not installed", allow_module_level=True)
 
 
-def test_update_metadata_single_file(tmp_path: Path) -> None:
+def test_update_metadata_single_file(tmp_path: Path, tiff_backend: str) -> None:
     """Test update_metadata method for single-file TIFF streams."""
     settings = AcquisitionSettings(
         root_path=str(tmp_path / "test.ome.tiff"),
@@ -36,7 +36,7 @@ def test_update_metadata_single_file(tmp_path: Path) -> None:
             Dimension(name="x", count=32, type="space"),
         ],
         dtype="uint16",
-        backend="tiff",
+        backend=tiff_backend,
     )
 
     with create_stream(settings) as stream:
@@ -55,7 +55,7 @@ def test_update_metadata_single_file(tmp_path: Path) -> None:
     assert ome_obj.images[0].pixels.channels[0].name == "Updated Channel"
 
 
-def test_update_metadata_multiposition(tmp_path: Path) -> None:
+def test_update_metadata_multiposition(tmp_path: Path, tiff_backend: str) -> None:
     """Test update_metadata method for multi-position TIFF streams."""
     settings = AcquisitionSettings(
         root_path=str(tmp_path / "multipos.ome.tiff"),
@@ -66,7 +66,7 @@ def test_update_metadata_multiposition(tmp_path: Path) -> None:
             Dimension(name="x", count=32, type="space"),
         ],
         dtype="uint16",
-        backend="tiff",
+        backend=tiff_backend,
     )
 
     with create_stream(settings) as stream:
@@ -86,7 +86,7 @@ def test_update_metadata_multiposition(tmp_path: Path) -> None:
         assert ome_obj.images[0].name == f"Position {pos_idx} Updated"
 
 
-def test_update_metadata_error_conditions(tmp_path: Path) -> None:
+def test_update_metadata_error_conditions(tmp_path: Path, tiff_backend: str) -> None:
     """Test error conditions in update_metadata method."""
     settings = AcquisitionSettings(
         root_path=str(tmp_path / "error.ome.tiff"),
@@ -95,7 +95,7 @@ def test_update_metadata_error_conditions(tmp_path: Path) -> None:
             Dimension(name="x", count=32, type="space"),
         ],
         dtype="uint16",
-        backend="tiff",
+        backend=tiff_backend,
     )
 
     with create_stream(settings) as stream:
@@ -114,7 +114,7 @@ def test_update_metadata_error_conditions(tmp_path: Path) -> None:
     assert ome_obj.images[0].name == "Fixed"
 
 
-def test_update_metadata_with_plates(tmp_path: Path) -> None:
+def test_update_metadata_with_plates(tmp_path: Path, tiff_backend: str) -> None:
     """Test update_metadata with plate metadata for multi-position experiments."""
     settings = AcquisitionSettings(
         root_path=str(tmp_path / "plate.ome.tiff"),
@@ -129,7 +129,7 @@ def test_update_metadata_with_plates(tmp_path: Path) -> None:
             Dimension(name="x", count=32, type="space"),
         ],
         dtype="uint16",
-        backend="tiff",
+        backend=tiff_backend,
         plate=Plate(name="Test Plate", row_names=["A"], column_names=["1", "2"]),
     )
 

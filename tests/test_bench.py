@@ -114,7 +114,7 @@ def _make_frames(settings: AcquisitionSettings) -> list[np.ndarray]:
     ]
 
 
-@pytest.mark.parametrize("backend", ["zarr", "acquire-zarr", "tensorstore"])
+@pytest.mark.parametrize("backend", ["zarr-python", "acquire-zarr", "tensorstore"])
 @pytest.mark.parametrize("case", BENCHMARK_CASES)
 def test_bench_append(
     backend: str,

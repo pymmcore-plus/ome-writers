@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import warnings
 from enum import Enum
-from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeAlias, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeAlias, cast, get_args
 
 import numpy as np
 from annotated_types import Len
@@ -19,11 +19,15 @@ from pydantic import (
 )
 
 from ome_writers._memory import warn_if_high_memory_usage
+from ome_writers._stream import BACKENDS
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-BackendName: TypeAlias = Literal["acquire-zarr", "tensorstore", "zarr", "tiff"]
+FileFormat: TypeAlias = Literal["tiff", "zarr"]
+BackendName: TypeAlias = Literal[
+    "acquire-zarr", "tensorstore", "zarr-python", "tifffile"
+]
 DimensionType: TypeAlias = Literal["space", "time", "channel", "other"]
 StandardAxisKey: TypeAlias = Literal["x", "y", "z", "c", "t", "p"]
 
@@ -357,6 +361,11 @@ class Plate(_BaseModel):
     )
 
 
+TiffCompression: TypeAlias = Literal["lzw", "none"]
+ZarrCompression: TypeAlias = Literal["blosc-zstd", "blosc-lz4", "zstd", "none"]
+Compression: TypeAlias = TiffCompression | ZarrCompression
+
+
 class AcquisitionSettings(_BaseModel):
     """Top-level acquisition settings.
 
@@ -391,10 +400,13 @@ class AcquisitionSettings(_BaseModel):
         description="Data type of the pixel data to be written, e.g. 'uint8', "
         "'uint16', 'float32', etc. Must be a valid numpy DTypeLike string.",
     )
-    compression: str | None = None
-    # "ome" means "spec-compliant" storage order.
-    # It MAY depend on the output format (e.g. OME-Zarr vs OME-TIFF) and
-    # version, and backends may have different restrictions.
+    compression: Compression | None = Field(
+        default=None,
+        description="Compression algorithm for the storage backend. "
+        "Zarr backends support: 'blosc-zstd', 'blosc-lz4', 'zstd', 'none'. "
+        "TIFF backend supports: 'lzw', 'none'. "
+        "If None, no compression is applied.",
+    )
     storage_order: Literal["acquisition", "ome"] | list[str] = Field(
         default="ome",
         description="Storage order for non-frame dimensions (if different from "
@@ -418,20 +430,29 @@ class AcquisitionSettings(_BaseModel):
     )
     backend: BackendName | Literal["auto"] = Field(
         default="auto",
-        description="Storage backend to use for writing data.  May be one of "
-        "'acquire-zarr', 'tensorstore', 'zarr', or 'tiff'.  If 'auto', the backend "
-        "will be chosen based on the `root_path` extension and available dependencies. "
-        "Default is 'auto'.",
+        description="Storage backend to use for writing data.  Must be one of "
+        "'acquire-zarr', 'tensorstore', 'zarr-python', 'tifffile', or 'auto'.  "
+        "If 'auto' (the default), the backend will be chosen based on the `root_path` "
+        "extension and available dependencies. Zarr backends are chosen in the order: "
+        "tensorstore, acquire-zarr, then zarr-python.",
     )
 
     @property
-    def format(self) -> Literal["tiff", "zarr"]:
+    def format(self) -> FileFormat:
         """Inferred file format.  Either (OME) 'tiff' or 'zarr'."""
-        if self.backend == "tiff" or (
-            self.backend == "auto"
-            and self.root_path.lower().endswith((".tiff", ".tif"))
-        ):
+        if self.root_path.lower().endswith((".tiff", ".tif")):
             return "tiff"
+        if self.root_path.lower().endswith(".zarr"):
+            return "zarr"
+
+        # this is for the ambiguous case where user has given a generic
+        # path without extension.  *and* used a specific backend.
+        if self.backend != "auto":
+            for b in BACKENDS:
+                if b.name == self.backend:
+                    return b.format
+
+        # all other no-extension cases default to zarr
         return "zarr"
 
     @property
@@ -508,6 +529,28 @@ class AcquisitionSettings(_BaseModel):
         return self.storage_index_dimensions + self.frame_dimensions
 
     # --------- Validators ---------
+
+    @model_validator(mode="after")
+    def _validate_format_compression(self) -> AcquisitionSettings:
+        """Validate compression is supported for selected format."""
+        if self.compression is None:
+            return self
+        if self.format == "tiff":
+            tiff_args = get_args(TiffCompression)
+            if self.compression not in tiff_args:
+                raise ValueError(
+                    f"Compression '{self.compression}' is not supported for OME-TIFF. "
+                    f"Supported: {tiff_args}."
+                )
+        else:
+            zarr_args = get_args(ZarrCompression)
+            if self.compression not in zarr_args:
+                raise ValueError(
+                    f"Compression '{self.compression}' is not supported for OME-Zarr. "
+                    f"Supported: {zarr_args}."
+                )
+
+        return self
 
     @model_validator(mode="after")
     def _validate_storage_order(self) -> AcquisitionSettings:
@@ -654,7 +697,7 @@ def _ome_tiff_sort_key(dim: Dimension) -> tuple[int, int]:
 def _sort_dims_to_storage_order(
     index_dims: list[Dimension],
     storage_order: str | list[str],
-    format: Literal["tiff", "zarr"],
+    format: FileFormat,
 ) -> tuple[Dimension, ...]:
     """Resolve storage_order setting to explicit list of dimension names.
 

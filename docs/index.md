@@ -1,10 +1,9 @@
 ---
 icon: lucide/rocket
+title: Get started
 ---
 
-# Get started
-
-## OME-writers
+# Getting started with OME-writers
 
 `ome-writers` is a Python library that provides a unified interface for writing
 microscopy image data to OME-compliant formats (OME-TIFF and OME-Zarr) using
