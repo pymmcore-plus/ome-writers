@@ -2,10 +2,22 @@
 
 run `uv run tools/benchmark.py --help` for usage details.
 
-Most important parameter is `--dims`/`-d` which specifies shape of the data to write.
+You can specify data shape either via `--dims`/`-d` or `--settings-file`/`-f`.
 
-Format:
+Format for --dims:
     `name:count[:chunk[:shard]]` (comma-separated)
+
+Format for --settings-file (JSON) is any AcquisitionSettings dict, for example:
+    {
+        "dimensions": [
+            {"name": "t", "count": 2},
+            {"name": "c", "count": 3},
+            {"name": "z", "count": 4},
+            {"name": "y", "count": 256, "chunk_size": 64},
+            {"name": "x", "count": 256, "chunk_size": 64}
+        ],
+        "dtype": "uint16"
+    }
 
 Usage examples:
 
@@ -24,10 +36,14 @@ Usage examples:
         -d t:40:1:10,c:2,z:10:1:5,y:1024:512:2,x:1024:512:2 \
         -b zarrs-python \
         --dtype uint8 --warmups 0 --iterations 3
+
+    # Using a settings file
+    uv run tools/benchmark.py -f settings.json -b zarr-python
 """
 
 from __future__ import annotations
 
+import json
 import shutil
 import tempfile
 import time
@@ -104,6 +120,29 @@ def parse_dimensions(dim_spec: str) -> list[Dimension | PositionDimension]:
         shard_shapes[name] = int(parts[3]) if len(parts) > 3 else None
 
     return dims_from_standard_axes(sizes, chunk_shapes, shard_shapes)
+
+
+def parse_settings_file(
+    file_path: Path, dtype: str, compression: str | None
+) -> AcquisitionSettings:
+    """Parse settings from a JSON file."""
+    data = json.loads(Path(file_path).expanduser().resolve().read_text())
+    if not isinstance(data, dict):
+        raise ValueError("Settings file must contain a single JSON object")
+
+    data["root_path"] = "tmp"
+    data.setdefault("dtype", dtype)
+    data.setdefault("compression", compression)
+    settings = AcquisitionSettings.model_validate(data)
+    for d in settings.dimensions:
+        if isinstance(d, Dimension):
+            d.chunk_size = d.chunk_size or 1
+        if d.count is None:
+            raise NotImplementedError(
+                "Unbounded dimensions not supported in benchmark\n"
+                f"Please modify dimension {d.name!r} in settings file {file_path}"
+            )
+    return settings
 
 
 def run_benchmark_iteration(
@@ -352,19 +391,6 @@ def print_results(
 
 @app.command(no_args_is_help=True)
 def main(
-    dimensions: Annotated[
-        str,
-        typer.Option(
-            "--dims",
-            "-d",
-            help=(
-                "Dimension spec: name:count[:chunk[:shard]] (comma-separated). "
-                "For example, 'c:3,y:512:128,x:512:128:4' defines a 3-channel "
-                "image with 512x512 pixels, chunks of (128, 128) and sharding of 4 "
-                "chunks per shard in only the x dimension."
-            ),
-        ),
-    ],
     backends: Annotated[
         list[str],
         typer.Option(
@@ -374,10 +400,39 @@ def main(
             f"Must be one of {list(AVAILABLE_BACKENDS)}.  Or, "
             "use 'all' for all available backends. ",
         ),
-    ],
+    ] = ["all"],  # noqa
+    dimensions: Annotated[
+        str | None,
+        typer.Option(
+            "--dims",
+            "-d",
+            help=(
+                "Dimension spec: name:count[:chunk[:shard]] (comma-separated). "
+                "For example, 'c:3,y:512:128,x:512:128:4' defines a 3-channel "
+                "image with 512x512 pixels, chunks of (128, 128) and sharding of 4 "
+                "chunks per shard in only the x dimension. "
+                "Mutually exclusive with --settings-file."
+            ),
+        ),
+    ] = None,
+    settings_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--settings-file",
+            "-f",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            help=(
+                "Path to JSON file containing settings. "
+                "Expected format: {'dimensions': [...], 'dtype': 'uint16'}. "
+                "Mutually exclusive with --dims."
+            ),
+        ),
+    ] = None,
     dtype: Annotated[
         str,
-        typer.Option("--dtype", help="Data type"),
+        typer.Option("--dtype", help="Data type (overridden by settings file)"),
     ] = "uint16",
     compression: Annotated[
         _schema.Compression | None,
@@ -398,8 +453,8 @@ def main(
 ) -> None:
     """Benchmark ome-writers backends with granular phase timing.
 
-    Define a synthetic acquisition using --dims, and specify one or more
-    backends to benchmark.
+    Define a synthetic acquisition using --dims or --settings-file, and specify
+    one or more backends to benchmark.
 
     Each backend is benchmarked `iterations` times, and timing is reported for:
     - create: Time for stream initialization and directory creation
@@ -409,30 +464,55 @@ def main(
         console.print("[red]Error: At least one --backend must be specified[/red]")
         raise typer.Exit(1)
 
-    # Parse dimensions
-    try:
-        dims = parse_dimensions(dimensions)
-    except ValueError as e:
-        console.print(f"[red]Error parsing dimensions: {e}[/red]")
-        raise typer.Exit(1) from e
+    # Validate mutual exclusivity of dimensions and settings_file
+    if dimensions is None:
+        if settings_file is None:
+            console.print(
+                "[red]Error: Either --dims or --settings-file must be specified[/red]"
+            )
+            raise typer.Exit(1)
+    elif settings_file is not None:
+        console.print(
+            "[red]Error: --dims and --settings-file are mutually exclusive[/red]"
+        )
+        raise typer.Exit(1)
 
-    settings = AcquisitionSettings(
-        root_path="tmp",
-        dimensions=dims,
-        dtype=dtype,
-        compression=compression,
-    )
+    # Parse dimensions and dtype from appropriate source
+    if settings_file is not None:
+        try:
+            settings = parse_settings_file(settings_file, dtype, compression)
+        except Exception as e:
+            console.print(f"[red]Error parsing settings file: {e}[/red]")
+            raise typer.Exit(1) from e
+    else:
+        try:
+            dims = parse_dimensions(dimensions)
+        except ValueError as e:
+            console.print(f"[red]Error parsing settings: {e}[/red]")
+            raise typer.Exit(1) from e
+
+        settings = AcquisitionSettings(
+            root_path="tmp",
+            dimensions=dims,
+            dtype=dtype,
+            compression=compression,
+        )
 
     if "all" in backends:
         backends = list(AVAILABLE_BACKENDS)
 
+    dims = "".join(dim.name for dim in settings.dimensions)
+    shape = tuple(dim.count for dim in settings.dimensions)
+    chunks = tuple(dim.chunk_size for dim in settings.dimensions)
+
     # Display configuration
     console.print("\n[bold cyan]Benchmark Configuration[/bold cyan]")
     console.print(f"  Backends: {', '.join(backends)}")
-    console.print(f"  Dimensions: {dimensions}")
+    console.print(f"  Dimensions: {dims!r} {shape}")
+    console.print(f"  Chunk shape: {chunks}")
     console.print(f"  Total frames: {settings.num_frames:,}")
-    console.print(f"  Dtype: {dtype}")
-    console.print(f"  Compression: {compression or 'none'}")
+    console.print(f"  Dtype: {settings.dtype}")
+    console.print(f"  Compression: {settings.compression}")
     console.print(f"  Warmups: {warmups}")
     console.print(f"  Iterations: {iterations}\n")
 
