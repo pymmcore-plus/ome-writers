@@ -303,7 +303,7 @@ def main(
     iterations: Annotated[
         int,
         typer.Option("--iterations", "-n", help="Number of benchmark iterations"),
-    ] = 5,
+    ] = 10,
 ) -> None:
     """Benchmark ome-writers backends with granular phase timing.
 
