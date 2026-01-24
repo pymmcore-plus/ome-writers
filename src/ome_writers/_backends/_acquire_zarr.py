@@ -60,7 +60,7 @@ class AcquireZarrBackend(YaozarrsBackend):
             return str(e)
         return False
 
-    def _get_writer(self) -> Callable[..., _ArrayPlaceholder]:
+    def _get_yaozarrs_writer(self) -> Callable[..., _ArrayPlaceholder]:
         """Return custom writer that collects array configs as placeholders."""
 
         def custom_writer(
@@ -206,7 +206,7 @@ def _to_acquire_dim(dim: Dimension, frame_dim: bool) -> az.Dimension:
         kind=kind,
         array_size_px=dim.count or 1,
         chunk_size_px=chunk_size,
-        shard_size_chunks=dim.shard_size or 1,
+        shard_size_chunks=dim.shard_size_chunks or 1,
     )
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import re
 import time
 from dataclasses import dataclass
@@ -188,6 +189,16 @@ CASES = [
         ],
         dtype="uint16",
     ),
+    # Sharding test: shard_size_chunks parameter
+    AcquisitionSettings(
+        root_path="tmp",
+        dimensions=[
+            D(name="t", count=4, chunk_size=1, shard_size_chunks=2, type="time"),
+            D(name="y", count=512, chunk_size=128, shard_size_chunks=4, type="space"),
+            D(name="x", count=512, chunk_size=128, shard_size_chunks=4, type="space"),
+        ],
+        dtype="uint16",
+    ),
 ]
 
 
@@ -346,7 +357,8 @@ class ArrayData:
     dtype: np.dtype
     chunks: tuple[int, ...]
     data: np.ndarray
-    dim_names: list[str] | None = None
+    dimension_names: list[str] | None = None
+    shards: tuple[int, ...] | None = None
 
 
 def _extract_tifffile(path: Path, storage_dims: list[D]) -> ArrayData:
@@ -372,30 +384,44 @@ def _extract_tifffile(path: Path, storage_dims: list[D]) -> ArrayData:
     shape = tuple(ome_dims[d.name.upper()] for d in storage_dims)
     chunks = tuple(d.chunk_size or 1 for d in storage_dims)
 
-    return ArrayData(shape, pixels.type.numpy_dtype, chunks, tifffile.imread(path))
+    return ArrayData(
+        shape=shape,
+        dtype=pixels.type.numpy_dtype,
+        chunks=chunks,
+        data=tifffile.imread(path),
+    )
 
 
-def _extract_tensorstore(group: yaozarrs.ZarrGroup, az_hack: bool = False) -> ArrayData:
-    """Extract array metadata and data using tensorstore."""
+def _extract_zarr(group: yaozarrs.ZarrGroup, array_path: Path) -> ArrayData:
+    """Extract array metadata directly from the zarr.json and array zarr/tensorstore."""
+    # https://zarr-specs.readthedocs.io/en/latest/v3/core/index.html
+    meta = json.loads((array_path / "zarr.json").read_text())
 
-    array0 = group["0"].to_tensorstore()
-    shape = array0.shape
-    dim_names = [d.label for d in array0.domain]  # type: ignore
-    chunks = array0.chunk_layout.read_chunk.shape
+    outer_chunk_shape = tuple(meta["chunk_grid"]["configuration"]["chunk_shape"])
+    for codec in meta["codecs"]:
+        if codec["name"] == "sharding_indexed":
+            # With sharding: outer chunk_shape is shard size, inner is chunk size
+            chunks = tuple(codec["configuration"]["chunk_shape"])
+            shards = outer_chunk_shape
+            break
+    else:
+        # Without sharding: outer chunk_shape is chunk size, no shards
+        chunks = outer_chunk_shape
+        shards = None
 
-    if az_hack:  # Adjust for acquire-zarr phantom dimension
-        assert dim_names[0] == "_singleton"
-        shape, dim_names, chunks = shape[1:], dim_names[1:], chunks[1:]  # ty: ignore
+    try:
+        array_data = np.asarray(group["0"].to_tensorstore())
+    except ImportError:
+        array_data = np.asarray(group["0"].to_zarr_python())
 
-    return ArrayData(shape, array0.dtype, chunks, array0.read().result(), dim_names)
-
-
-def _extract_zarr(group: yaozarrs.ZarrGroup) -> ArrayData:
-    """Extract array metadata and data using zarr-python."""
-    import zarr  # noqa: F401
-
-    array0 = group["0"].to_zarr_python()
-    return ArrayData(array0.shape, np.dtype(array0.dtype), array0.chunks, array0[:])
+    return ArrayData(
+        shape=tuple(meta["shape"]),
+        dtype=np.dtype(meta["data_type"]),
+        chunks=chunks,
+        shards=shards,
+        data=array_data,
+        dimension_names=meta.get("dimension_names", []),
+    )
 
 
 def _assert_array_valid(
@@ -406,11 +432,24 @@ def _assert_array_valid(
     expected_chunks = tuple(d.chunk_size or 1 for d in storage_dims)
     expected_names = [d.name for d in storage_dims]
 
+    # Expected shards: chunk_size * shard_size_chunks (if sharding is used)
+    expected_shards = None
+    if any(d.shard_size_chunks is not None for d in storage_dims):
+        expected_shards = tuple(
+            (d.chunk_size or 1) * (d.shard_size_chunks or 1) for d in storage_dims
+        )
+
     assert extracted.shape == expected_shape
     assert extracted.dtype == np.dtype(expected_dtype)
     assert extracted.chunks == expected_chunks
-    if extracted.dim_names is not None:
-        assert extracted.dim_names == expected_names
+    if extracted.dimension_names is not None:
+        assert extracted.dimension_names == expected_names
+    # Only check shards if both expected and actually extracted
+    # (TIFF doesn't support sharding, so extracted.shards will be None for TIFF)
+    if expected_shards is not None and extracted.shards is not None:
+        assert extracted.shards == expected_shards, (
+            f"Expected shards {expected_shards}, got {extracted.shards}"
+        )
 
     validate_encoded_frame_values(extracted.data, expected_names[:-2], pos_idx)
 
@@ -456,13 +495,8 @@ def _assert_valid_ome_zarr(case: AcquisitionSettings) -> None:
         paths = [root / pos.name for pos in case.positions]
 
     dims = case.array_storage_dimensions
-    az_hack = case.backend == "acquire-zarr" and len(dims) == 2
-
     for i, path in enumerate(paths):
         group = yaozarrs.open_group(path)
         assert isinstance(group.ome_metadata(), v05.Image)
-        try:
-            data = _extract_tensorstore(group, az_hack)
-        except ImportError:
-            data = _extract_zarr(group)
+        data = _extract_zarr(group, path / "0")
         _assert_array_valid(data, dims, case.dtype, i)

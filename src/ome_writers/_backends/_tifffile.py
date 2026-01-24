@@ -510,6 +510,7 @@ def _create_ome_image(
 ) -> ome.Image:
     """Generate OME Image object for TIFF file."""
     # Build shape dictionary from dimensions
+    # OME-XML has fasted-varying dimension on the left (rightmost in storage order)
     shape_dict = {d.name.upper(): d.count or 1 for d in reversed(dims)}
     size_z = shape_dict.setdefault("Z", 1)
     size_c = shape_dict.setdefault("C", 1)

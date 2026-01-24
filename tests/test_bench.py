@@ -153,4 +153,4 @@ def test_bench_append(
             stream.append(frame)
         stream._backend.finalize()
 
-    benchmark.pedantic(append_all_frames, setup=setup, rounds=5)
+    benchmark.pedantic(append_all_frames, setup=setup, rounds=15)

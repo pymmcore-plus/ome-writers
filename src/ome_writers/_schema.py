@@ -89,7 +89,7 @@ class StandardAxis(str, Enum):
         count: int | None = None,
         positions: list[str | Position] | None = None,
         chunk_size: int | None = None,
-        shard_size: int | None = None,
+        shard_size_chunks: int | None = None,
         scale: float | None = None,
     ) -> Dimension | PositionDimension:
         """Convert to Dimension or PositionDimension with given count."""
@@ -112,7 +112,7 @@ class StandardAxis(str, Enum):
             type=self.dimension_type(),
             unit=self.unit(),
             chunk_size=chunk_size,
-            shard_size=shard_size,
+            shard_size_chunks=shard_size_chunks,
             scale=scale,
         )
 
@@ -137,10 +137,11 @@ class Dimension(_BaseModel):
         "backends that support chunking (e.g. Zarr). If None, defaults to full size "
         "(i.e. `count`) for the last two 'frame' dimensions, and 1 for others.",
     )
-    shard_size: PositiveInt | None = Field(
+    shard_size_chunks: PositiveInt | None = Field(
         default=None,
-        description="Number of chunks per shard, for storage backends that "
-        "support sharding (e.g. Zarr v3). If not specified, no sharding is used.",
+        description="Number of chunks per shard (*NOT* number of pixels per shard), "
+        "for storage backends that support sharding (e.g. Zarr v3). If not specified, "
+        "no sharding is used (i.e. chunks are the unit of storage).",
     )
     type: DimensionType | None = Field(
         default=None,
