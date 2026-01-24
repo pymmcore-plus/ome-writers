@@ -6,6 +6,7 @@
 Version](https://img.shields.io/pypi/pyversions/ome-writers.svg?color=green)](https://python.org)
 [![CI](https://github.com/pymmcore-plus/ome-writers/actions/workflows/ci.yml/badge.svg)](https://github.com/pymmcore-plus/ome-writers/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/pymmcore-plus/ome-writers/branch/main/graph/badge.svg)](https://codecov.io/gh/pymmcore-plus/ome-writers)
+[![codspeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://codspeed.io/pymmcore-plus/ome-writers?utm_source=badge)
 
 OME-TIFF and OME-ZARR writer APIs designed for microscopy acquisition.
 
