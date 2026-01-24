@@ -41,7 +41,7 @@ from ome_writers import (
     create_stream,
     dims_from_standard_axes,
 )
-from ome_writers._stream import get_format_for_backend, AVAILABLE_BACKENDS
+from ome_writers._stream import AVAILABLE_BACKENDS, get_format_for_backend
 
 if TYPE_CHECKING:
     from jedi.inference.gradual.typing import TypedDict
@@ -115,6 +115,10 @@ def run_benchmark_iteration(
         # Time finalize
         stream._backend.finalize()
         t3 = time.perf_counter()
+
+        # print warning if tmp_path is empty (no data written)
+        if not any(tmp_path.rglob("*")):
+            console.print(f"[yellow]Warning: No data written to {tmp_path}[/yellow]")
     finally:
         shutil.rmtree(tmp_path, ignore_errors=True)
 
@@ -245,11 +249,11 @@ def print_results(
             write = result["write"]
             write_row.append(f"{write['mean']:.4f} ± {write['std']:.4f}")
 
-            # Throughput
+            # Throughput and bandwidth
             if (write_time := write["mean"]) > 0:
                 fps = num_frames / write_time
-                throughput_row.append(f"{fps:,.1f}")
                 gb_per_sec = (total_bytes / 1e9) / write_time
+                throughput_row.append(f"{fps:,.1f}")
                 bandwidth_row.append(f"{gb_per_sec:.3f}")
             else:
                 throughput_row.append("N/A")
@@ -316,7 +320,6 @@ def main(
     # Parse dimensions
     try:
         dims = parse_dimensions(dimensions)
-        print(dims)
     except ValueError as e:
         console.print(f"[red]Error parsing dimensions: {e}[/red]")
         raise typer.Exit(1) from e

@@ -218,7 +218,6 @@ def create_stream(settings: AcquisitionSettings) -> OMEStream:
         backend.finalize()
         raise
     except Exception as e:  # pragma: no cover
-        raise
         backend.finalize()
         raise RuntimeError(f"Unexpected error during backend preparation: {e}") from e
     return OMEStream(backend, router)
