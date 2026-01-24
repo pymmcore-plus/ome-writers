@@ -58,6 +58,7 @@ test = [
     "yaozarrs[io]>=0.2.0",
     "pytest-xdist>=3.8.0",
     "useq-schema>=0.8.2",
+    "typer>=0.15.0",
 ]
 # these mirror the extras above
 # but with additional dependencies for testing
@@ -95,7 +96,6 @@ dev = [
     "pytest-benchmark>=5.1.0",
     "prek>=0.2.28",
     "ty>=0.0.12",
-    "typer>=0.15.0",
     "useq-schema>=0.8.2",
     "pytest-xdist>=3.8.0",
 ]
