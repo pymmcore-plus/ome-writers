@@ -17,6 +17,7 @@ import numpy as np
 
 from ome_writers._backends._backend import ArrayBackend
 from ome_writers._schema import StandardAxis
+from ome_writers._units import ngff_to_ome_unit
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -552,17 +553,14 @@ def _create_ome_image(
         if (dim := dims_by_name.get(axis)) and dim.scale is not None:
             setattr(pixels, f"physical_size_{axis}", dim.scale)
             if dim.unit:
-                # FIX ME!!!!! VERY BAD...
-                # Convert common ome-ngff units to OME-XML equivalents
-                unit_str = dim.unit
-                if unit_str == "micrometer":
-                    unit_str = "µm"
+                # Convert NGFF units (e.g., "micrometer") to OME-XML (e.g., "µm")
+                ome_unit_str = ngff_to_ome_unit(dim.unit)
                 try:
-                    ome_unit = ome.UnitsLength(unit_str)
+                    ome_unit = ome.UnitsLength(ome_unit_str)
                 except ValueError:
                     warnings.warn(
-                        f"Could not convert unit '{dim.unit}' to ome.UnitsLength. "
-                        "Skipping unit assignment.",
+                        f"Could not convert unit '{dim.unit}' (→ '{ome_unit_str}') "
+                        f"to ome.UnitsLength. Skipping unit assignment.",
                         stacklevel=2,
                     )
                 else:

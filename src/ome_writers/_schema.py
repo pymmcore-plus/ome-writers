@@ -150,10 +150,11 @@ class Dimension(_BaseModel):
     )
     unit: str | None = Field(
         default=None,
-        description="Physical unit for this dimension, e.g. 'micrometer' for spatial "
-        "dimensions or 'second' for time.  Prefer using [ome-ngff unit naming "
-        "conventions](https://ngff.openmicroscopy.org/latest/index.html#axes-md)"
-        " where possible.",
+        description="Physical unit for this dimension. MUST use OME-NGFF compliant "
+        "unit names (e.g., 'micrometer', 'nanometer', 'second', 'millisecond'). "
+        "See [OME-NGFF axes specification](https://ngff.openmicroscopy.org/latest/index.html#axes-md) "  # noqa: E501
+        "for valid units. The TIFF backend will automatically convert these to "
+        "OME-XML symbols (e.g., 'micrometer' → 'µm').",
     )
     scale: float | None = Field(
         default=None,
