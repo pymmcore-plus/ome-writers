@@ -148,7 +148,8 @@ class TiffBackend(ArrayBackend):
                 ome_xml = self._cached_metadata.to_xml()
             else:
                 ome_xml = ome.OME(images=[all_images[p_idx]]).to_xml()
-            ome_xml = ome_xml.replace("µ", "&#x00B5;")  # ASCII compatibility
+            # Convert to ASCII with XML character references (e.g., µ → &#181;)
+            ome_xml = ome_xml.encode("ascii", "xmlcharrefreplace").decode("ascii")
 
             q = Queue[np.ndarray | None]()
             thread = WriterThread(
@@ -333,8 +334,9 @@ class TiffBackend(ArrayBackend):
                     xml = self._cached_metadata.to_xml()
                 else:
                     xml = ome.OME(images=[all_images[p_idx]]).to_xml()
-                xml = xml.replace("µ", "&#x00B5;")
-                tifffile.tiffcomment(writer.file_path, comment=xml.encode("ascii"))
+                # Convert to ASCII with XML character references
+                ascii_xml = xml.encode("ascii", "xmlcharrefreplace")
+                tifffile.tiffcomment(writer.file_path, comment=ascii_xml)
             except Exception as e:  # pragma: no cover
                 warnings.warn(
                     f"Failed to update OME metadata in {writer.file_path}: {e}",
@@ -359,7 +361,8 @@ class TiffBackend(ArrayBackend):
 
             # Create ASCII version for tifffile.tiffcomment
             # tifffile.tiffcomment requires ASCII strings
-            ascii_xml = position_ome.to_xml().replace("µ", "&#x00B5;").encode("ascii")
+            # xmlcharrefreplace converts non-ASCII chars to XML entities (µ → &#181;)
+            ascii_xml = position_ome.to_xml().encode("ascii", "xmlcharrefreplace")
         except Exception as e:  # pragma: no cover
             raise RuntimeError(
                 f"Failed to create position-specific OME metadata for position "
