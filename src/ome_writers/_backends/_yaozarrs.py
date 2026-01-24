@@ -426,8 +426,10 @@ def _get_chunks_and_shards(
             chunks.append(1)
 
         # Shards
-        if dim.shard_size is not None:
-            shards.append(dim.shard_size)
+        if dim.shard_size_chunks is not None:
+            # multiply shard_size_chunks by chunk size
+            # to get shard shape in pixels (which is what yaozarrs expects)
+            shards.append(chunks[-1] * dim.shard_size_chunks)
             has_shards = True
         else:
             shards.append(chunks[-1])  # Default to chunk size
