@@ -1,23 +1,29 @@
 """Benchmark ome-writers backends with granular phase timing.
 
+run `uv run profiling/benchmark.py --help` for usage details.
+
+Most important parameter is `--dims`/`-d` which specifies shape of the data to write.
+
+Format:
+    `name:count[:chunk[:shard]]` (comma-separated)
+
 Usage examples:
     # Single backend, simple 3D acquisition
-    python profiling/benchmark.py \\
-        --dims "c:3,y:512:128,x:512:128" \\
-        --backend zarr-python
+    uv run profiling/benchmark.py -d c:3,y:512:128,x:512:128 \
+        -b zarr-python
 
+    # 10 timepoints, 2 channels, (2048,2048) frame with (512,512) chunks
     # Multiple backends with compression
-    python profiling/benchmark.py \\
-        --dims "t:100,c:2,y:2048:256,x:2048:256" \\
-        -b zarr-python -b zarrs-python -b tensorstore \\
-        --compression blosc-zstd \\
-        --iterations 10 --warmups 3
+    uv run profiling/benchmark.py -d t:10,c:2,y:2048:512,x:2048:512 \
+        -b zarr-python -b zarrs-python -b tensorstore \
+        --compression blosc-zstd \
+        --iterations 5
 
-    # With sharding
-    python profiling/benchmark.py \\
-        --dims "t:100:1:10,c:4,z:20:1:5,y:1024:128,x:1024:128" \\
-        -b zarrs-python \\
-        --dtype uint8
+    # With sharding and dtype
+    uv run profiling/benchmark.py \
+        -d t:40:1:10,c:2,z:10:1:5,y:1024:512:2,x:1024:512:2 \
+        -b zarrs-python \
+        --dtype uint8 --warmups 0 --iterations 3
 """
 
 from __future__ import annotations
@@ -26,7 +32,7 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, get_args
 
 import numpy as np
 import typer
@@ -38,13 +44,14 @@ from ome_writers import (
     AcquisitionSettings,
     Dimension,
     PositionDimension,
+    _schema,
     create_stream,
     dims_from_standard_axes,
 )
 from ome_writers._stream import AVAILABLE_BACKENDS, get_format_for_backend
 
 if TYPE_CHECKING:
-    from jedi.inference.gradual.typing import TypedDict
+    from typing import TypedDict
 
     class TimingDict(TypedDict):
         create_stream: float
@@ -68,7 +75,13 @@ if TYPE_CHECKING:
         total: SummaryDict
 
 
-app = typer.Typer(help="Benchmark ome-writers backends")
+COMPRESSIONS = set(get_args(_schema.Compression))
+app = typer.Typer(
+    help="Benchmark ome-writers backends",
+    pretty_exceptions_enable=False,
+    add_completion=False,
+    no_args_is_help=True,
+)
 console = Console()
 
 
@@ -200,7 +213,6 @@ def run_all_benchmarks(
         except Exception as e:
             console.print(f"[red]✗ {b} failed: {e}[/red]\n")
             results[b] = str(e)
-            raise
     return results, frames
 
 
@@ -216,24 +228,96 @@ def print_results(
     num_frames = len(frames)
     frame_bytes = frames[0].nbytes
     total_bytes = num_frames * frame_bytes
+    frame_shape = frames[0].shape
+    outer_shape = [dim.count for dim in settings.dimensions]
+
+    # Display test conditions
+    console.print("[bold cyan]Test Conditions:[/bold cyan]")
+    console.print(f"  Total shape: {tuple(outer_shape)}")
+    console.print(f"  Frame shape: {tuple(frame_shape)}")
+    console.print(f"  Number of frames: {num_frames:,}")
+    console.print(f"  Data type: {settings.dtype}")
+
+    # Chunk shape - extract from dimensions
+    chunk_shape = []
+    shard_shape_chunks = []
+    has_sharding = False
+    for dim in settings.dimensions:
+        chunk_shape.append(dim.chunk_size)
+        if hasattr(dim, "shard_size_chunks") and dim.shard_size_chunks is not None:
+            shard_shape_chunks.append(dim.shard_size_chunks)
+            has_sharding = True
+        else:
+            shard_shape_chunks.append(None)
+
+    console.print(f"  Chunk shape: {tuple(chunk_shape)}")
+
+    # Shard shape (in chunks per shard) if present
+    if has_sharding:
+        shard_display = tuple(s if s is not None else 1 for s in shard_shape_chunks)
+        console.print(f"  Shard shape (chunks/shard): {shard_display}")
+
+    # MB per chunk
+    dtype_size = np.dtype(settings.dtype).itemsize
+    chunk_elements = np.prod(chunk_shape)
+    mb_per_chunk = (chunk_elements * dtype_size) / (1024 * 1024)
+    console.print(f"  MB per chunk: {mb_per_chunk:.3f}")
+
+    # Total data size
+    console.print(f"  Total data: {total_bytes / (1024**3):.3f} GB")
+    console.print(f"  Compression: {settings.compression or 'none'}")
+    console.print()
 
     # Create table with backends as columns
     table = Table()
     table.add_column("Metric", style="cyan", no_wrap=True)
 
-    # Add a column for each backend
+    # Calculate throughput for each backend to determine fastest/slowest
     backend_names = list(results.keys())
+    throughputs: dict[str, float | None] = {}
+    for backend, result in results.items():
+        if isinstance(result, str):
+            throughputs[backend] = None
+        else:
+            write_time = result["write"]["mean"]
+            throughputs[backend] = num_frames / write_time if write_time > 0 else None
+
+    # Find fastest and slowest (excluding errors)
+    valid_throughputs = {k: v for k, v in throughputs.items() if v is not None}
+    fastest_backend = (
+        max(valid_throughputs, key=lambda k: valid_throughputs[k])
+        if valid_throughputs
+        else None
+    )
+    slowest_backend = (
+        min(valid_throughputs, key=lambda k: valid_throughputs[k])
+        if valid_throughputs
+        else None
+    )
+
+    # Add a column for each backend with appropriate header styling
     for backend in backend_names:
         is_error = isinstance(results[backend], str)
-        style = "dim" if is_error else "bold yellow"
-        table.add_column(backend, justify="right", style=style)
+        style = "dim" if is_error else "light_cyan3"
+        if is_error:
+            header_style = "dim"
+        elif backend == fastest_backend:
+            header_style = "bold green"
+        elif backend == slowest_backend:
+            header_style = "bold red"
+        else:
+            header_style = "bold white"
+        table.add_column(
+            backend, justify="right", header_style=header_style, style=style
+        )
 
     # Build all rows in a single pass through results
-    create_row = ["create"]
-    write_row = ["write"]
-    throughput_row = ["throughput (fps)"]
-    bandwidth_row = ["bandwidth (GB/s)"]
+    create_row = ["create [dim](mean±std s)"]
+    write_row = ["write  [dim](mean±std s)"]
+    throughput_row = ["throughput    [dim](fps)"]
+    bandwidth_row = ["bandwidth    [dim](GB/s)"]
 
+    p = 3
     for result in results.values():
         if isinstance(result, str):
             create_row.append("ERROR")
@@ -243,11 +327,11 @@ def print_results(
         else:
             # Create time
             create = result["create_stream"]
-            create_row.append(f"{create['mean']:.4f} ± {create['std']:.4f}")
+            create_row.append(f"{create['mean']:.{p}f} ± {create['std']:.{p}f}")
 
             # Write time
             write = result["write"]
-            write_row.append(f"{write['mean']:.4f} ± {write['std']:.4f}")
+            write_row.append(f"{write['mean']:.{p}f} ± {write['std']:.{p}f}")
 
             # Throughput and bandwidth
             if (write_time := write["mean"]) > 0:
@@ -266,7 +350,7 @@ def print_results(
     console.print(table)
 
 
-@app.command()
+@app.command(no_args_is_help=True)
 def main(
     dimensions: Annotated[
         str,
@@ -275,7 +359,9 @@ def main(
             "-d",
             help=(
                 "Dimension spec: name:count[:chunk[:shard]] (comma-separated). "
-                "Example: c:3,y:512:128,x:512:128"
+                "For example, 'c:3,y:512:128,x:512:128:4' defines a 3-channel "
+                "image with 512x512 pixels, chunks of (128, 128) and sharding of 4 "
+                "chunks per shard in only the x dimension."
             ),
         ),
     ],
@@ -285,7 +371,8 @@ def main(
             "--backend",
             "-b",
             help="Backend to benchmark (can be specified multiple times).  "
-            "Use 'all' for all available backends.",
+            f"Must be one of {list(AVAILABLE_BACKENDS)}.  Or, "
+            "use 'all' for all available backends. ",
         ),
     ],
     dtype: Annotated[
@@ -293,8 +380,12 @@ def main(
         typer.Option("--dtype", help="Data type"),
     ] = "uint16",
     compression: Annotated[
-        str | None,
-        typer.Option("--compression", "-c", help="Compression algorithm"),
+        _schema.Compression | None,
+        typer.Option(
+            "--compression",
+            "-c",
+            help="Compression algorithm.",
+        ),
     ] = None,
     warmups: Annotated[
         int,
@@ -307,11 +398,12 @@ def main(
 ) -> None:
     """Benchmark ome-writers backends with granular phase timing.
 
-    Each backend is benchmarked multiple times, and timing is collected for
-    three phases:
-    - create_stream(): Stream initialization
-    - append(): Cumulative time for all frame writes
-    - finalize(): Backend finalization
+    Define a synthetic acquisition using --dims, and specify one or more
+    backends to benchmark.
+
+    Each backend is benchmarked `iterations` times, and timing is reported for:
+    - create: Time for stream initialization and directory creation
+    - write: Cumulative time for all frame writes (plus finalization)
     """
     if not backends:
         console.print("[red]Error: At least one --backend must be specified[/red]")

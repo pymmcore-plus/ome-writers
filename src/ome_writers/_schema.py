@@ -364,7 +364,7 @@ class Plate(_BaseModel):
 
 TiffCompression: TypeAlias = Literal["lzw", "none"]
 ZarrCompression: TypeAlias = Literal["blosc-zstd", "blosc-lz4", "zstd", "none"]
-Compression: TypeAlias = TiffCompression | ZarrCompression
+Compression: TypeAlias = Literal["blosc-zstd", "blosc-lz4", "zstd", "lzw", "none"]
 
 
 class AcquisitionSettings(_BaseModel):
@@ -676,7 +676,7 @@ def dims_from_standard_axes(
         dims.append(
             axis.to_dimension(
                 chunk_size=chunk_shapes.get(axis),
-                shard_size=shard_shapes.get(axis),
+                shard_size_chunks=shard_shapes.get(axis),
                 **kwargs,
             )
         )
