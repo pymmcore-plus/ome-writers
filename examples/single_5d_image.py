@@ -45,8 +45,6 @@ if settings.format == "zarr":
 
 if settings.format == "tiff":
     from ome_types import from_tiff
-    from rich import print
 
     from_tiff(settings.root_path)
     print("✓ TIFF file is valid")
-    print(from_tiff(settings.root_path).to_xml())

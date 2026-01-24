@@ -40,10 +40,15 @@ class _PositionWriter:
     """Per-position writer state for TIFF backend."""
 
     file_path: str
-    file_uuid: str
-    thread: WriterThread
-    queue: Queue[np.ndarray | None]
+    file_uuid: str | None
+    thread: WriterThread | None
+    queue: Queue[np.ndarray | None] | None
     name: str | None = None
+
+    def cleanup(self) -> None:
+        """Clean up thread and queue references while keeping file info."""
+        self.thread = None
+        self.queue = None
 
 
 class TiffBackend(ArrayBackend):
@@ -186,17 +191,22 @@ class TiffBackend(ArrayBackend):
         if not self._finalized:
             # Signal threads to stop
             for writer in self._position_writers.values():
-                writer.queue.put(None)
+                if writer.queue:
+                    writer.queue.put(None)
 
             # Wait for threads to finish
             for writer in self._position_writers.values():
-                writer.thread.join(timeout=5)
+                if writer.thread:
+                    writer.thread.join(timeout=5)
 
             # Update OME metadata if unbounded dimensions were written
             if self._storage_dims and any(d.count is None for d in self._storage_dims):
                 self._update_unbounded_metadata()
 
-            self._position_writers.clear()
+            # Clean thread and queue refs, but keep file info for update_metadata()
+            for writer in self._position_writers.values():
+                writer.cleanup()
+
             self._finalized = True
 
     def get_metadata(self) -> ome.OME | None:

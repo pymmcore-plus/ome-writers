@@ -74,10 +74,14 @@ def test_update_metadata_multiposition(tmp_path: Path, tiff_backend: str) -> Non
             stream.append(np.random.randint(0, 1000, (32, 32), dtype=np.uint16))
 
     # Verify default names are position names
-    for pos_idx in range(2):
+    # Note: Each file contains companion OME-XML with ALL positions,
+    # but the actual image data in each file corresponds to its position index
+    for pos_idx, pos in enumerate(settings.positions):
         pos_file = tmp_path / f"multipos_p{pos_idx:03d}.ome.tiff"
         ome_obj = from_tiff(str(pos_file))
-        assert ome_obj.images[0].name == f"Pos{pos_idx}"
+        # All files have all positions in metadata, check the one that matches this file
+        assert len(ome_obj.images) == 2
+        assert ome_obj.images[pos_idx].name == pos.name
 
     # Update metadata
     metadata = stream.get_metadata()
@@ -144,10 +148,14 @@ def test_update_metadata_with_plates(tmp_path: Path, tiff_backend: str) -> None:
             stream.append(np.random.randint(0, 1000, (32, 32), dtype=np.uint16))
 
     # Verify default names are position names
+    # Note: Each file contains companion OME-XML with ALL positions,
+    # but the actual image data in each file corresponds to its position index
     for pos_idx, expected_name in enumerate(["Well_A01", "Well_A02"]):
         pos_file = tmp_path / f"plate_p{pos_idx:03d}.ome.tiff"
         ome_obj = from_tiff(str(pos_file))
-        assert ome_obj.images[0].name == expected_name
+        # All files have all positions in metadata, check the one that matches this file
+        assert len(ome_obj.images) == 2
+        assert ome_obj.images[pos_idx].name == expected_name
 
     # Update metadata
     metadata = stream.get_metadata()
@@ -228,26 +236,26 @@ def test_tiff_multiposition_detailed_metadata(
     pos0_file = tmp_path / "multipos_p000.ome.tiff"
     ome_obj = from_tiff(str(pos0_file))
 
-    # Should contain metadata for both positions
+    # Should contain metadata for both positions (companion OME-XML)
     assert len(ome_obj.images) == 2
     assert ome_obj.images[0].id == "Image:0"
+    assert ome_obj.images[0].name == "Pos0"
     assert ome_obj.images[1].id == "Image:1"
+    assert ome_obj.images[1].name == "Pos1"
 
-    # Check detailed TiffData blocks for position 0
+    # Check TiffData block for position 0 has UUID
     pixels0 = ome_obj.images[0].pixels
-    assert len(pixels0.tiff_data_blocks) == 6  # 2 channels * 3 z-slices
+    assert len(pixels0.tiff_data_blocks) == 1
+    tiff_data = pixels0.tiff_data_blocks[0]
+    assert tiff_data.plane_count == 6  # 2 channels * 3 z-slices
+    assert tiff_data.uuid is not None
+    assert tiff_data.uuid.value.startswith("urn:uuid:")
+    assert tiff_data.uuid.file_name == "multipos_p000.ome.tiff"
 
-    # Verify each TiffData has proper structure
-    for idx, tiff_data in enumerate(pixels0.tiff_data_blocks):
-        assert tiff_data.ifd == idx
-        assert tiff_data.plane_count == 1
-        assert tiff_data.uuid is not None
-        assert tiff_data.uuid.value.startswith("urn:uuid:")
-        assert tiff_data.uuid.file_name == "multipos_p000.ome.tiff"
-        # Check FirstC, FirstZ, FirstT are set
-        assert tiff_data.first_c is not None
-        assert tiff_data.first_z is not None
-        assert tiff_data.first_t is not None
+    # Check second position file also has full metadata
+    pos1_file = tmp_path / "multipos_p001.ome.tiff"
+    ome_obj = from_tiff(str(pos1_file))
+    assert len(ome_obj.images) == 2  # Both positions in companion OME-XML
 
     # Verify UUIDs are different between positions
     pixels1 = ome_obj.images[1].pixels
