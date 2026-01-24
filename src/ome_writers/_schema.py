@@ -614,7 +614,6 @@ class AcquisitionSettings(_BaseModel):
 def dims_from_standard_axes(
     sizes: Mapping[str, int | Sequence[str | Position] | None],
     chunk_shapes: Mapping[str | StandardAxis, int] | None = None,
-    shard_shapes: Mapping[str | StandardAxis, int] | None = None,
 ) -> list[Dimension | PositionDimension]:
     """Create dimensions from standard axis names.
 
@@ -632,11 +631,7 @@ def dims_from_standard_axes(
         Mapping of axis name to size. Order determines dimension order.
         For 'p', value can be int or list of position names.
     chunk_shapes
-        Optional mapping of axis_name to chunk size. Defaults to full size for X/Y,
-        1 for others.
-    shard_shapes
-        Optional mapping of axis_name to shard size (in number of chunks). Defaults to
-        None (no sharding).
+        Optional chunk sizes per axis. Defaults to full size for X/Y, 1 for others.
 
     Returns
     -------
@@ -651,9 +646,8 @@ def dims_from_standard_axes(
     try:
         std_axes = [StandardAxis(axis) for axis in sizes]
     except ValueError as e:
-        allowed = [x.value for x in StandardAxis]
         raise ValueError(
-            f"Standard axes names must be one of {allowed}. Got: {list(sizes)}"
+            f"All axes must be one of {StandardAxis._member_names_}."
         ) from e
 
     # Default chunk shapes: full size for X/Y, 1 for others
@@ -664,7 +658,6 @@ def dims_from_standard_axes(
             size = sizes.get(axis.value)
             chunk_shapes[axis] = size if isinstance(size, int) and axis in x_or_y else 1
 
-    shard_shapes = dict(shard_shapes) if shard_shapes else {}
     dims: list[Dimension | PositionDimension] = []
     for axis in std_axes:
         value = sizes[axis.value]
@@ -672,13 +665,7 @@ def dims_from_standard_axes(
             kwargs = {"positions": value}
         else:
             kwargs = {"count": value}
-        dims.append(
-            axis.to_dimension(
-                chunk_size=chunk_shapes.get(axis),
-                shard_size=shard_shapes.get(axis),
-                **kwargs,
-            )
-        )
+        dims.append(axis.to_dimension(chunk_size=chunk_shapes.get(axis), **kwargs))
     return dims
 
 
