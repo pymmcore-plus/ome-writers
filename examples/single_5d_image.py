@@ -9,7 +9,6 @@ from ome_writers import AcquisitionSettings, Dimension, create_stream
 # Derive backend from command line argument (default: auto)
 BACKEND = "auto" if len(sys.argv) < 2 else sys.argv[1]
 
-UM = "micrometer"
 suffix = ".ome.tiff" if BACKEND == "tifffile" else ".ome.zarr"
 
 # create acquisition settings
@@ -19,9 +18,9 @@ settings = AcquisitionSettings(
     dimensions=[
         Dimension(name="t", count=2, chunk_size=1, type="time"),
         Dimension(name="c", count=3, chunk_size=1, type="channel"),
-        Dimension(name="z", count=4, chunk_size=1, type="space", scale=5, unit=UM),
-        Dimension(name="y", count=256, chunk_size=64, type="space", scale=0.1, unit=UM),
-        Dimension(name="x", count=256, chunk_size=64, type="space", scale=0.1, unit=UM),
+        Dimension(name="z", count=4, chunk_size=1, type="space", scale=5, unit="µm"),
+        Dimension(name="y", count=256, chunk_size=64, type="space", scale=2, unit="µm"),
+        Dimension(name="x", count=256, chunk_size=64, type="space", scale=2, unit="µm"),
     ],
     dtype="uint16",
     overwrite=True,
@@ -46,6 +45,8 @@ if settings.format == "zarr":
 
 if settings.format == "tiff":
     from ome_types import from_tiff
+    from rich import print
 
     from_tiff(settings.root_path)
     print("✓ TIFF file is valid")
+    print(from_tiff(settings.root_path).to_xml())

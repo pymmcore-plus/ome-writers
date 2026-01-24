@@ -11,7 +11,6 @@ BACKEND = "auto" if len(sys.argv) < 2 else sys.argv[1]
 suffix = ".ome.tiff" if BACKEND == "tifffile" else ".ome.zarr"
 
 # create acquisition settings
-UM = "micrometer"
 settings = AcquisitionSettings(
     root_path=f"example_5d_series{suffix}",
     # declare dimensions in order of acquisition (slowest to fastest)
@@ -19,9 +18,9 @@ settings = AcquisitionSettings(
         Dimension(name="t", count=2, chunk_size=1, type="time"),
         PositionDimension(positions=["Pos0", "Pos1"]),
         Dimension(name="c", count=3, chunk_size=1, type="channel"),
-        Dimension(name="z", count=4, chunk_size=1, type="space", scale=5, unit=UM),
-        Dimension(name="y", count=256, chunk_size=64, type="space", scale=0.1, unit=UM),
-        Dimension(name="x", count=256, chunk_size=64, type="space", scale=0.1, unit=UM),
+        Dimension(name="z", count=4, chunk_size=1, type="space", scale=5, unit="µm"),
+        Dimension(name="y", count=256, chunk_size=64, type="space", scale=2, unit="µm"),
+        Dimension(name="x", count=256, chunk_size=64, type="space", scale=2, unit="µm"),
     ],
     dtype="uint16",
     overwrite=True,
@@ -46,8 +45,12 @@ if settings.format == "zarr":
 
 if settings.format == "tiff":
     from ome_types import from_tiff
+    from rich import print
 
+    pos_names = [p.name for p in settings.positions]
     files = [f"{settings.root_path[:-9]}_p{pos:03d}.ome.tiff" for pos in range(2)]
     for idx, file in enumerate(files):
         from_tiff(file)
         print(f"✓ TIFF file {idx} is valid")
+
+        print(from_tiff(file).to_xml())

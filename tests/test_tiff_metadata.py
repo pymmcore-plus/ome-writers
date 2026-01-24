@@ -73,6 +73,12 @@ def test_update_metadata_multiposition(tmp_path: Path, tiff_backend: str) -> Non
         for _ in range(4):
             stream.append(np.random.randint(0, 1000, (32, 32), dtype=np.uint16))
 
+    # Verify default names are position names
+    for pos_idx in range(2):
+        pos_file = tmp_path / f"multipos_p{pos_idx:03d}.ome.tiff"
+        ome_obj = from_tiff(str(pos_file))
+        assert ome_obj.images[0].name == f"Pos{pos_idx}"
+
     # Update metadata
     metadata = stream.get_metadata()
     metadata.images[0].name = "Position 0 Updated"
@@ -136,6 +142,12 @@ def test_update_metadata_with_plates(tmp_path: Path, tiff_backend: str) -> None:
     with create_stream(settings) as stream:
         for _ in range(2):
             stream.append(np.random.randint(0, 1000, (32, 32), dtype=np.uint16))
+
+    # Verify default names are position names
+    for pos_idx, expected_name in enumerate(["Well_A01", "Well_A02"]):
+        pos_file = tmp_path / f"plate_p{pos_idx:03d}.ome.tiff"
+        ome_obj = from_tiff(str(pos_file))
+        assert ome_obj.images[0].name == expected_name
 
     # Update metadata
     metadata = stream.get_metadata()

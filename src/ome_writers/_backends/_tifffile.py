@@ -6,18 +6,20 @@ import math
 import threading
 import uuid
 import warnings
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from itertools import count, product
+from itertools import count
 from pathlib import Path
 from queue import Queue
 from typing import TYPE_CHECKING, Literal
 
+import numpy as np
+
 from ome_writers._backends._backend import ArrayBackend
+from ome_writers._schema import StandardAxis
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-
-    import numpy as np
 
     from ome_writers._router import FrameRouter
     from ome_writers._schema import AcquisitionSettings, Dimension
@@ -33,6 +35,17 @@ except ImportError as e:
     ) from e
 
 
+@dataclass
+class _PositionWriter:
+    """Per-position writer state for TIFF backend."""
+
+    file_path: str
+    file_uuid: str
+    thread: WriterThread
+    queue: Queue[np.ndarray | None]
+    name: str | None = None
+
+
 class TiffBackend(ArrayBackend):
     """OME-TIFF backend using tifffile for sequential writes.
 
@@ -42,14 +55,11 @@ class TiffBackend(ArrayBackend):
     """
 
     def __init__(self) -> None:
-        self._threads: dict[int, WriterThread] = {}
-        self._queues: dict[int, Queue[np.ndarray | None]] = {}
-        self._file_paths: dict[int, str] = {}  # Store paths for metadata updates
-        self._file_uuids: dict[int, str] = {}  # Store UUIDs for each file
         self._finalized = False
+        self._position_writers: dict[int, _PositionWriter] = {}
         self._storage_dims: tuple[Dimension, ...] | None = None
-        self._cached_metadata: ome.OME | None = None  # Cache for get_metadata()
-        self._compression: str | None = None
+        self._dtype: str = ""
+        self._cached_metadata: ome.OME | None = None
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         """Check if settings are compatible with TIFF backend."""
@@ -70,15 +80,29 @@ class TiffBackend(ArrayBackend):
                 f"Compression '{settings.compression}' is not supported by "
                 f"TiffBackend. Supported: {supported}."
             )
+
+        # Validate storage dimension names for OME-TIFF compatibility
+        # OME-TIFF supports x, y, z, c, t (all StandardAxis except position)
+        valid_dims = {
+            axis.value for axis in StandardAxis if axis != StandardAxis.POSITION
+        }
+        for dim in settings.array_storage_dimensions:
+            if dim.name.lower() not in valid_dims:
+                return (
+                    f"Invalid dimension name '{dim.name}' for OME-TIFF. "
+                    f"Valid names are: {', '.join(sorted(valid_dims))} "
+                    f"(case-insensitive)."
+                )
+
         return False
 
     def prepare(self, settings: AcquisitionSettings, router: FrameRouter) -> None:
         """Initialize OME-TIFF files and writer threads."""
         self._finalized = False
-        root = Path(settings.root_path).expanduser().resolve()
-        positions = settings.positions
         self._storage_dims = storage_dims = settings.array_storage_dimensions
         self._dtype = settings.dtype
+        positions = settings.positions
+        root = Path(settings.root_path).expanduser().resolve()
 
         # Extract and validate compression
         if settings.compression in (None, "none"):
@@ -88,7 +112,6 @@ class TiffBackend(ArrayBackend):
 
         # Compute shape from storage dimensions
         shape = tuple(d.count if d.count is not None else 1 for d in storage_dims)
-        dtype = settings.dtype
 
         # Check if any dimension is unbounded
         has_unbounded = any(d.count is None for d in storage_dims)
@@ -98,11 +121,17 @@ class TiffBackend(ArrayBackend):
 
         # Generate UUIDs and OME metadata for all positions
         all_images, num_pos = [], len(positions)
+        file_uuids: dict[int, str | None] = {}
         for p_idx, fname in enumerate(fnames):
-            self._file_uuids[p_idx] = file_uuid = str(uuid.uuid4())
+            file_uuids[p_idx] = file_uuid = str(uuid.uuid4()) if num_pos > 1 else None
             all_images.append(
                 _create_ome_image(
-                    storage_dims, dtype, Path(fname).name, p_idx, file_uuid, num_pos
+                    dims=storage_dims,
+                    dtype=self._dtype,
+                    filename=Path(fname).name,
+                    image_index=p_idx,
+                    file_uuid=file_uuid,
+                    position_name=positions[p_idx].name if num_pos > 1 else None,
                 )
             )
         self._cached_metadata = ome.OME(images=all_images)
@@ -115,18 +144,25 @@ class TiffBackend(ArrayBackend):
                 ome_xml = ome.OME(images=[all_images[p_idx]]).to_xml()
             ome_xml = ome_xml.replace("µ", "&#x00B5;")  # ASCII compatibility
 
-            self._file_paths[p_idx] = fname
-            self._queues[p_idx] = q = Queue()
-            self._threads[p_idx] = thread = WriterThread(
+            q = Queue[np.ndarray | None]()
+            thread = WriterThread(
                 path=fname,
                 shape=shape,
-                dtype=dtype,
+                dtype=self._dtype,
                 image_queue=q,
                 ome_xml=ome_xml,
                 has_unbounded=has_unbounded,
                 compression=compression,
             )
             thread.start()
+
+            self._position_writers[p_idx] = _PositionWriter(
+                file_path=fname,
+                file_uuid=file_uuids[p_idx],
+                thread=thread,
+                queue=q,
+                name=positions[p_idx].name if num_pos > 1 else None,
+            )
 
     def write(
         self,
@@ -140,28 +176,27 @@ class TiffBackend(ArrayBackend):
         """
         if self._finalized:  # pragma: no cover
             raise RuntimeError("Cannot write after finalize().")
-        if not self._threads:  # pragma: no cover
+        if not self._position_writers:  # pragma: no cover
             raise RuntimeError("Backend not prepared. Call prepare() first.")
 
-        self._queues[position_index].put(frame)
+        self._position_writers[position_index].queue.put(frame)
 
     def finalize(self) -> None:
         """Flush and close all TIFF writers."""
         if not self._finalized:
             # Signal threads to stop
-            for queue in self._queues.values():
-                queue.put(None)
+            for writer in self._position_writers.values():
+                writer.queue.put(None)
 
             # Wait for threads to finish
-            for thread in self._threads.values():
-                thread.join(timeout=5)
+            for writer in self._position_writers.values():
+                writer.thread.join(timeout=5)
 
             # Update OME metadata if unbounded dimensions were written
             if self._storage_dims and any(d.count is None for d in self._storage_dims):
                 self._update_unbounded_metadata()
 
-            self._threads.clear()
-            self._queues.clear()
+            self._position_writers.clear()
             self._finalized = True
 
     def get_metadata(self) -> ome.OME | None:
@@ -216,7 +251,7 @@ class TiffBackend(ArrayBackend):
                 f"Expected ome_types.model.OME metadata, got {type(metadata)}"
             )
 
-        for position_idx in self._file_paths:
+        for position_idx in self._position_writers:
             self._update_position_metadata(position_idx, metadata)
 
         # Update cache to reflect what's now on disk
@@ -235,10 +270,10 @@ class TiffBackend(ArrayBackend):
 
         # Get actual frame count from first position's thread
         # (all positions should have written the same number of frames)
-        if 0 not in self._threads:  # pragma: no cover
+        if 0 not in self._position_writers:  # pragma: no cover
             return
 
-        total_frames_written = self._threads[0].frames_written
+        total_frames_written = self._position_writers[0].thread.frames_written
         if total_frames_written == 0:  # pragma: no cover
             return
 
@@ -264,12 +299,16 @@ class TiffBackend(ArrayBackend):
         )
 
         # Regenerate OME metadata for each position
-        all_images, num_pos = [], len(self._file_paths)
-        for p_idx, fname in sorted(self._file_paths.items()):
-            filename, file_uuid = Path(fname).name, self._file_uuids.get(p_idx)
+        all_images = []
+        for p_idx, writer in sorted(self._position_writers.items()):
             all_images.append(
                 _create_ome_image(
-                    corrected_dims, self._dtype, filename, p_idx, file_uuid, num_pos
+                    dims=corrected_dims,
+                    dtype=self._dtype,
+                    filename=Path(writer.file_path).name,
+                    image_index=p_idx,
+                    file_uuid=writer.file_uuid,
+                    position_name=writer.name,
                 )
             )
 
@@ -277,22 +316,23 @@ class TiffBackend(ArrayBackend):
         self._cached_metadata = ome.OME(images=all_images)
 
         # Write metadata to each file
-        for p_idx, fname in sorted(self._file_paths.items()):
+        for p_idx, writer in sorted(self._position_writers.items()):
             try:
-                if num_pos > 1:  # multiposition: full OME with all images
+                if len(self._position_writers) > 1:  # multiposition: full OME
                     xml = self._cached_metadata.to_xml()
                 else:
                     xml = ome.OME(images=[all_images[p_idx]]).to_xml()
                 xml = xml.replace("µ", "&#x00B5;")
-                tifffile.tiffcomment(fname, comment=xml.encode("ascii"))
+                tifffile.tiffcomment(writer.file_path, comment=xml.encode("ascii"))
             except Exception as e:  # pragma: no cover
                 warnings.warn(
-                    f"Failed to update OME metadata in {fname}: {e}", stacklevel=2
+                    f"Failed to update OME metadata in {writer.file_path}: {e}",
+                    stacklevel=2,
                 )
 
     def _update_position_metadata(self, position_idx: int, metadata: ome.OME) -> None:
         """Update OME metadata for a specific position's TIFF file."""
-        file_path = self._file_paths[position_idx]
+        file_path = self._position_writers[position_idx].file_path
 
         if not Path(file_path).exists():  # pragma: no cover
             warnings.warn(
@@ -452,44 +492,33 @@ def _create_ome_image(
     filename: str,
     image_index: int,
     file_uuid: str | None = None,
-    num_positions: int = 1,
+    position_name: str | None = None,
 ) -> ome.Image:
     """Generate OME Image object for TIFF file."""
-    shape_dict = {d.name.upper(): d.count or 1 for d in dims}
-    size_t = shape_dict.get("T", 1)
-    size_c = shape_dict.get("C", 1)
-    size_z = shape_dict.get("Z", 1)
-    dim_order = next(
-        order
-        for order in ome.Pixels_DimensionOrder
-        if order.value.startswith("".join(reversed(shape_dict.keys())))
-    )
-    dims_by_name = {d.name.lower(): d for d in dims}
-
-    # Build TiffData: simple for single position, detailed with UUIDs for multi
-    if num_positions == 1:
-        tiff_data_blocks = [ome.TiffData(plane_count=size_t * size_c * size_z)]
+    # Build shape dictionary from dimensions
+    shape_dict = {d.name.upper(): d.count or 1 for d in reversed(dims)}
+    size_z = shape_dict.setdefault("Z", 1)
+    size_c = shape_dict.setdefault("C", 1)
+    size_t = shape_dict.setdefault("T", 1)
+    our_order = "".join(x for x in shape_dict if x in "ZCT")  # only Z,C,T
+    for order in ome.Pixels_DimensionOrder:
+        if order.value.endswith(our_order):
+            dim_order = order
+            break
     else:
-        tiff_data_blocks, ifd = [], 0
-        # Get dimension names in storage order (already provided in dims)
-        dim_names = [d.name.upper() for d in dims[:-2]]  # Exclude Y, X
-        dim_sizes = {"T": size_t, "C": size_c, "Z": size_z}
-        # Build indices for all dimensions in storage order
-        for indices in product(*(range(dim_sizes[name]) for name in dim_names)):
-            coord_map = dict(zip(dim_names, indices, strict=False))
-            td = ome.TiffData(
-                ifd=ifd,
-                plane_count=1,
-                first_c=coord_map.get("C", 0),
-                first_z=coord_map.get("Z", 0),
-                first_t=coord_map.get("T", 0),
-            )
-            if file_uuid:
-                td.uuid = ome.TiffData.UUID(
-                    value=f"urn:uuid:{file_uuid}", file_name=filename
-                )
-            tiff_data_blocks.append(td)
-            ifd += 1
+        raise ValueError(
+            f"Cannot determine OME dimension order for storage dimensions: {dims}"
+        ) from None
+
+    # Build TiffData (with UUIDs for multi-position)
+    tiff_data_blocks = ome.TiffData(
+        plane_count=size_t * size_c * size_z,
+        uuid=(
+            ome.TiffData.UUID(value=f"urn:uuid:{file_uuid}", file_name=filename)
+            if file_uuid
+            else None
+        ),
+    )
 
     pixels = ome.Pixels(
         id=f"Pixels:{image_index}",
@@ -505,21 +534,26 @@ def _create_ome_image(
             ome.Channel(id=f"Channel:{image_index}:{i}", samples_per_pixel=1)
             for i in range(size_c)
         ],
-        tiff_data_blocks=tiff_data_blocks,
+        tiff_data_blocks=[tiff_data_blocks],
     )
     # Add physical sizes if available
+    dims_by_name = {d.name.lower(): d for d in dims}
     for axis in ["x", "y", "z"]:
         if (dim := dims_by_name.get(axis)) and dim.scale is not None:
             setattr(pixels, f"physical_size_{axis}", dim.scale)
             if dim.unit:
                 try:
-                    setattr(
-                        pixels, f"physical_size_{axis}_unit", ome.UnitsLength(dim.unit)
-                    )
+                    ome_unit = ome.UnitsLength(dim.unit)
                 except ValueError:
-                    pass
+                    warnings.warn(
+                        f"Could not convert unit '{dim.unit}' to ome.UnitsLength. "
+                        "Skipping unit assignment.",
+                        stacklevel=2,
+                    )
+                else:
+                    setattr(pixels, f"physical_size_{axis}_unit", ome_unit)
 
-    name = Path(filename).stem.removesuffix(".ome")
+    name = position_name if position_name else Path(filename).stem.removesuffix(".ome")
     return ome.Image(
         id=f"Image:{image_index}",
         acquisition_date=datetime.now(timezone.utc),
