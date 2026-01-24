@@ -64,7 +64,9 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         self._chunk_buffers: list[ChunkBuffer] | None = None
 
     @abstractmethod
-    def _get_writer(self) -> Literal["zarr", "tensorstore"] | Callable[..., Any]:
+    def _get_yaozarrs_writer(
+        self,
+    ) -> Literal["zarr", "tensorstore"] | Callable[..., Any]:
         """Return the writer to use for array creation.
 
         Subclasses can override to provide a custom CreateArrayFunc.
@@ -115,7 +117,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         compression = cast("CompressionName", settings.compression or "none")
 
         # Get writer from hook (subclasses can override)
-        writer = self._get_writer()
+        writer = self._get_yaozarrs_writer()
 
         # Plate mode
         if settings.plate is not None:

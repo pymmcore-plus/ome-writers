@@ -60,7 +60,7 @@ class AcquireZarrBackend(YaozarrsBackend):
             return str(e)
         return False
 
-    def _get_writer(self) -> Callable[..., _ArrayPlaceholder]:
+    def _get_yaozarrs_writer(self) -> Callable[..., _ArrayPlaceholder]:
         """Return custom writer that collects array configs as placeholders."""
 
         def custom_writer(
