@@ -542,8 +542,13 @@ def _create_ome_image(
         if (dim := dims_by_name.get(axis)) and dim.scale is not None:
             setattr(pixels, f"physical_size_{axis}", dim.scale)
             if dim.unit:
+                # FIX ME!!!!! VERY BAD...
+                # Convert common ome-ngff units to OME-XML equivalents
+                unit_str = dim.unit
+                if unit_str == "micrometer":
+                    unit_str = "µm"
                 try:
-                    ome_unit = ome.UnitsLength(dim.unit)
+                    ome_unit = ome.UnitsLength(unit_str)
                 except ValueError:
                     warnings.warn(
                         f"Could not convert unit '{dim.unit}' to ome.UnitsLength. "

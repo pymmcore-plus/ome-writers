@@ -8,8 +8,8 @@ from ome_writers import AcquisitionSettings, Dimension, create_stream
 
 # Derive backend from command line argument (default: auto)
 BACKEND = "auto" if len(sys.argv) < 2 else sys.argv[1]
-
 suffix = ".ome.tiff" if BACKEND == "tifffile" else ".ome.zarr"
+UM = "µm" if BACKEND == "tifffile" else "micrometer"
 
 # create acquisition settings
 settings = AcquisitionSettings(
@@ -18,9 +18,9 @@ settings = AcquisitionSettings(
     dimensions=[
         Dimension(name="t", count=2, chunk_size=1, type="time"),
         Dimension(name="c", count=3, chunk_size=1, type="channel"),
-        Dimension(name="z", count=4, chunk_size=1, type="space", scale=5, unit="µm"),
-        Dimension(name="y", count=256, chunk_size=64, type="space", scale=2, unit="µm"),
-        Dimension(name="x", count=256, chunk_size=64, type="space", scale=2, unit="µm"),
+        Dimension(name="z", count=4, chunk_size=1, type="space", scale=5, unit=UM),
+        Dimension(name="y", count=256, chunk_size=64, type="space", scale=2, unit=UM),
+        Dimension(name="x", count=256, chunk_size=64, type="space", scale=2, unit=UM),
     ],
     dtype="uint16",
     overwrite=True,
