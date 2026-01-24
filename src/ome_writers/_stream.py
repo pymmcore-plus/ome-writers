@@ -82,6 +82,13 @@ class OMEStream:
         self._backend.finalize()
 
 
+def get_format_for_backend(backend: str) -> FileFormat:
+    """Get the appropriate file suffix for a given backend."""
+    if not (meta := AVAILABLE_BACKENDS.get(backend)):
+        raise ValueError(f"Unknown backend: {backend}")
+    return meta.format
+
+
 @dataclass
 class BackendMetadata:
     """Metadata for a backend implementation."""
@@ -211,6 +218,7 @@ def create_stream(settings: AcquisitionSettings) -> OMEStream:
         backend.finalize()
         raise
     except Exception as e:  # pragma: no cover
+        raise
         backend.finalize()
         raise RuntimeError(f"Unexpected error during backend preparation: {e}") from e
     return OMEStream(backend, router)
