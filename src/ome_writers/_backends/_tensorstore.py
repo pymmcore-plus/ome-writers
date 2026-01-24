@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 class TensorstoreBackend(YaozarrsBackend):
     """OME-Zarr writer using tensorstore via yaozarrs."""
 
-    def _get_writer(self) -> Literal["tensorstore"]:
+    def _get_yaozarrs_writer(self) -> Literal["tensorstore"]:
         return "tensorstore"
 
     def __init__(self) -> None:

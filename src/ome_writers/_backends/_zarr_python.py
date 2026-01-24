@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 from ome_writers._backends._yaozarrs import YaozarrsBackend
 
 if TYPE_CHECKING:
+    from donfig.config_obj import ConfigSet
+
     from ome_writers._router import FrameRouter
     from ome_writers._schema import AcquisitionSettings
 
@@ -12,24 +14,31 @@ if TYPE_CHECKING:
 class ZarrBackend(YaozarrsBackend):
     """OME-Zarr writer using zarr-python via yaozarrs."""
 
-    def _get_writer(self) -> Literal["zarr"]:
+    _config_set: ConfigSet | None = None
+    _zarr_config: ClassVar[dict[str, object]] = {
+        # Disable write_empty_chunks optimization
+        "array.write_empty_chunks": True,
+    }
+
+    def _get_yaozarrs_writer(self) -> Literal["zarr"]:
         return "zarr"
-
-
-class ZarrsBackend(ZarrBackend):
-    """OME-Zarr writer using zarr-python via yaozarrs."""
 
     def prepare(self, settings: AcquisitionSettings, router: FrameRouter) -> None:
         import zarr
 
-        self._previous_pipeline = zarr.config.get("codec_pipeline.path")
-        zarr.config.set({"codec_pipeline.path": "zarrs.ZarrsCodecPipeline"})
+        self._config_set = zarr.config.set(self._zarr_config)
         super().prepare(settings, router)
 
     def finalize(self) -> None:
         super().finalize()
-        if (pipeline := getattr(self, "_previous_pipeline", None)) is not None:
-            import zarr
+        if self._config_set is not None:
+            self._config_set.__exit__(None, None, None)
 
-            zarr.config.set({"codec_pipeline.path": pipeline})
-            del self._previous_pipeline
+
+class ZarrsBackend(ZarrBackend):
+    """OME-Zarr writer using zarrs-python Rust codecs via yaozarrs."""
+
+    _zarr_config: ClassVar[dict[str, object]] = {
+        **ZarrBackend._zarr_config,
+        "codec_pipeline.path": "zarrs.ZarrsCodecPipeline",
+    }
