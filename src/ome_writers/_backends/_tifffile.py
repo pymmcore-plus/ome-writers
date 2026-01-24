@@ -445,16 +445,20 @@ def _create_ome_image(
     by the storage dimensions order.
     """
     # Build shape dictionary from dimensions
-    shape_dict = {d.name.upper(): d.count or 1 for d in dims}
-    size_t = shape_dict.get("T", 1)
-    size_c = shape_dict.get("C", 1)
-    size_z = shape_dict.get("Z", 1)
     # OME-XML has fasted-varying dimension on the left (rightmost in storage order)
-    dim_order = next(
-        order
-        for order in ome.Pixels_DimensionOrder
-        if order.value.startswith("".join(reversed(shape_dict.keys())))
-    )
+    shape_dict = {d.name.upper(): d.count or 1 for d in reversed(dims)}
+    size_z = shape_dict.setdefault("Z", 1)
+    size_c = shape_dict.setdefault("C", 1)
+    size_t = shape_dict.setdefault("T", 1)
+    our_order = "".join(x for x in shape_dict if x in "ZCT")  # only Z,C,T
+    for order in ome.Pixels_DimensionOrder:
+        if order.value.endswith(our_order):
+            dim_order = order
+            break
+    else:
+        raise ValueError(
+            f"Cannot determine OME dimension order for storage dimensions: {dims}"
+        ) from None
 
     return ome.Image(
         id=f"Image:{image_index}",
