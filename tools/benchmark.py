@@ -1,6 +1,6 @@
 """Benchmark ome-writers backends with granular phase timing.
 
-run `uv run profiling/benchmark.py --help` for usage details.
+run `uv run tools/benchmark.py --help` for usage details.
 
 Most important parameter is `--dims`/`-d` which specifies shape of the data to write.
 
@@ -8,19 +8,19 @@ Format:
     `name:count[:chunk[:shard]]` (comma-separated)
 
 Usage examples:
+
     # Single backend, simple 3D acquisition
-    uv run profiling/benchmark.py -d c:3,y:512:128,x:512:128 \
-        -b zarr-python
+    uv run tools/benchmark.py -d c:3,y:512:128,x:512:128 -b zarr-python
 
     # 10 timepoints, 2 channels, (2048,2048) frame with (512,512) chunks
     # Multiple backends with compression
-    uv run profiling/benchmark.py -d t:10,c:2,y:2048:512,x:2048:512 \
+    uv run tools/benchmark.py -d t:10,c:2,y:2048:512,x:2048:512 \
         -b zarr-python -b zarrs-python -b tensorstore \
         --compression blosc-zstd \
         --iterations 5
 
     # With sharding and dtype
-    uv run profiling/benchmark.py \
+    uv run tools/benchmark.py \
         -d t:40:1:10,c:2,z:10:1:5,y:1024:512:2,x:1024:512:2 \
         -b zarrs-python \
         --dtype uint8 --warmups 0 --iterations 3
