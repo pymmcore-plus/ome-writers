@@ -79,6 +79,51 @@ _NGFF_TO_OME_TIME: dict[str, str] = {
 }
 
 
+def validate_ngff_unit(unit: str | None) -> str | None:
+    """Validate that a unit is NGFF-compliant.
+
+    This validator ensures that any unit specified in a Dimension
+    is a valid NGFF unit name from the yaozarrs specifications.
+
+    Parameters
+    ----------
+    unit : str | None
+        Unit name to validate
+
+    Returns
+    -------
+    str | None
+        The validated unit (unchanged if valid), or None if unit was None
+
+    Raises
+    ------
+    ValueError
+        If unit is not a valid NGFF unit name
+
+    Examples
+    --------
+    >>> validate_ngff_unit("micrometer")
+    'micrometer'
+    >>> validate_ngff_unit("second")
+    'second'
+    >>> validate_ngff_unit(None)
+    >>> validate_ngff_unit("invalid")  # doctest: +SKIP
+    Traceback (most recent call last):
+        ...
+    ValueError: Invalid NGFF unit: 'invalid'. ...
+    """
+    if unit is None:
+        return None
+
+    if unit not in {*_NGFF_TO_OME_LENGTH, *_NGFF_TO_OME_TIME}:
+        raise ValueError(
+            f"Invalid NGFF unit: {unit!r}. Must be one of the valid NGFF "
+            f"unit names. Valid spatial units: {sorted(_NGFF_TO_OME_LENGTH.keys())}. "
+            f"Valid temporal units: {sorted(_NGFF_TO_OME_TIME.keys())}."
+        )
+    return unit
+
+
 def ngff_to_ome_unit(unit: str) -> str:
     """Convert NGFF unit name to OME-XML symbol for TIFF backend.
 

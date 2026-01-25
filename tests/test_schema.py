@@ -472,3 +472,68 @@ def test_storage_order_invalid_list() -> None:
             dtype="uint16",
             storage_order=["z", "t", "y", "x"],  # 'z' doesn't exist in index dims
         )
+
+
+def test_dimension_valid_ngff_units() -> None:
+    """Test that valid NGFF units are accepted in Dimension."""
+    # Valid spatial units
+    Dimension(name="x", count=64, type="space", unit="micrometer")
+    Dimension(name="y", count=64, type="space", unit="nanometer")
+    Dimension(name="z", count=10, type="space", unit="millimeter")
+
+    # Valid temporal units
+    Dimension(name="t", count=100, type="time", unit="second")
+    Dimension(name="t", count=100, type="time", unit="millisecond")
+    Dimension(name="t", count=100, type="time", unit="microsecond")
+
+    # None is valid
+    Dimension(name="x", count=64, type="space", unit=None)
+
+
+def test_dimension_invalid_ngff_units() -> None:
+    """Test that invalid NGFF units raise ValidationError."""
+    # Invalid unit names
+    with pytest.raises(ValidationError, match="Invalid NGFF unit: 'um'"):
+        Dimension(name="x", count=64, type="space", unit="um")
+
+    with pytest.raises(ValidationError, match="Invalid NGFF unit: 'µm'"):
+        Dimension(name="x", count=64, type="space", unit="µm")
+
+    with pytest.raises(ValidationError, match="Invalid NGFF unit: 'ms'"):
+        Dimension(name="t", count=100, type="time", unit="ms")
+
+    with pytest.raises(ValidationError, match="Invalid NGFF unit: 'sec'"):
+        Dimension(name="t", count=100, type="time", unit="sec")
+
+    with pytest.raises(ValidationError, match="Invalid NGFF unit: 'meters'"):
+        Dimension(name="x", count=64, type="space", unit="meters")
+
+
+def test_dimension_valid_units_in_acquisition_settings() -> None:
+    """Test that valid units work in full AcquisitionSettings."""
+    settings = AcquisitionSettings(
+        root_path="test.zarr",
+        dimensions=[
+            Dimension(name="t", count=10, type="time", unit="second", scale=0.1),
+            Dimension(name="z", count=5, type="space", unit="micrometer", scale=1.0),
+            Dimension(name="y", count=64, type="space", unit="micrometer", scale=0.5),
+            Dimension(name="x", count=64, type="space", unit="micrometer", scale=0.5),
+        ],
+        dtype="uint16",
+    )
+    assert settings.dimensions[0].unit == "second"
+    assert settings.dimensions[1].unit == "micrometer"
+
+
+def test_dimension_invalid_units_in_acquisition_settings() -> None:
+    """Test that invalid units are caught in AcquisitionSettings."""
+    with pytest.raises(ValidationError, match="Invalid NGFF unit"):
+        AcquisitionSettings(
+            root_path="test.zarr",
+            dimensions=[
+                Dimension(name="t", count=10, type="time", unit="sec"),  # Invalid
+                Dimension(name="y", count=64, type="space"),
+                Dimension(name="x", count=64, type="space"),
+            ],
+            dtype="uint16",
+        )

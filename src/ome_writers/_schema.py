@@ -20,6 +20,7 @@ from pydantic import (
 
 from ome_writers._memory import warn_if_high_memory_usage
 from ome_writers._stream import BACKENDS
+from ome_writers._units import validate_ngff_unit
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -154,8 +155,7 @@ class Dimension(_BaseModel):
         description="Physical unit for this dimension. MUST use OME-NGFF compliant "
         "unit names (e.g., 'micrometer', 'nanometer', 'second', 'millisecond'). "
         "See [OME-NGFF axes specification](https://ngff.openmicroscopy.org/latest/index.html#axes-md) "  # noqa: E501
-        "for valid units. The TIFF backend will automatically convert these to "
-        "OME-XML symbols (e.g., 'micrometer' → 'µm').",
+        "for valid units.",
     )
     scale: float | None = Field(
         default=None,
@@ -169,6 +169,13 @@ class Dimension(_BaseModel):
         "in the specified `unit`. (e.g. the physical coordinate of the first pixel "
         "or timepoint, in some XYZ stage or other coordinate system).",
     )
+
+    @model_validator(mode="after")
+    def _validate_unit(self) -> Dimension:
+        """Validate that unit is NGFF-compliant if specified."""
+        if self.unit is not None:
+            validate_ngff_unit(self.unit)
+        return self
 
 
 class Position(_BaseModel):
