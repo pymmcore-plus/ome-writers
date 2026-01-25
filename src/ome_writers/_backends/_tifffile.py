@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from itertools import count
 from pathlib import Path
 from queue import Queue
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 import numpy as np
 
@@ -186,7 +186,8 @@ class TiffBackend(ArrayBackend):
         if not self._position_writers:  # pragma: no cover
             raise RuntimeError("Backend not prepared. Call prepare() first.")
 
-        self._position_writers[position_index].queue.put(frame)
+        writer = self._position_writers[position_index]
+        cast("Queue[np.ndarray | None]", writer.queue).put(frame)
 
     def finalize(self) -> None:
         """Flush and close all TIFF writers."""
@@ -285,7 +286,8 @@ class TiffBackend(ArrayBackend):
         if 0 not in self._position_writers:  # pragma: no cover
             return
 
-        total_frames_written = self._position_writers[0].thread.frames_written
+        writer = self._position_writers[0]
+        total_frames_written = cast("WriterThread", writer.thread).frames_written
         if total_frames_written == 0:  # pragma: no cover
             return
 
