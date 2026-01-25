@@ -170,6 +170,74 @@ def test_update_metadata_with_plates(tmp_path: Path, tiff_backend: str) -> None:
         assert ome_obj.images[0].name == f"Well A0{pos_idx + 1}"
 
 
+def test_plate_structure_in_metadata(tmp_path: Path, tiff_backend: str) -> None:
+    """Test that plate metadata structure is correctly written to OME-TIFF."""
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "plate.ome.tiff"),
+        dimensions=[
+            PositionDimension(
+                positions=[
+                    Position(name="fov0", plate_row="A", plate_column="1"),
+                    Position(name="fov0", plate_row="A", plate_column="2"),
+                    Position(name="fov0", plate_row="C", plate_column="4"),
+                    Position(name="fov1", plate_row="C", plate_column="4"),
+                ]
+            ),
+            Dimension(name="y", count=32, type="space"),
+            Dimension(name="x", count=32, type="space"),
+        ],
+        dtype="uint16",
+        backend=tiff_backend,
+        plate=Plate(
+            name="Test Plate",
+            row_names=["A", "B", "C", "D"],
+            column_names=["1", "2", "3", "4"],
+        ),
+    )
+
+    with create_stream(settings) as stream:
+        for _ in range(4):
+            stream.append(np.zeros((32, 32), dtype=np.uint16))
+
+    # Read metadata from first file
+    ome_obj = from_tiff(str(tmp_path / "plate_p000.ome.tiff"))
+
+    # Verify plate structure
+    assert len(ome_obj.plates) == 1
+    plate = ome_obj.plates[0]
+    assert plate.name == "Test Plate"
+    assert plate.rows == 4
+    assert plate.columns == 4
+
+    # Verify wells
+    assert len(plate.wells) == 3  # A1, A2, C4
+
+    # Build a map of wells by (row, col)
+    wells_by_pos = {(w.row, w.column): w for w in plate.wells}
+
+    # Well A1 (row=0, col=0) should have 1 sample referencing Image:0
+    well_a1 = wells_by_pos[(0, 0)]
+    assert len(well_a1.well_samples) == 1
+    assert well_a1.well_samples[0].image_ref.id == "Image:0"
+
+    # Well A2 (row=0, col=1) should have 1 sample referencing Image:1
+    well_a2 = wells_by_pos[(0, 1)]
+    assert len(well_a2.well_samples) == 1
+    assert well_a2.well_samples[0].image_ref.id == "Image:1"
+
+    # Well C4 (row=2, col=3) should have 2 samples referencing Image:2 and Image:3
+    well_c4 = wells_by_pos[(2, 3)]
+    assert len(well_c4.well_samples) == 2
+    sample_image_ids = {s.image_ref.id for s in well_c4.well_samples}
+    assert sample_image_ids == {"Image:2", "Image:3"}
+
+    # Verify image names include well info
+    assert ome_obj.images[0].name == "A1_fov0"
+    assert ome_obj.images[1].name == "A2_fov0"
+    assert ome_obj.images[2].name == "C4_fov0"
+    assert ome_obj.images[3].name == "C4_fov1"
+
+
 def test_tiff_metadata_physical_sizes_and_names(
     tmp_path: Path, tiff_backend: str
 ) -> None:
@@ -262,3 +330,21 @@ def test_tiff_multiposition_detailed_metadata(
     uuid0 = pixels0.tiff_data_blocks[0].uuid.value
     uuid1 = pixels1.tiff_data_blocks[0].uuid.value
     assert uuid0 != uuid1
+
+
+def test_build_position_name() -> None:
+    """Test _build_position_name helper function."""
+    from ome_writers._backends._tifffile import _build_position_name
+
+    # Plate mode: should include well info
+    pos_plate = Position(name="fov0", plate_row="A", plate_column="1")
+    assert _build_position_name(pos_plate, num_positions=2) == "A1_fov0"
+    assert _build_position_name(pos_plate, num_positions=1) == "A1_fov0"
+
+    # Multi-position without plate: just position name
+    pos_multi = Position(name="Pos0")
+    assert _build_position_name(pos_multi, num_positions=3) == "Pos0"
+
+    # Single position without plate: None
+    pos_single = Position(name="OnlyPos")
+    assert _build_position_name(pos_single, num_positions=1) is None
