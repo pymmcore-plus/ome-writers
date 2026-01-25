@@ -165,7 +165,7 @@ def test_duplicate_names_rejected() -> None:
 
 def test_dims_from_standard_axes_names_values() -> None:
     # Test dims_from_standard_axes with invalid axis name
-    with pytest.raises(ValueError, match="All axes must be one of"):
+    with pytest.raises(ValueError, match="Standard axes names must be one of"):
         dims_from_standard_axes({"invalid": 10, "y": 64, "x": 64})
 
     # Test dims_from_standard_axes with invalid position value
