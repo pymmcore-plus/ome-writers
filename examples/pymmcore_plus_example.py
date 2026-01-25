@@ -74,8 +74,8 @@ if settings.format == "tiff":
     if npos == 1:
         files = [settings.root_path]
     else:
-        base = settings.root_path.replace(".ome.tiff", "")
-        files = [f"{base}_p{p:03d}.ome.tiff" for p in range(npos)]
+        base = settings.root_path.replace(f"{suffix}", "")
+        files = [f"{base}_p{p:03d}{suffix}" for p in range(npos)]
     for idx, file in enumerate(files):
         from_tiff(file)
         print(f"✓ TIFF file {idx} is valid")
