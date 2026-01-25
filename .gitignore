@@ -117,3 +117,4 @@ example_*
 output.ome.zarr
 .codspeed
 .benchmarks
+profile_output/

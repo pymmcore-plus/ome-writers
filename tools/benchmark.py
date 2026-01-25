@@ -43,26 +43,27 @@ Usage examples:
 
 from __future__ import annotations
 
-import json
 import shutil
+import sys
 import tempfile
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, get_args
 
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent))
+
 import numpy as np
 import typer
+from _common import generate_frames, parse_dimensions, parse_settings_file
 from rich.console import Console
 from rich.progress import track
 from rich.table import Table
 
 from ome_writers import (
     AcquisitionSettings,
-    Dimension,
-    PositionDimension,
     _schema,
     create_stream,
-    dims_from_standard_axes,
 )
 from ome_writers._stream import AVAILABLE_BACKENDS, get_format_for_backend
 
@@ -101,50 +102,6 @@ app = typer.Typer(
 console = Console()
 
 
-def parse_dimensions(dim_spec: str) -> list[Dimension | PositionDimension]:
-    """Parse compact dimension specification.
-
-    Format: name:count[:chunk[:shard]]
-    Example: t:10:1,c:3,z:5,y:512:64,x:512:64
-    """
-    sizes: dict[str, int] = {}
-    chunk_shapes: dict[str, int] = {}
-    shard_shapes: dict[str, int | None] = {}
-    for spec in dim_spec.split(","):
-        if len(parts := spec.split(":")) < 2:
-            raise ValueError(f"Invalid dimension spec: {spec} (need name:count)")
-
-        name = parts[0]
-        sizes[name] = int(parts[1])
-        chunk_shapes[name] = int(parts[2]) if len(parts) > 2 else 1
-        shard_shapes[name] = int(parts[3]) if len(parts) > 3 else None
-
-    return dims_from_standard_axes(sizes, chunk_shapes, shard_shapes)
-
-
-def parse_settings_file(
-    file_path: Path, dtype: str, compression: str | None
-) -> AcquisitionSettings:
-    """Parse settings from a JSON file."""
-    data = json.loads(Path(file_path).expanduser().resolve().read_text())
-    if not isinstance(data, dict):
-        raise ValueError("Settings file must contain a single JSON object")
-
-    data["root_path"] = "tmp"
-    data.setdefault("dtype", dtype)
-    data.setdefault("compression", compression)
-    settings = AcquisitionSettings.model_validate(data)
-    for d in settings.dimensions:
-        if isinstance(d, Dimension):
-            d.chunk_size = d.chunk_size or 1
-        if d.count is None:
-            raise NotImplementedError(
-                "Unbounded dimensions not supported in benchmark\n"
-                f"Please modify dimension {d.name!r} in settings file {file_path}"
-            )
-    return settings
-
-
 def run_benchmark_iteration(
     settings: AcquisitionSettings, frames: list[np.ndarray]
 ) -> TimingDict:
@@ -181,14 +138,6 @@ def run_benchmark_iteration(
         "write": t3 - t1,
         "total": t3 - t0,
     }
-
-
-def _generate_frames(settings: AcquisitionSettings) -> list[np.ndarray]:
-    """Generate random frames based on acquisition settings."""
-    dtype = np.dtype(settings.dtype)
-    iinfo = np.iinfo(dtype)
-    size = (settings.num_frames or 1, *settings.shape[-2:])
-    return list(np.random.randint(iinfo.min, iinfo.max, size=size, dtype=dtype))
 
 
 def run_benchmark(
@@ -235,7 +184,7 @@ def run_all_benchmarks(
     settings: AcquisitionSettings, backends: list[str], warmups: int, iterations: int
 ) -> tuple[dict[str, ResultsDict | str], list[np.ndarray]]:
     # Run benchmarks
-    frames = _generate_frames(settings)
+    frames = generate_frames(settings)
 
     results: dict[str, ResultsDict | str] = {}
     for b in backends:
