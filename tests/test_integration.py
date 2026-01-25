@@ -136,6 +136,16 @@ CASES = [
         ],
         dtype="uint16",
     ),
+    # Single unbounded dim
+    AcquisitionSettings(
+        root_path="tmp",
+        dimensions=[
+            D(name="t", count=None),
+            D(name="y", count=128, chunk_size=128, unit="um"),
+            D(name="x", count=128, chunk_size=128, unit="um"),
+        ],
+        dtype="uint16",
+    ),
     # Unbounded with chunk buffering (tests resize with buffering enabled)
     AcquisitionSettings(
         root_path="tmp",

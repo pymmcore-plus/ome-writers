@@ -93,7 +93,7 @@ pos=1:B2, idx=(1, 1)
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -199,7 +199,9 @@ class FrameRouter:
         last_idx = self._num_non_frame_dims - 1
         self._dim_indices[last_idx] += 1
 
-        size_limit = cast("int", self._non_frame_sizes[last_idx])
+        size_limit = self._non_frame_sizes[last_idx]
+        if size_limit is None:
+            return  # Rightmost non-frame dimension is unlimited
         if self._dim_indices[last_idx] < size_limit:
             return  # Still within bounds - common case
 
