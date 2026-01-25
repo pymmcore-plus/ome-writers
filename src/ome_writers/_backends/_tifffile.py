@@ -558,19 +558,18 @@ def _create_ome_image(
     for axis in ["x", "y", "z"]:
         if (dim := dims_by_name.get(axis)) and dim.scale is not None:
             setattr(pixels, f"physical_size_{axis}", dim.scale)
-            if dim.unit:
-                # Convert NGFF units (e.g., "micrometer") to OME-XML (e.g., "µm")
-                ome_unit_str = ngff_to_ome_unit(dim.unit)
-                try:
-                    ome_unit = ome.UnitsLength(ome_unit_str)
-                except ValueError:
-                    warnings.warn(
-                        f"Could not convert unit '{dim.unit}' (→ '{ome_unit_str}') "
-                        f"to ome.UnitsLength. Skipping unit assignment.",
-                        stacklevel=2,
-                    )
-                else:
-                    setattr(pixels, f"physical_size_{axis}_unit", ome_unit)
+            # if dim.type is space, it's guaranteed to be a valid NGFF unit
+            if dim.unit and dim.type == "space":
+                if ome_unit_str := ngff_to_ome_unit(dim.unit):
+                    try:
+                        # ome-types will validate unit assignment
+                        setattr(pixels, f"physical_size_{axis}_unit", ome_unit_str)
+                    except Exception:  # pragma: no cover  (should be unreachable)
+                        warnings.warn(
+                            f"Could not convert unit '{dim.unit}' (→ '{ome_unit_str}') "
+                            f"to ome.UnitsLength. Skipping unit assignment.",
+                            stacklevel=2,
+                        )
 
     name = position_name if position_name else Path(filename).stem.removesuffix(".ome")
     return ome.Image(

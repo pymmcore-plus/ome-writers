@@ -19,9 +19,19 @@ The mappings are based on:
 
 from __future__ import annotations
 
+import warnings
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ome_writers._schema import DimensionType
+
+
 # Mapping from NGFF spatial unit names to OME-XML length symbols
 # All 26 NGFF ValidSpaceUnit values → OME UnitsLength
-_NGFF_TO_OME_LENGTH: dict[str, str] = {
+# note, this is not a complete list of OME length units, only those defined by NGFF
+# there ARE some units in OME not defined by NGFF (e.g., ly, pt, au, decameter, etc.)
+# if a use case arises for these, they can be added later
+NGFF_TO_OME_UNITS_LENGTH: dict[str, str] = {
     "angstrom": "Å",
     "attometer": "am",
     "centimeter": "cm",
@@ -50,9 +60,22 @@ _NGFF_TO_OME_LENGTH: dict[str, str] = {
     "zettameter": "Zm",
 }
 
+# Reverse mapping from OME-XML length symbols to NGFF spatial unit names
+ANY_LENGTH_TO_NGFF: dict[str, str] = {v: k for k, v in NGFF_TO_OME_UNITS_LENGTH.items()}
+ANY_LENGTH_TO_NGFF.update({k: k for k in NGFF_TO_OME_UNITS_LENGTH})
+# special cases we want to handle
+ANY_LENGTH_TO_NGFF.update(
+    {
+        "um": "micrometer",
+        "u": "micrometer",
+        "micron": "micrometer",
+        "A": "angstrom",
+    }
+)
+
 # Mapping from NGFF temporal unit names to OME-XML time symbols
 # All 23 NGFF ValidTimeUnit values → OME UnitsTime
-_NGFF_TO_OME_TIME: dict[str, str] = {
+NGFF_TO_OME_UNITS_TIME: dict[str, str] = {
     "attosecond": "as",
     "centisecond": "cs",
     "day": "d",
@@ -78,82 +101,72 @@ _NGFF_TO_OME_TIME: dict[str, str] = {
     "zettasecond": "Zs",
 }
 
+# Reverse mapping from OME-XML time symbols to NGFF temporal unit names
+ANY_TIME_TO_NGFF: dict[str, str] = {v: k for k, v in NGFF_TO_OME_UNITS_TIME.items()}
+ANY_TIME_TO_NGFF.update({k: k for k in NGFF_TO_OME_UNITS_TIME})
+# special cases we want to handle
+ANY_TIME_TO_NGFF.update(
+    {
+        "us": "microsecond",
+        "usec": "microsecond",
+        "µsec": "microsecond",
+        "msec": "millisecond",
+        "sec": "second",
+    }
+)
 
-def validate_ngff_unit(unit: str | None) -> str | None:
-    """Validate that a unit is NGFF-compliant.
 
-    This validator ensures that any unit specified in a Dimension
-    is a valid NGFF unit name from the yaozarrs specifications.
+def cast_unit_to_ngff(
+    unit: str, dim_type: DimensionType | None
+) -> tuple[str, DimensionType | None]:
+    """Cast a unit string to its NGFF-compliant equivalent."""
+    # all versions of units longer than 2 characters should be lowercased for matching
+    unit_lower = str(unit).lower() if len(unit) > 2 else unit
 
-    Parameters
-    ----------
-    unit : str | None
-        Unit name to validate
+    if dim_type == "space":
+        try:
+            return ANY_LENGTH_TO_NGFF[unit_lower], dim_type
+        except KeyError as e:
+            raise ValueError(
+                f"Unrecognized unit of length: {unit!r}.\n  "
+                f"Recognized units of length include: {list(ANY_LENGTH_TO_NGFF.keys())}"
+            ) from e
+    elif dim_type == "time":
+        try:
+            return ANY_TIME_TO_NGFF[unit_lower], dim_type
+        except KeyError as e:
+            raise ValueError(
+                f"Unrecognized unit of time: {unit!r}.\n  "
+                f"Recognized units of time include: {list(ANY_TIME_TO_NGFF.keys())}"
+            ) from e
 
-    Returns
-    -------
-    str | None
-        The validated unit (unchanged if valid), or None if unit was None
+    # if the user only provided unit, but not dim_type, try to infer dim_type from unit
+    elif dim_type is None:
+        if unit_lower in ANY_LENGTH_TO_NGFF:
+            return ANY_LENGTH_TO_NGFF[unit_lower], "space"
+        elif unit_lower in ANY_TIME_TO_NGFF:
+            return ANY_TIME_TO_NGFF[unit_lower], "time"
 
-    Raises
-    ------
-    ValueError
-        If unit is not a valid NGFF unit name
+    # at this point, dim_type is either "channel", "other", or still None, but with
+    # an unrecognized unit
+    return unit, dim_type
 
-    Examples
-    --------
-    >>> validate_ngff_unit("micrometer")
-    'micrometer'
-    >>> validate_ngff_unit("second")
-    'second'
-    >>> validate_ngff_unit(None)
-    >>> validate_ngff_unit("invalid")  # doctest: +SKIP
-    Traceback (most recent call last):
-        ...
-    ValueError: Invalid NGFF unit: 'invalid'. ...
+
+NGFF_TO_OME_UNITS = {**NGFF_TO_OME_UNITS_LENGTH, **NGFF_TO_OME_UNITS_TIME}
+
+
+def ngff_to_ome_unit(unit: str) -> str | None:
+    """Convert an NGFF-compliant unit to its OME-XML equivalent.
+
+    This assumes that the unit was already validated as a valid NGFF unit (above).
+    This is the case in _schema.Dimension class.
     """
-    if unit is None:
-        return None
-
-    if unit not in {*_NGFF_TO_OME_LENGTH, *_NGFF_TO_OME_TIME}:
-        raise ValueError(
-            f"Invalid NGFF unit: {unit!r}. Must be one of the valid NGFF "
-            f"unit names. Valid spatial units: {sorted(_NGFF_TO_OME_LENGTH.keys())}. "
-            f"Valid temporal units: {sorted(_NGFF_TO_OME_TIME.keys())}."
+    try:
+        return NGFF_TO_OME_UNITS[unit]
+    except KeyError:
+        warnings.warn(
+            f"Unit {unit!r} not recognized as a valid OME spatial or temporal unit. "
+            "Will not be written to OME-XML metadata.",
+            stacklevel=2,
         )
-    return unit
-
-
-def ngff_to_ome_unit(unit: str) -> str:
-    """Convert NGFF unit name to OME-XML symbol for TIFF backend.
-
-    This function is used internally by the TIFF backend to convert NGFF-compliant
-    units (e.g., "micrometer") to OME-XML symbols (e.g., "µm").
-
-    Users should always specify units using NGFF-compliant names in their
-    Dimension specifications. The conversion to OME-XML format happens
-    automatically when writing TIFF files.
-
-    Parameters
-    ----------
-    unit : str
-        NGFF-compliant unit name (e.g., "micrometer", "second")
-
-    Returns
-    -------
-    str
-        OME-XML unit symbol (e.g., "µm", "s")
-        Returns input unchanged if no mapping exists.
-
-    Examples
-    --------
-    >>> ngff_to_ome_unit("micrometer")
-    'µm'
-    >>> ngff_to_ome_unit("second")
-    's'
-    >>> ngff_to_ome_unit("nanometer")
-    'nm'
-    """
-    # Combined mapping of all NGFF units → OME symbols
-    ngff_to_ome = {**_NGFF_TO_OME_LENGTH, **_NGFF_TO_OME_TIME}
-    return ngff_to_ome.get(unit, unit)
+    return None

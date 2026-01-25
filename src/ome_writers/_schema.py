@@ -20,7 +20,7 @@ from pydantic import (
 
 from ome_writers._memory import warn_if_high_memory_usage
 from ome_writers._stream import BACKENDS
-from ome_writers._units import validate_ngff_unit
+from ome_writers._units import cast_unit_to_ngff
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -146,16 +146,22 @@ class Dimension(_BaseModel):
     )
     type: DimensionType | None = Field(
         default=None,
-        description="Type of this dimension. Must be one of 'space', 'time', 'channel' "
-        "or 'other'. If `None`, type _may_ be inferred from the name for standard "
-        "names like 'x', 'y', 'z', 'c', 't'.",
+        description="Type of this dimension. Must be one of `'space'`, `'time'`, "
+        "`'channel'` or `'other'`. If `None`, type _may_ be inferred from the provided "
+        "`unit`, or from standard dimension `names` like `'x'`, `'y'`, `'z'`, `'c'`, "
+        "`'t'`.",
     )
     unit: str | None = Field(
         default=None,
-        description="Physical unit for this dimension. MUST use OME-NGFF compliant "
-        "unit names (e.g., 'micrometer', 'nanometer', 'second', 'millisecond'). "
-        "See [OME-NGFF axes specification](https://ngff.openmicroscopy.org/latest/index.html#axes-md) "  # noqa: E501
-        "for valid units.",
+        description="Physical unit for this dimension. "
+        "If `type` is `'space'` or `'time'`, this MUST be a valid unit of length or "
+        "time. Both [OME-NGFF unit "
+        "names](https://ngff.openmicroscopy.org/latest/index.html#axes-md) (_e.g._, "
+        "`'micrometer'`, `'millisecond'`), and [OME-XML "
+        "abbreviations](https://www.openmicroscopy.org/Schemas/Documentation/Generated/OME-2016-06/ome_xsd.html#UnitsLength)"
+        " (_e.g._, `'um'`, `'ms'`) are accepted. "
+        "If `type` is `None`, then it will be inferred from the unit if a recognized "
+        "unit is provided.",
     )
     scale: float | None = Field(
         default=None,
@@ -170,12 +176,23 @@ class Dimension(_BaseModel):
         "or timepoint, in some XYZ stage or other coordinate system).",
     )
 
-    @model_validator(mode="after")
-    def _validate_unit(self) -> Dimension:
-        """Validate that unit is NGFF-compliant if specified."""
-        if self.unit is not None:
-            validate_ngff_unit(self.unit)
-        return self
+    @model_validator(mode="before")
+    @classmethod
+    def _validate_unit(cls, data: Any) -> Any:
+        """Validate that unit is NGFF-compliant if specified.
+
+        Ensure that unit matches dim type, and infer dim type from unit if missing.
+
+        After validation, Dimensions with type "space" or "time" are guaranteed to
+        to have valid NGFF units.  Those with type "channel", "other", or None may
+        still have arbitrary units.
+        """
+        if isinstance(data, dict):
+            if (unit := data.get("unit")) is not None:
+                cast_unit, dim_type = cast_unit_to_ngff(unit, data.get("type"))
+                data["unit"] = cast_unit
+                data["type"] = dim_type
+        return data
 
 
 class Position(_BaseModel):
@@ -462,7 +479,7 @@ class AcquisitionSettings(_BaseModel):
                     return b.format
 
         # all other no-extension cases default to zarr
-        return "zarr"
+        return "zarr"  # pragma: no cover
 
     @property
     def shape(self) -> tuple[int | None, ...]:
@@ -546,14 +563,14 @@ class AcquisitionSettings(_BaseModel):
             return self
         if self.format == "tiff":
             tiff_args = get_args(TiffCompression)
-            if self.compression not in tiff_args:
+            if self.compression not in tiff_args:  # pragma: no cover
                 raise ValueError(
                     f"Compression '{self.compression}' is not supported for OME-TIFF. "
                     f"Supported: {tiff_args}."
                 )
         else:
             zarr_args = get_args(ZarrCompression)
-            if self.compression not in zarr_args:
+            if self.compression not in zarr_args:  # pragma: no cover
                 raise ValueError(
                     f"Compression '{self.compression}' is not supported for OME-Zarr. "
                     f"Supported: {zarr_args}."
