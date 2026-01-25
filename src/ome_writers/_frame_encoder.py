@@ -1,8 +1,15 @@
+"""Utilities for encoding and verifying frame data.
+
+These are not public, and are intended for internal testing purposes only.
+You may import and use them, but there will be no deprecated warnings if they change
+or are removed in future versions.
+"""
+
 from __future__ import annotations
 
 import math
 from itertools import islice
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
@@ -11,8 +18,11 @@ from ome_writers._stream import create_stream
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Sequence
+    from typing import TypeAlias
 
     from ome_writers._schema import AcquisitionSettings
+
+    EncodeMode: TypeAlias = Literal["solid", "random-corner"]
 
 # max dimension counts used for encoding/decoding coordinates
 # having this results in a consistent encoding across tests,
@@ -85,25 +95,54 @@ def sizes_for_dtype(dtype: str) -> dict[str, int]:
 
 
 def frame_generator(
-    settings: AcquisitionSettings, *, real_unbounded_count: int = 2
+    settings: AcquisitionSettings,
+    *,
+    real_unbounded_count: int = 2,
+    mode: EncodeMode = "random-corner",
 ) -> Iterator[np.ndarray]:
+    """Generate encoded (verifiable) frames for given settings.
+
+    Parameters
+    ----------
+    settings : AcquisitionSettings
+        The acquisition settings defining the dimensions and dtype.
+    real_unbounded_count : int, optional
+        The real count to use for unbounded dimensions when generating frames.
+    mode : Literal["solid", "random-corner"], optional
+        The mode of frame generation.
+        - "solid": each frame is filled with the encoded coordinate value.
+        - "random-corner": frames are filled with random data, but pixel at (0,0)
+          is set to the encoded coordinate value.
+    """
     router = FrameRouter(settings)
     storage_names = tuple(d.name for d in settings.storage_index_dimensions)
     frame_shape = tuple((d.count or 1) for d in settings.frame_dimensions)
     total = math.prod(d.count or real_unbounded_count for d in settings.dimensions[:-2])
     encoding_sizes = sizes_for_dtype(settings.dtype)
-
+    dtype = np.dtype(settings.dtype)
+    iinfo = np.iinfo(dtype)
+    low, high = iinfo.min, iinfo.max + 1
     for pos_idx, storage_idx in islice(router, total):
         coord = {"p": pos_idx, **dict(zip(storage_names, storage_idx, strict=False))}
         value = encode_coord(coord, sizes=encoding_sizes)
-        yield np.full(frame_shape, value, dtype=settings.dtype)
+        if mode == "random-corner":
+            frame = np.random.randint(low, high, size=frame_shape, dtype=dtype)
+            frame[0, 0] = value
+        else:
+            frame = np.full(frame_shape, value, dtype=dtype)
+        yield frame
 
 
 def write_encoded_data(
-    settings: AcquisitionSettings, *, real_unbounded_count: int = 2
+    settings: AcquisitionSettings,
+    *,
+    real_unbounded_count: int = 2,
+    mode: EncodeMode = "random-corner",
 ) -> None:
     """Write data using the provided writer and settings."""
-    frames = frame_generator(settings, real_unbounded_count=real_unbounded_count)
+    frames = frame_generator(
+        settings, real_unbounded_count=real_unbounded_count, mode=mode
+    )
     with create_stream(settings) as stream:
         for frame in frames:
             stream.append(frame)
