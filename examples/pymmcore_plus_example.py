@@ -25,7 +25,7 @@ core.loadSystemConfiguration()
 # Create a MDASequence, which will be used to run the MDA with pymmcore-plus
 seq = useq.MDASequence(
     axis_order="ptcz",
-    # stage_positions=[(0.0, 0.0), (10.0, 10.0)],
+    stage_positions=[(0.0, 0.0), (10.0, 10.0)],
     time_plan={"interval": 0.1, "loops": 3},
     channels=["DAPI", "Cy5"],
     z_plan={"range": 2, "step": 1.0},
@@ -70,10 +70,12 @@ if settings.format == "zarr":
 if settings.format == "tiff":
     from ome_types import from_tiff
 
-    if len(seq.stage_positions) == 0:
+    npos = len(settings.positions)
+    if npos == 1:
         files = [settings.root_path]
     else:
-        files = [f"{settings.root_path[:-9]}_p{pos:03d}.ome.tiff" for pos in range(2)]
+        base = settings.root_path.replace(".ome.tiff", "")
+        files = [f"{base}_p{p:03d}.ome.tiff" for p in range(npos)]
     for idx, file in enumerate(files):
         from_tiff(file)
         print(f"✓ TIFF file {idx} is valid")

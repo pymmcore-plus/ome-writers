@@ -147,10 +147,10 @@ def test_update_metadata_with_plates(tmp_path: Path, tiff_backend: str) -> None:
         for _ in range(2):
             stream.append(np.random.randint(0, 1000, (32, 32), dtype=np.uint16))
 
-    # Verify default names are position names
+    # Verify default names include well info: {row}{col}_{position_name}
     # Note: Each file contains companion OME-XML with ALL positions,
     # but the actual image data in each file corresponds to its position index
-    for pos_idx, expected_name in enumerate(["Well_A01", "Well_A02"]):
+    for pos_idx, expected_name in enumerate(["A1_Well_A01", "A2_Well_A02"]):
         pos_file = tmp_path / f"plate_p{pos_idx:03d}.ome.tiff"
         ome_obj = from_tiff(str(pos_file))
         # All files have all positions in metadata, check the one that matches this file
@@ -247,3 +247,89 @@ def test_tiff_multiposition_detailed_metadata(
                 assert td.uuid is not None
                 assert td.uuid.value.startswith("urn:uuid:")
                 assert f"multipos_p{img_idx:03}.ome.tiff" in (td.uuid.file_name or "")
+
+
+def test_plate_structure_in_metadata(tmp_path: Path, tiff_backend: str) -> None:
+    """Test that plate metadata structure is correctly written to OME-TIFF."""
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "plate.ome.tiff"),
+        dimensions=[
+            PositionDimension(
+                positions=[
+                    Position(name="fov0", plate_row="A", plate_column="1"),
+                    Position(name="fov0", plate_row="A", plate_column="2"),
+                    Position(name="fov0", plate_row="C", plate_column="4"),
+                    Position(name="fov1", plate_row="C", plate_column="4"),
+                ]
+            ),
+            Dimension(name="y", count=32, type="space"),
+            Dimension(name="x", count=32, type="space"),
+        ],
+        dtype="uint16",
+        backend=tiff_backend,
+        plate=Plate(
+            name="Test Plate",
+            row_names=["A", "B", "C", "D"],
+            column_names=["1", "2", "3", "4"],
+        ),
+    )
+
+    with create_stream(settings) as stream:
+        for _ in range(4):
+            stream.append(np.zeros((32, 32), dtype=np.uint16))
+
+    # Read metadata from first file
+    ome_obj = from_tiff(str(tmp_path / "plate_p000.ome.tiff"))
+
+    # Verify plate structure
+    assert len(ome_obj.plates) == 1
+    plate = ome_obj.plates[0]
+    assert plate.name == "Test Plate"
+    assert plate.rows == 4
+    assert plate.columns == 4
+
+    # Verify wells
+    assert len(plate.wells) == 3  # A1, A2, C4
+
+    # Build a map of wells by (row, col)
+    wells_by_pos = {(w.row, w.column): w for w in plate.wells}
+
+    # Well A1 (row=0, col=0) should have 1 sample referencing Image:0
+    well_a1 = wells_by_pos[(0, 0)]
+    assert len(well_a1.well_samples) == 1
+    assert well_a1.well_samples[0].image_ref.id == "Image:0"
+
+    # Well A2 (row=0, col=1) should have 1 sample referencing Image:1
+    well_a2 = wells_by_pos[(0, 1)]
+    assert len(well_a2.well_samples) == 1
+    assert well_a2.well_samples[0].image_ref.id == "Image:1"
+
+    # Well C4 (row=2, col=3) should have 2 samples referencing Image:2 and Image:3
+    well_c4 = wells_by_pos[(2, 3)]
+    assert len(well_c4.well_samples) == 2
+    sample_image_ids = {s.image_ref.id for s in well_c4.well_samples}
+    assert sample_image_ids == {"Image:2", "Image:3"}
+
+    # Verify image names include well info
+    assert ome_obj.images[0].name == "A1_fov0"
+    assert ome_obj.images[1].name == "A2_fov0"
+    assert ome_obj.images[2].name == "C4_fov0"
+    assert ome_obj.images[3].name == "C4_fov1"
+
+
+def test_build_position_name() -> None:
+    """Test _build_position_name helper function."""
+    from ome_writers._backends._tifffile import _build_position_name
+
+    # Plate mode: should include well info
+    pos_plate = Position(name="fov0", plate_row="A", plate_column="1")
+    assert _build_position_name(pos_plate, num_positions=2) == "A1_fov0"
+    assert _build_position_name(pos_plate, num_positions=1) == "A1_fov0"
+
+    # Multi-position without plate: just position name
+    pos_multi = Position(name="Pos0")
+    assert _build_position_name(pos_multi, num_positions=3) == "Pos0"
+
+    # Single position without plate: None
+    pos_single = Position(name="OnlyPos")
+    assert _build_position_name(pos_single, num_positions=1) is None

@@ -47,7 +47,9 @@ if settings.format == "zarr":
 if settings.format == "tiff":
     from ome_types import from_tiff
 
-    files = [f"{settings.root_path[:-9]}_p{pos:03d}.ome.tiff" for pos in range(2)]
+    npos = len(settings.positions)
+    base = settings.root_path.replace(".ome.tiff", "")
+    files = [f"{base}_p{p:03d}.ome.tiff" for p in range(npos)]
     for idx, file in enumerate(files):
         from_tiff(file)
         print(f"✓ TIFF file {idx} is valid")
