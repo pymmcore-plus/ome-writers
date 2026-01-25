@@ -69,7 +69,6 @@ if settings.format == "zarr":
 
 if settings.format == "tiff":
     from ome_types import from_tiff
-    from rich import print
 
     if len(seq.stage_positions) == 0:
         files = [settings.root_path]
@@ -78,5 +77,3 @@ if settings.format == "tiff":
     for idx, file in enumerate(files):
         from_tiff(file)
         print(f"✓ TIFF file {idx} is valid")
-
-        print(from_tiff(file).to_xml())
