@@ -148,8 +148,6 @@ class TiffBackend(ArrayBackend):
                 ome_xml = self._cached_metadata.to_xml()
             else:
                 ome_xml = ome.OME(images=[all_images[p_idx]]).to_xml()
-            # Convert to ASCII with XML character references (e.g., µ → &#181;)
-            ome_xml = ome_xml.encode("ascii", "xmlcharrefreplace").decode("ascii")
 
             q = Queue[np.ndarray | None]()
             thread = WriterThread(
@@ -336,9 +334,8 @@ class TiffBackend(ArrayBackend):
                     xml = self._cached_metadata.to_xml()
                 else:
                     xml = ome.OME(images=[all_images[p_idx]]).to_xml()
-                # Convert to ASCII with XML character references
-                ascii_xml = xml.encode("ascii", "xmlcharrefreplace")
-                tifffile.tiffcomment(writer.file_path, comment=ascii_xml)
+                # must pre-encode to UTF-8 bytes and pass in bytes, not string
+                tifffile.tiffcomment(writer.file_path, comment=xml.encode("utf-8"))
             except Exception as e:  # pragma: no cover
                 warnings.warn(
                     f"Failed to update OME metadata in {writer.file_path}: {e}",
@@ -360,11 +357,8 @@ class TiffBackend(ArrayBackend):
         try:
             # Extract position-specific metadata from complete OME
             position_ome = _create_position_specific_ome(position_idx, metadata)
-
-            # Create ASCII version for tifffile.tiffcomment
-            # tifffile.tiffcomment requires ASCII strings
-            # xmlcharrefreplace converts non-ASCII chars to XML entities (µ → &#181;)
-            ascii_xml = position_ome.to_xml().encode("ascii", "xmlcharrefreplace")
+            # must pre-encode to UTF-8 bytes and pass tifffile bytes, not string
+            ome_xml_bytes = position_ome.to_xml().encode("utf-8")
         except Exception as e:  # pragma: no cover
             raise RuntimeError(
                 f"Failed to create position-specific OME metadata for position "
@@ -372,7 +366,7 @@ class TiffBackend(ArrayBackend):
             ) from e
 
         try:
-            tifffile.tiffcomment(file_path, comment=ascii_xml)
+            tifffile.tiffcomment(file_path, comment=ome_xml_bytes)
         except Exception as e:  # pragma: no cover
             raise RuntimeError(
                 f"Failed to update OME metadata in {file_path}: {e}"
@@ -440,7 +434,13 @@ class WriterThread(threading.Thread):
         self._shape = shape
         self._dtype = dtype
         self._image_queue = image_queue
-        self._ome_xml = ome_xml
+        # Encode to UTF-8 bytes
+        # critical: if you pass a str to tifffile.tiffcomment, it requires ASCII
+        # which limits the ability to properly express characters like 'µ' in
+        # physical units.  The OME-TIFF spec, however, explicitly requests UTF-8.
+        # passing in bytes directly circumvents tifffile conversion and preserves
+        # encoding.
+        self._ome_xml_bytes = ome_xml.encode("utf-8")
         self._res = 1 / pixelsize
         self._has_unbounded = has_unbounded
         self._compression = compression
@@ -473,7 +473,7 @@ class WriterThread(threading.Thread):
                             resolution=(self._res, self._res),
                             resolutionunit=tifffile.RESUNIT.MICROMETER,
                             photometric=tifffile.PHOTOMETRIC.MINISBLACK,
-                            description=self._ome_xml if i == 0 else None,
+                            description=self._ome_xml_bytes if i == 0 else None,
                             compression=self._compression,
                         )
                 else:
@@ -485,7 +485,7 @@ class WriterThread(threading.Thread):
                         resolution=(self._res, self._res),
                         resolutionunit=tifffile.RESUNIT.MICROMETER,
                         photometric=tifffile.PHOTOMETRIC.MINISBLACK,
-                        description=self._ome_xml,
+                        description=self._ome_xml_bytes,
                         compression=self._compression,
                     )
         except Exception as e:  # pragma: no cover
