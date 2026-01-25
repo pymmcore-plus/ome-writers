@@ -147,10 +147,10 @@ def test_update_metadata_with_plates(tmp_path: Path, tiff_backend: str) -> None:
         for _ in range(2):
             stream.append(np.random.randint(0, 1000, (32, 32), dtype=np.uint16))
 
-    # Verify default names are position names
+    # Verify default names include well info: {row}{col}_{position_name}
     # Note: Each file contains companion OME-XML with ALL positions,
     # but the actual image data in each file corresponds to its position index
-    for pos_idx, expected_name in enumerate(["Well_A01", "Well_A02"]):
+    for pos_idx, expected_name in enumerate(["A1_Well_A01", "A2_Well_A02"]):
         pos_file = tmp_path / f"plate_p{pos_idx:03d}.ome.tiff"
         ome_obj = from_tiff(str(pos_file))
         # All files have all positions in metadata, check the one that matches this file

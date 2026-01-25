@@ -128,8 +128,10 @@ class TiffBackend(ArrayBackend):
         # Generate UUIDs and OME metadata for all positions
         all_images, num_pos = [], len(positions)
         file_uuids: dict[int, str | None] = {}
+        position_names: dict[int, str | None] = {}
         for p_idx, fname in enumerate(fnames):
             file_uuids[p_idx] = file_uuid = str(uuid.uuid4()) if num_pos > 1 else None
+            position_names[p_idx] = _build_position_name(positions[p_idx], num_pos)
             all_images.append(
                 _create_ome_image(
                     dims=storage_dims,
@@ -137,7 +139,7 @@ class TiffBackend(ArrayBackend):
                     filename=Path(fname).name,
                     image_index=p_idx,
                     file_uuid=file_uuid,
-                    position_name=positions[p_idx].name if num_pos > 1 else None,
+                    position_name=position_names[p_idx],
                 )
             )
 
@@ -175,7 +177,7 @@ class TiffBackend(ArrayBackend):
                 file_uuid=file_uuids[p_idx],
                 thread=thread,
                 queue=q,
-                name=positions[p_idx].name if num_pos > 1 else None,
+                name=position_names[p_idx],
             )
 
     def write(
@@ -589,6 +591,86 @@ def _create_ome_image(
     )
 
 
+def _build_position_name(pos: Position, num_positions: int) -> str | None:
+    """Build position name, including well info for plate mode.
+
+    Parameters
+    ----------
+    pos : Position
+        The position object.
+    num_positions : int
+        Total number of positions in the acquisition.
+
+    Returns
+    -------
+    str | None
+        Position name in format "{row}{col}_{name}" for plate mode,
+        just "{name}" for multi-position, or None for single position.
+    """
+    if pos.plate_row is not None and pos.plate_column is not None:
+        return f"{pos.plate_row}{pos.plate_column}_{pos.name}"
+    elif num_positions > 1:
+        return pos.name
+    return None
+
+
+def _build_ome_plate(plate: Plate, positions: tuple[Position, ...]) -> ome.Plate:
+    """Build ome-types Plate metadata from ome-writers Plate schema.
+
+    Creates a complete Plate with Wells and WellSamples, where each position
+    becomes a WellSample referencing its corresponding Image ID.
+
+    Parameters
+    ----------
+    plate : Plate
+        The ome-writers Plate schema with row_names, column_names, and name.
+    positions : tuple[Position, ...]
+        Positions in acquisition order. Each position must have plate_row
+        and plate_column defined.
+
+    Returns
+    -------
+    ome.Plate
+        OME-types Plate object with wells and well samples.
+    """
+    # Group positions by (row, column) to build wells
+    well_positions: dict[tuple[str, str], list[tuple[int, Position]]] = {}
+    for idx, pos in enumerate(positions):
+        if pos.plate_row is None or pos.plate_column is None:
+            # Skip positions without row/column (shouldn't happen if validated)
+            continue
+        key = (pos.plate_row, pos.plate_column)
+        well_positions.setdefault(key, []).append((idx, pos))
+
+    # Build wells with well samples
+    wells: list[ome.Well] = []
+    for (row, col), pos_list in well_positions.items():
+        well_samples = [
+            ome.WellSample(
+                id=f"WellSample:{idx}",
+                index=idx,
+                image_ref=ome.ImageRef(id=f"Image:{idx}"),
+            )
+            for idx, _pos in pos_list
+        ]
+        wells.append(
+            ome.Well(
+                id=f"Well:{row}_{col}",
+                row=plate.row_names.index(row),
+                column=plate.column_names.index(col),
+                well_samples=well_samples,
+            )
+        )
+
+    return ome.Plate(
+        id="Plate:0",
+        name=plate.name,
+        rows=len(plate.row_names),
+        columns=len(plate.column_names),
+        wells=wells,
+    )
+
+
 def _create_position_specific_ome(position_idx: int, metadata: ome.OME) -> ome.OME:
     """Create OME metadata for a specific position from complete metadata.
 
@@ -649,60 +731,3 @@ def _create_position_plate(
     well_dict["well_samples"] = [target_sample]
     plate_dict["wells"] = [well_dict]
     return ome.Plate.model_validate(plate_dict)
-
-
-def _build_ome_plate(plate: Plate, positions: tuple[Position, ...]) -> ome.Plate:
-    """Build ome-types Plate metadata from ome-writers Plate schema.
-
-    Creates a complete Plate with Wells and WellSamples, where each position
-    becomes a WellSample referencing its corresponding Image ID.
-
-    Parameters
-    ----------
-    plate : Plate
-        The ome-writers Plate schema with row_names, column_names, and name.
-    positions : tuple[Position, ...]
-        Positions in acquisition order. Each position must have plate_row
-        and plate_column defined.
-
-    Returns
-    -------
-    ome.Plate
-        OME-types Plate object with wells and well samples.
-    """
-    # Group positions by (row, column) to build wells
-    well_positions: dict[tuple[str, str], list[tuple[int, Position]]] = {}
-    for idx, pos in enumerate(positions):
-        if pos.plate_row is None or pos.plate_column is None:
-            # Skip positions without row/column (shouldn't happen if validated)
-            continue
-        key = (pos.plate_row, pos.plate_column)
-        well_positions.setdefault(key, []).append((idx, pos))
-
-    # Build wells with well samples
-    wells: list[ome.Well] = []
-    for (row, col), pos_list in well_positions.items():
-        well_samples = [
-            ome.WellSample(
-                id=f"WellSample:{idx}",
-                index=idx,
-                image_ref=ome.ImageRef(id=f"Image:{idx}"),
-            )
-            for idx, _pos in pos_list
-        ]
-        wells.append(
-            ome.Well(
-                id=f"Well:{row}_{col}",
-                row=plate.row_names.index(row),
-                column=plate.column_names.index(col),
-                well_samples=well_samples,
-            )
-        )
-
-    return ome.Plate(
-        id="Plate:0",
-        name=plate.name,
-        rows=len(plate.row_names),
-        columns=len(plate.column_names),
-        wells=wells,
-    )

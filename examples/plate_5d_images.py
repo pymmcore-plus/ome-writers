@@ -16,6 +16,7 @@ from ome_writers import (
 # Derive backend from command line argument (default: auto)
 BACKEND = "auto" if len(sys.argv) < 2 else sys.argv[1]
 suffix = ".ome.tiff" if BACKEND == "tifffile" else ".ome.zarr"
+UM = "micrometer"
 
 # create acquisition settings
 settings = AcquisitionSettings(
@@ -34,9 +35,9 @@ settings = AcquisitionSettings(
             ]
         ),
         Dimension(name="c", count=3, chunk_size=1, type="channel"),
-        Dimension(name="z", count=4, chunk_size=1, type="space"),
-        Dimension(name="y", count=256, chunk_size=64, type="space"),
-        Dimension(name="x", count=256, chunk_size=64, type="space"),
+        Dimension(name="z", count=4, chunk_size=1, type="space", scale=5, unit=UM),
+        Dimension(name="y", count=256, chunk_size=64, type="space", scale=2, unit=UM),
+        Dimension(name="x", count=256, chunk_size=64, type="space", scale=2, unit=UM),
     ],
     dtype="uint16",
     plate=Plate(
@@ -70,5 +71,3 @@ if settings.format == "tiff":
     for idx, file in enumerate(files):
         from_tiff(file)
         print(f"✓ TIFF file {idx} is valid")
-
-        print(from_tiff(file).to_xml())
