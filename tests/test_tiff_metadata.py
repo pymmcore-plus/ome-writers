@@ -232,33 +232,18 @@ def test_tiff_multiposition_detailed_metadata(
         for _ in range(12):  # 2 positions * 2 channels * 3 z-slices
             stream.append(np.random.randint(0, 1000, (32, 32), dtype=np.uint16))
 
-    # Check first position file
-    pos0_file = tmp_path / "multipos_p000.ome.tiff"
-    ome_obj = from_tiff(str(pos0_file))
+    # Check all position files contain the same detailed metadata
+    for p_idx in range(len(settings.positions)):
+        ome_obj = from_tiff(tmp_path / f"multipos_p{p_idx:03}.ome.tiff")
 
-    # Should contain metadata for both positions (companion OME-XML)
-    assert len(ome_obj.images) == 2
-    assert ome_obj.images[0].id == "Image:0"
-    assert ome_obj.images[0].name == "Pos0"
-    assert ome_obj.images[1].id == "Image:1"
-    assert ome_obj.images[1].name == "Pos1"
+        # Should contain metadata for both positions (companion OME-XML)
+        assert len(ome_obj.images) == 2
+        assert [img.name for img in ome_obj.images] == ["Pos0", "Pos1"]
+        assert [img.id for img in ome_obj.images] == ["Image:0", "Image:1"]
 
-    # Check TiffData block for position 0 has UUID
-    pixels0 = ome_obj.images[0].pixels
-    assert len(pixels0.tiff_data_blocks) == 1
-    tiff_data = pixels0.tiff_data_blocks[0]
-    assert tiff_data.plane_count == 6  # 2 channels * 3 z-slices
-    assert tiff_data.uuid is not None
-    assert tiff_data.uuid.value.startswith("urn:uuid:")
-    assert tiff_data.uuid.file_name == "multipos_p000.ome.tiff"
-
-    # Check second position file also has full metadata
-    pos1_file = tmp_path / "multipos_p001.ome.tiff"
-    ome_obj = from_tiff(str(pos1_file))
-    assert len(ome_obj.images) == 2  # Both positions in companion OME-XML
-
-    # Verify UUIDs are different between positions
-    pixels1 = ome_obj.images[1].pixels
-    uuid0 = pixels0.tiff_data_blocks[0].uuid.value
-    uuid1 = pixels1.tiff_data_blocks[0].uuid.value
-    assert uuid0 != uuid1
+        for img_idx, image in enumerate(ome_obj.images):
+            for td in image.pixels.tiff_data_blocks:
+                assert td.plane_count == 6
+                assert td.uuid is not None
+                assert td.uuid.value.startswith("urn:uuid:")
+                assert f"multipos_p{img_idx:03}.ome.tiff" in (td.uuid.file_name or "")
