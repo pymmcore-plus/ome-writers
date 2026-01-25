@@ -574,7 +574,7 @@ def _create_ome_image(
                     try:
                         # ome-types will validate unit assignment
                         setattr(pixels, f"physical_size_{axis}_unit", ome_unit_str)
-                    except Exception:  # pragma: no cover  (should be unreachable)
+                    except Exception:  # pragma: no cover
                         warnings.warn(
                             f"Could not convert unit '{dim.unit}' (→ '{ome_unit_str}') "
                             f"to ome.UnitsLength. Skipping unit assignment.",
@@ -636,8 +636,7 @@ def _build_ome_plate(plate: Plate, positions: tuple[Position, ...]) -> ome.Plate
     well_positions: dict[tuple[str, str], list[tuple[int, Position]]] = {}
     for idx, pos in enumerate(positions):
         if pos.plate_row is None or pos.plate_column is None:
-            # Skip positions without row/column (shouldn't happen if validated)
-            continue
+            continue  # pragma: no cover
         key = (pos.plate_row, pos.plate_column)
         well_positions.setdefault(key, []).append((idx, pos))
 
