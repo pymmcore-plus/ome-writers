@@ -26,7 +26,7 @@ from ome_writers import (
     _stream,
     create_stream,
 )
-from tests._frame_encoder import validate_encoded_frame_values, write_encoded_data
+from ome_writers._frame_encoder import validate_encoded_frame_values, write_encoded_data
 
 BACKEND_TO_EXT = {b.name: f".ome.{b.format}" for b in _stream.BACKENDS}
 # NOTES:
