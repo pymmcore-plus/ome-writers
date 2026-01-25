@@ -73,6 +73,10 @@ jobs:
             python-version: "3.14"
             platform: ubuntu-latest
             resolution: highest
+          - group: dev # this exercises even the tools/dir
+            python-version: "3.13"
+            platform: ubuntu-latest
+            resolution: highest
 
     steps:
       - uses: actions/checkout@v6
@@ -83,8 +87,9 @@ jobs:
           enable-cache: true
 
       - name: Install Dependencies
-        run: uv sync --no-dev --group test --group ${{ matrix.group }}
+        run: uv sync --group test --group ${{ matrix.group }}
         env:
+          UV_NO_DEV: ${{ matrix.group == 'dev' && '0' || '1' }}
           UV_RESOLUTION: ${{ matrix.resolution }}
           UV_PRERELEASE: ${{ github.event_name == 'schedule' && 'allow' || 'if-necessary-or-explicit' }}
 
