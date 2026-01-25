@@ -51,5 +51,3 @@ if settings.format == "tiff":
     for idx, file in enumerate(files):
         from_tiff(file)
         print(f"✓ TIFF file {idx} is valid")
-
-        print(from_tiff(file).to_xml())
