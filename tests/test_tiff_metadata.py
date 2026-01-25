@@ -150,7 +150,7 @@ def test_update_metadata_with_plates(tmp_path: Path, tiff_backend: str) -> None:
     # Verify default names include well info: {row}{col}_{position_name}
     # Note: Each file contains companion OME-XML with ALL positions,
     # but the actual image data in each file corresponds to its position index
-    for pos_idx, expected_name in enumerate(["A1_Well_A01", "A2_Well_A02"]):
+    for pos_idx, expected_name in enumerate(["Well_A01", "Well_A02"]):
         pos_file = tmp_path / f"plate_p{pos_idx:03d}.ome.tiff"
         ome_obj = from_tiff(str(pos_file))
         # All files have all positions in metadata, check the one that matches this file
@@ -317,19 +317,31 @@ def test_plate_structure_in_metadata(tmp_path: Path, tiff_backend: str) -> None:
     assert ome_obj.images[3].name == "C4_fov1"
 
 
-def test_build_position_name() -> None:
-    """Test _build_position_name helper function."""
+# fmt: off
+# Test cases for _build_position_name
+POSITION_NAME_CASES = [
+    # (position, num_positions, expected_result, test_id)
+    (Position(name="0"), 1, None, "single_no_plate"),
+    (Position(name="pos0"), 3, "pos0", "multi_no_plate"),
+    (Position(name="fov0", plate_row="A", plate_column="1"), 2, "A1_fov0", "plate_prepend"),  # noqa: E501
+    (Position(name="A1", plate_row="A", plate_column="1"), 1, "A1", "plate_already_in_name"),  # noqa: E501
+    (Position(name="Well_A1", plate_row="A", plate_column="1"), 2, "Well_A1", "plate_in_name_with_prefix"),  # noqa: E501
+    (Position(name="A0001", plate_row="A", plate_column="1"), 1, "A0001", "plate_zero_padded"),  # noqa: E501
+    (Position(name="Well_A0001", plate_row="A", plate_column="1"), 2, "Well_A0001", "plate_zero_padded_with_prefix"),  # noqa: E501
+    (Position(name="Ctrl_Well", plate_row="A", plate_column="1"), 1, "A1_Ctrl_Well", "plate_not_in_name"),  # noqa: E501
+]
+# fmt: on
+
+
+@pytest.mark.parametrize(
+    ("position", "num_positions", "expected"),
+    [(p, n, e) for p, n, e, _ in POSITION_NAME_CASES],
+    ids=[test_id for _, _, _, test_id in POSITION_NAME_CASES],
+)
+def test_build_position_name(
+    position: Position, num_positions: int, expected: str | None
+) -> None:
+    """Test _build_position_name helper function with various cases."""
     from ome_writers._backends._tifffile import _build_position_name
 
-    # Plate mode: should include well info
-    pos_plate = Position(name="fov0", plate_row="A", plate_column="1")
-    assert _build_position_name(pos_plate, num_positions=2) == "A1_fov0"
-    assert _build_position_name(pos_plate, num_positions=1) == "A1_fov0"
-
-    # Multi-position without plate: just position name
-    pos_multi = Position(name="Pos0")
-    assert _build_position_name(pos_multi, num_positions=3) == "Pos0"
-
-    # Single position without plate: None
-    pos_single = Position(name="OnlyPos")
-    assert _build_position_name(pos_single, num_positions=1) is None
+    assert _build_position_name(position, num_positions) == expected

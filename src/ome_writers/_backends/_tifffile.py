@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 import threading
 import uuid
 import warnings
@@ -603,14 +604,21 @@ def _build_position_name(pos: Position, num_positions: int) -> str | None:
     Returns
     -------
     str | None
-        Position name in format "{row}{col}_{name}" for plate mode,
-        just "{name}" for multi-position, or None for single position.
+        If plate mode "{row}{col}_{name}" or `pos.name` if well ID (e.g. A1) already
+        present. Otherwise, `None` for single position, `pos.name` for multi-position.
     """
     if pos.plate_row is not None and pos.plate_column is not None:
+        # Check if well identifier is already present in the name
+        # Pattern matches plate_row followed by optional zeros, then plate_column
+        # e.g., for row="A", col="1": matches "A1", "A01", "A001", etc.
+        pattern = f"{re.escape(pos.plate_row)}0*{re.escape(pos.plate_column)}"
+        if re.search(pattern, pos.name):
+            return pos.name
         return f"{pos.plate_row}{pos.plate_column}_{pos.name}"
-    elif num_positions > 1:
-        return pos.name
-    return None
+    # For single position without plate info, return None to use filename
+    if num_positions == 1:
+        return None
+    return pos.name
 
 
 def _build_ome_plate(plate: Plate, positions: tuple[Position, ...]) -> ome.Plate:
