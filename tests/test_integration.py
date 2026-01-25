@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import contextlib
+import importlib
+import importlib.util
 import json
 import re
 import time
@@ -45,8 +47,8 @@ CASES = [
         root_path="tmp",
         dimensions=[
             D(name="c", count=2, type="channel"),
-            D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
-            D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
+            D(name="y", count=64, chunk_size=64, unit="micrometer", scale=0.1),
+            D(name="x", count=64, chunk_size=64, unit="micrometer", scale=0.1),
         ],
         dtype="uint8",
     ),
@@ -149,9 +151,9 @@ CASES = [
     AcquisitionSettings(
         root_path="tmp",
         dimensions=[
-            D(name="z", count=16, chunk_size=4, type="space"),
-            D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
-            D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
+            D(name="z", count=16, chunk_size=4, unit="micrometer", scale=0.5),
+            D(name="y", count=64, chunk_size=64, unit="micrometer", scale=0.1),
+            D(name="x", count=64, chunk_size=64, unit="micrometer", scale=0.1),
         ],
         dtype="uint16",
     ),
@@ -475,6 +477,34 @@ def _assert_valid_ome_tiff(case: AcquisitionSettings) -> None:
     for i, path in enumerate(paths):
         assert path.exists()
         _assert_array_valid(_extract_tifffile(path, dims), dims, case.dtype, i)
+
+    _assert_bioformats_reads_ome_tiff(case)
+
+
+def _assert_bioformats_reads_ome_tiff(case: AcquisitionSettings) -> None:
+    # Test that bioformats can read the generated OME-TIFF correctly
+    if not importlib.util.find_spec("scyjava"):
+        pytest.skip("Bio-Formats reader is required for OME-TIFF validation")
+
+    from tests._bf_reader import read_core_meta_with_bioformats
+
+    dims = {
+        d.name: d.count or UNBOUNDED_FRAME_COUNT for d in case.array_storage_dimensions
+    }
+    for array in Path(case.root_path).parent.glob("*.ome.tiff"):
+        meta = read_core_meta_with_bioformats(str(array))
+        # if this is 'Tagged Image File Format', it means Bio-Formats failed
+        # to read the OME-TIFF correctly and fell back to generic TIFF
+        assert meta.format_name == "OME-TIFF"
+        assert meta.reader_class == "OMETiffReader"
+
+        # check sizes
+        assert meta.size_t == dims.get("t", 1)
+        assert meta.size_c == dims.get("c", 1)
+        assert meta.size_z == dims.get("z", 1)
+        assert meta.size_y == dims.get("y", 1)
+        assert meta.size_x == dims.get("x", 1)
+        assert meta.dtype == np.dtype(case.dtype)
 
 
 def _assert_valid_ome_zarr(case: AcquisitionSettings) -> None:
