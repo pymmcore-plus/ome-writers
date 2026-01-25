@@ -370,7 +370,7 @@ def test_frame_metadata_multiposition(tmp_path: Path, tiff_backend: str) -> None
         # Get MapAnnotations for this position
         map_annots = [
             a
-            for a in ome_obj.structured_annotations
+            for a in (ome_obj.structured_annotations or [])
             if a.__class__.__name__ == "MapAnnotation"
             and a.id.startswith(f"Annotation:Pos{pos_idx}:")
         ]

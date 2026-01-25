@@ -303,7 +303,7 @@ class TiffBackend(ArrayBackend):
         # For single position, enhance with position 0's metadata
         if len(self._position_writers) > 1:
             # Multi-position: collect all annotations from all positions
-            all_annotations = []
+            all_annotations: list[ome.StructuredAnnotations] = []
             for p_idx, image in enumerate(self._cached_metadata.images):
                 if p_idx in self._frame_metadata:
                     # Enhance this image with its metadata
@@ -319,7 +319,7 @@ class TiffBackend(ArrayBackend):
 
             # Set all collected annotations
             if all_annotations:
-                self._cached_metadata.structured_annotations = all_annotations
+                self._cached_metadata.structured_annotations = all_annotations  # ty: ignore
 
             # Write full OME to each file
             for _p_idx, writer in sorted(self._position_writers.items()):
@@ -424,7 +424,7 @@ class TiffBackend(ArrayBackend):
                         if enhanced.structured_annotations:
                             all_annotations.extend(enhanced.structured_annotations)
                 if all_annotations:
-                    self._cached_metadata.structured_annotations = all_annotations
+                    self._cached_metadata.structured_annotations = all_annotations  # ty: ignore
             else:
                 # Single position
                 if 0 in self._frame_metadata:
@@ -803,10 +803,10 @@ def _enhance_ome_with_frame_metadata(
         pixels.planes = planes
 
     # Add StructuredAnnotations to OME root
-    if not ome_obj.structured_annotations:
-        ome_obj.structured_annotations = []
-
-    ome_obj.structured_annotations.extend(map_annotations)
+    if isinstance(ome_obj.structured_annotations, list):
+        ome_obj.structured_annotations.extend(map_annotations)
+    else:
+        ome_obj.structured_annotations = [map_annotations]  # ty: ignore
 
     return ome_obj
 
