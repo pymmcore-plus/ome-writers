@@ -12,12 +12,17 @@ strike a balance that works optimally with no additional configuration for all
 use cases, so it's recommended to experiment with different settings for your
 specific use case.
 
-In particular, chunk sizes, sharding, and compression settings can have a major
-impact on performance for zarr-based formats like OME-Zarr.  Write performance
-is generally improved with larger chunk sizes and shards, though this may come
-at the cost of read performance if the chunks are too large for typical access
-patterns.  Different backends may also perform better or worse depending on the
-specific data shape and chunking/sharding strategy used.
+**In particular: chunk size, sharding, and compression settings will have a
+major impact on performance for zarr-based formats like OME-Zarr.**
+
+Write performance is generally improved with larger chunk sizes and shards,
+though this may come at the cost of read performance if the chunks are too large
+for typical access patterns.  Different backends may also perform better or
+worse depending on the specific data shape and chunking/sharding strategy used.
+
+!!! info "See Also"
+    The documentation for zarr-python also has some [tips for chunk
+    optimization](https://zarr.readthedocs.io/en/latest/user-guide/performance/#chunk-optimizations)
 
 ## Benchmarking
 
@@ -182,8 +187,7 @@ environment with `uv add --dev py-spy`.  For complete usage tips, see the
 but here is a quick example of how to use it with ome-writers:
 
 !!! tip
-
-  py-spy will require sudo access on most systems to attach to the Python process.
+    py-spy will require sudo access on most systems to attach to the Python process.
 
 Create a Python script that uses ome-writers to perform some operations,
 such as one of the examples in the `examples/` directory.  For example:
@@ -200,12 +204,11 @@ This will create a `profile.svg` file that you can open in a web browser to
 navigate the profiling results.
 
 !!! important
-
-  The structure of the script is very important.  If you want to profile
-  raw write performance, make sure that the frames are pre-generated outside
-  of the append loop.  The example scripts do *not* do this, so you may see
-  some amount of time spent in numpy frame generation interspersed with the
-  backend write time.
+    The structure of the script matters.  If you want to profile
+    raw write performance, make sure that the frames are pre-generated outside
+    of the append loop.  The example scripts do *not* do this, so you may see
+    some amount of time spent in numpy frame generation interspersed with the
+    backend write time.
 
 ### Understanding the flamegraph
 
