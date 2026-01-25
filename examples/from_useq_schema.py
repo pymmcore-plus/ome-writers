@@ -14,7 +14,6 @@ import sys
 
 import numpy as np
 import useq
-from rich import print
 
 from ome_writers import AcquisitionSettings, create_stream, dims_from_useq
 
