@@ -3,7 +3,6 @@
 # dependencies = [
 #     "ome-writers[all]",
 #     "useq-schema",
-#     "rich"
 # ]
 #
 # [tool.uv.sources]
