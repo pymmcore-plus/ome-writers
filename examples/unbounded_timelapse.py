@@ -46,3 +46,12 @@ if settings.format == "zarr":
 
     yaozarrs.validate_zarr_store(settings.root_path)
     print("✓ Zarr store is valid")
+
+if settings.format == "tiff":
+    from ome_types import from_tiff
+
+    npos = len(settings.positions)
+    files = [f"{settings.root_path[:-9]}_p{pos:03d}{suffix}" for pos in range(npos)]
+    for idx, file in enumerate(files):
+        from_tiff(file)
+        print(f"✓ TIFF file {idx} is valid")

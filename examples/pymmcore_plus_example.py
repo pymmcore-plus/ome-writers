@@ -73,7 +73,8 @@ if settings.format == "tiff":
     if len(seq.stage_positions) == 0:
         files = [settings.root_path]
     else:
-        files = [f"{settings.root_path[:-9]}_p{pos:03d}.ome.tiff" for pos in range(2)]
+        npos = len(settings.positions)
+        files = [f"{settings.root_path[:-9]}_p{pos:03d}{suffix}" for pos in range(npos)]
     for idx, file in enumerate(files):
         from_tiff(file)
         print(f"✓ TIFF file {idx} is valid")
