@@ -514,7 +514,8 @@ class JsonDocumentMirror(MutableMapping[str, Any]):
         self._dirty = True
 
     def __getitem__(self, key: str) -> Any:
-        return self._data[key]
+        with self._lock:
+            return self._data[key]
 
     def __setitem__(self, key: str, value: Any) -> None:
         with self._lock:
@@ -535,7 +536,7 @@ class JsonDocumentMirror(MutableMapping[str, Any]):
     def flush(self, indent: int | None = None) -> None:
         """Write data to disk if dirty."""
         with self._lock:
-            if self._dirty:
+            if not self._dirty:
                 # NOTE:
                 # we could consider attempting to serialize certain sub-sections here
                 # (e.g., "ome_writers.frame_metadata", which contains user-data)
@@ -554,10 +555,14 @@ class JsonDocumentMirror(MutableMapping[str, Any]):
     def load(self) -> None:
         """Load data from disk."""
         with self._lock:
-            assert not self._dirty, "Cannot load while dirty. Flush first."
+            if self._dirty:  #  pragma: no cover
+                raise RuntimeError("Cannot load while dirty. Flush first.")
 
             if self._path.exists():
-                self._data = cast("dict[str, Any]", json.loads(self._path.read_text()))
+                # NB: could use streaming parser for large files, but zarr.json
+                # are typically small enough to read fully into memory
+                content = self._path.read_text()
+                self._data = cast("dict[str, Any]", json.loads(content))
             else:
                 self._data = {}
             self._dirty = False
