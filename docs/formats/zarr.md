@@ -45,9 +45,15 @@ multiple arrays, each stored in a separate group within the root OME-Zarr group.
     ["multiscales" image](https://ngff.openmicroscopy.org/0.5/index.html#multiscale-md)
     at the `AcquisitionSettings.root_path`.
 
-    See the [`yaozarrs` documentation on
-    Images](https://tlambert03.github.io/yaozarrs/ome_zarr_guide/#working-with-images)
-    for details and examples directory structure.
+    ```
+    root_path.ome.zarr/
+    ├── zarr.json            # {"zarr_format": 3} group, with attributes.ome.multiscales
+    └── 0/                   # Full resolution array  
+        ├── zarr.json        # Array metadata (standard zarr schema)
+        └── c/0/1/2/3        # Chunk files
+    ```
+    
+    (We don't current write downsampled arrays, but this will be added in the future).
 
     !!! example "Example Code"
         [Writing a single ≤5D image](../examples/single_5d_image.md)
@@ -61,9 +67,16 @@ multiple arrays, each stored in a separate group within the root OME-Zarr group.
     convention](https://ngff.openmicroscopy.org/0.5/index.html#bf2raw)),
     with a sub multiscales group for each position or collection member.
 
-    See the [`yaozarrs` documentation on
-    Collections](https://tlambert03.github.io/yaozarrs/ome_zarr_guide/#working-with-collections)
-    for details and examples directory structure.
+    ```
+    root_path.ome.zarr/
+    ├── zarr.json             # Contains "bioformats2raw.layout" metadata
+    ├── OME                   # Special group for containing OME metadata
+    │   ├── zarr.json         # Contains "series" metadata, listing all positions
+    │   └── METADATA.ome.xml  # optional OME-XML file stored within the Zarr fileset
+    ├── 0/                    # First image in the collection (same as 5D image above)
+    ├── 1/                    # Second image in the collection
+    └── ...
+    ```
 
     !!! example "Example Code"
         [Writing multiple positions](../examples/multiposition.md)
@@ -74,10 +87,23 @@ multiple arrays, each stored in a separate group within the root OME-Zarr group.
     containing [`Position`s][ome_writers.Position] that define `plate_well`/`plate_column`
     information, the output structure will follow the [OME-Zarr HCS
     specification](https://ngff.openmicroscopy.org/0.5/index.html#plate-md):
-    
-    See the [`yaozarrs` documentation on
-    Plates](https://tlambert03.github.io/yaozarrs/ome_zarr_guide/#working-with-plates)
-    for details and examples directory structure.
+
+    ```
+    root_path.ome.zarr/
+    ├── zarr.json              # Plate metadata
+    ├── A/                     # Row A
+    │   ├── 1/                 # Well A1
+    │   │   ├── zarr.json      # Well metadata
+    │   │   ├── 0/             # Position 0 (Image with multiscales)
+    │   │   │   ├── zarr.json  # contains "ome.multiscales" metadata
+    │   │   │   ├── 0/         # Full resolution
+    │   │   │   └── n/         # (Downsampled levels, not currently written)
+    │   │   └── 1/             # Position 1  (Image with multiscales)
+    │   └── 2/                 # Well A2
+    └── B/                     # Row B
+        ├── 1/                 # Well B1    
+        └── ...
+    ```
 
     !!! example "Example Code"
         [Writing plates](../examples/plate.md)
