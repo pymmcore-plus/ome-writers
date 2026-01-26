@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import threading
 import warnings
 from abc import abstractmethod
+from collections.abc import Iterator, MutableMapping
 from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
@@ -58,7 +60,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
     def __init__(self) -> None:
         self._arrays: list[_AT] = []
         self._image_group_paths: list[str] = []  # Parallel to _arrays, for metadata
-        self._metadata_cache: dict[str, dict] = {}  # group path -> attrs dict
+        self._meta_mirrors: dict[str, JsonDocumentMirror] = {}  # grouppath -> mirror
         self._finalized = False
         self._root: Path | None = None
         self._chunk_buffers: list[ChunkBuffer] | None = None
@@ -310,10 +312,13 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         For plates:
             {"A/1/field_0": {"ome": {...}}, "A/2/field_0": {"ome": {...}}}
         """
-        if not self._metadata_cache:  # pragma: no cover
+        if not self._meta_mirrors:  # pragma: no cover
             return {}
 
-        return deepcopy(self._metadata_cache)
+        return {
+            path: deepcopy(mirror.get("attributes", {}))
+            for path, mirror in self._meta_mirrors.items()
+        }
 
     def update_metadata(self, metadata: dict[str, dict]) -> None:
         """Update metadata for all array groups in the zarr hierarchy.
@@ -332,7 +337,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         RuntimeError
             If backend is not prepared.
         """
-        if not self._metadata_cache:  # pragma: no cover
+        if not self._meta_mirrors:  # pragma: no cover
             raise RuntimeError("Backend not prepared. Call prepare() first.")
 
         if self._root is None:  # pragma: no cover
@@ -340,19 +345,19 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
             return
 
         for path, attrs in metadata.items():
-            if path not in self._metadata_cache:
+            if path not in self._meta_mirrors:
                 raise KeyError(f"Unknown path: {path}")
 
-            if (zarr_json := self._root / path / "zarr.json").exists():
-                data = cast("dict", json.loads(zarr_json.read_text()))
-                data.setdefault("attributes", {}).update(attrs)
-                zarr_json.write_text(json.dumps(data, indent=2))
-                self._metadata_cache[path] = deepcopy(attrs)
+            mirror = self._meta_mirrors[path]
+            mirror["attributes"] = deepcopy(attrs)
+            mirror.flush()
 
     def finalize(self) -> None:
         """Flush and release resources."""
         if not self._finalized:
             self._finalize_chunk_buffers()
+            for mirror in self._meta_mirrors.values():
+                mirror.flush()
             self._arrays.clear()
             self._image_group_paths.clear()
             self._finalized = True
@@ -384,10 +389,10 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
 
         Reads zarr.json and caches their attributes in position order.
         """
-        for parent_path in self._image_group_paths:
-            if (zarr_json := root / parent_path / "zarr.json").exists():
-                data = json.loads(zarr_json.read_text())
-                self._metadata_cache[parent_path] = data.get("attributes", {})
+        for group_path in self._image_group_paths:
+            if (zarr_json := root / group_path / "zarr.json").exists():
+                self._meta_mirrors[group_path] = doc = JsonDocumentMirror(zarr_json)
+                doc.load()
 
     def _should_use_chunk_buffering(self, storage_dims: list[Dimension]) -> bool:
         """Check if chunk buffering would be beneficial.
@@ -472,3 +477,48 @@ def _build_yaozarrs_plate_model(
             ],
         )
     )
+
+
+class JsonDocumentMirror(MutableMapping[str, Any]):
+    """In-memory mirror of a .json document with dirty tracking."""
+
+    def __init__(self, path: Path | str) -> None:
+        self._path = Path(path)
+        self._data: dict[str, Any] = {}
+        self._dirty = False
+        self._lock = threading.Lock()  # for thread safety
+
+    def __getitem__(self, key: str) -> Any:
+        return self._data[key]
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        with self._lock:
+            self._data[key] = value
+            self._dirty = True
+
+    def __delitem__(self, key: str) -> None:
+        with self._lock:
+            del self._data[key]
+            self._dirty = True
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._data)
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    def flush(self, indent: int | None = None) -> None:
+        """Write data to disk if dirty."""
+        with self._lock:
+            if self._dirty:
+                self._path.write_text(json.dumps(self._data, indent=indent))
+                self._dirty = False
+
+    def load(self) -> None:
+        """Load data from disk."""
+        with self._lock:
+            if self._path.exists():
+                self._data = cast("dict[str, Any]", json.loads(self._path.read_text()))
+            else:
+                self._data = {}
+            self._dirty = False
