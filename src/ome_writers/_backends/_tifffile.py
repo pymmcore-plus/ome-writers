@@ -65,7 +65,7 @@ class TiffBackend(ArrayBackend):
         self._position_writers: dict[int, _PositionWriter] = {}
         self._storage_dims: tuple[Dimension, ...] | None = None
         self._dtype: str = ""
-        self._cached_metadata: ome.OME | None = None
+        self._cached_metadata: dict[int, ome.OME] = {}
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         """Check if settings are compatible with TIFF backend."""
@@ -140,14 +140,24 @@ class TiffBackend(ArrayBackend):
                     position_name=positions[p_idx].name if num_pos > 1 else None,
                 )
             )
-        self._cached_metadata = ome.OME(images=all_images)
+
+        # Build complete OME metadata
+        complete_ome = ome.OME(images=all_images)
+
+        # Cache metadata per-position to mirror what's in each file
+        self._cached_metadata = {}
+        for p_idx in range(num_pos):
+            if num_pos > 1:
+                # Multi-position: each file gets complete OME with all images
+                self._cached_metadata[p_idx] = complete_ome.model_copy(deep=True)
+            else:
+                # Single position: file gets just its image
+                self._cached_metadata[p_idx] = ome.OME(images=[all_images[p_idx]])
 
         # Create writer thread for each position
         for p_idx, fname in enumerate(fnames):
-            if num_pos > 1:  # multiposition: write complete OME with all images
-                ome_xml = self._cached_metadata.to_xml()
-            else:
-                ome_xml = ome.OME(images=[all_images[p_idx]]).to_xml()
+            # Use cached metadata that mirrors what's in this file
+            ome_xml = self._cached_metadata[p_idx].to_xml()
 
             q = Queue[np.ndarray | None]()
             thread = WriterThread(
@@ -210,30 +220,38 @@ class TiffBackend(ArrayBackend):
 
             self._finalized = True
 
-    def get_metadata(self) -> ome.OME | None:
+    def get_metadata(self) -> dict[int, ome.OME]:
         """Get the base OME metadata generated from acquisition settings.
 
-        Returns the OME metadata object that was auto-generated during prepare()
-        based on dimensions, dtype, and file paths. This object contains all
-        positions as Image objects with IDs "Image:0", "Image:1", etc.
+        Returns a mapping of position indices to OME metadata objects that were
+        auto-generated during prepare(). Each entry mirrors exactly what was written
+        to the corresponding TIFF file.
 
-        Users can modify this object to add meaningful names, timestamps, etc.,
-        and pass it to update_metadata().
+        For multi-position acquisitions, each position's OME contains the complete
+        metadata with all images (as per OME-TIFF companion file spec).
+        For single-position acquisitions, the single entry contains just that image.
+
+        Users can modify these objects to add meaningful names, timestamps, etc.,
+        and pass the modified dict to update_metadata().
 
         Returns
         -------
-        ome_types.model.OME or None
-            Complete OME metadata object with all positions, or None if prepare()
-            has not been called yet.
+        dict[int, ome_types.model.OME]
+            Mapping of position indices to OME metadata objects, or empty dict if
+            prepare() has not been called yet.
         """
-        if self._cached_metadata is None:  # pragma: no cover
-            return None
-        return self._cached_metadata.model_copy(deep=True)
+        if not self._cached_metadata:  # pragma: no cover
+            return {}
+        return {
+            p_idx: meta.model_copy(deep=True)
+            for p_idx, meta in self._cached_metadata.items()
+        }
 
-    def update_metadata(self, metadata: ome.OME) -> None:
+    def update_metadata(self, metadata: dict[int, ome.OME]) -> None:
         """Update the OME metadata in the TIFF files.
 
-        The metadata argument MUST be an instance of ome_types.OME.
+        The metadata argument MUST be a dict mapping position indices to
+        ome_types.OME instances.
 
         This method must be called AFTER exiting the stream context (after
         finalize() completes), as TIFF files must be closed before metadata
@@ -241,13 +259,16 @@ class TiffBackend(ArrayBackend):
 
         Parameters
         ----------
-        metadata : ome_types.model.OME
-            Complete OME metadata object to write to the TIFF files.
+        metadata : dict[int, ome_types.model.OME]
+            Mapping of position indices to OME metadata objects. Keys should match
+            those returned by get_metadata().
 
         Raises
         ------
         TypeError
-            If metadata is not an ome_types.model.OME instance.
+            If metadata is not a dict or values are not ome_types.model.OME instances.
+        KeyError
+            If a position index in metadata doesn't correspond to a position.
         RuntimeError
             If called before finalize() completes, or if metadata update fails.
         """
@@ -257,16 +278,27 @@ class TiffBackend(ArrayBackend):
                 "TIFF files must be closed before metadata can be updated."
             )
 
-        if not isinstance(metadata, ome.OME):
+        if not isinstance(metadata, dict):
             raise TypeError(
-                f"Expected ome_types.model.OME metadata, got {type(metadata)}"
+                "Expected dict[int, ome_types.model.OME] metadata, "
+                f"got {type(metadata)}"
             )
 
-        for position_idx in self._position_writers:
-            self._update_position_metadata(position_idx, metadata)
+        for position_idx, meta in metadata.items():
+            if not isinstance(meta, ome.OME):
+                raise TypeError(
+                    f"Expected ome_types.model.OME for position {position_idx}, "
+                    f"got {type(meta)}"
+                )
+            if position_idx not in self._position_writers:
+                raise KeyError(f"Unknown position index: {position_idx}")
+
+            self._update_position_metadata(position_idx, meta)
 
         # Update cache to reflect what's now on disk
-        self._cached_metadata = metadata.model_copy(deep=True)
+        self._cached_metadata = {
+            p_idx: meta.model_copy(deep=True) for p_idx, meta in metadata.items()
+        }
 
     # -------------------
 
@@ -324,16 +356,24 @@ class TiffBackend(ArrayBackend):
                 )
             )
 
-        # Update cached metadata with corrected dimensions
-        self._cached_metadata = ome.OME(images=all_images)
+        # Build complete OME with corrected dimensions
+        complete_ome = ome.OME(images=all_images)
+        num_pos = len(self._position_writers)
+
+        # Update cached metadata per-position to mirror what's in each file
+        self._cached_metadata = {}
+        for p_idx in range(num_pos):
+            if num_pos > 1:
+                # Multi-position: each file gets complete OME with all images
+                self._cached_metadata[p_idx] = complete_ome.model_copy(deep=True)
+            else:
+                # Single position: file gets just its image
+                self._cached_metadata[p_idx] = ome.OME(images=[all_images[p_idx]])
 
         # Write metadata to each file
         for p_idx, writer in sorted(self._position_writers.items()):
             try:
-                if len(self._position_writers) > 1:  # multiposition: full OME
-                    xml = self._cached_metadata.to_xml()
-                else:
-                    xml = ome.OME(images=[all_images[p_idx]]).to_xml()
+                xml = self._cached_metadata[p_idx].to_xml()
                 # must pre-encode to UTF-8 bytes and pass in bytes, not string
                 tifffile.tiffcomment(writer.file_path, comment=xml.encode("utf-8"))
             except Exception as e:  # pragma: no cover
@@ -355,14 +395,11 @@ class TiffBackend(ArrayBackend):
             return
 
         try:
-            # Extract position-specific metadata from complete OME
-            position_ome = _create_position_specific_ome(position_idx, metadata)
             # must pre-encode to UTF-8 bytes and pass tifffile bytes, not string
-            ome_xml_bytes = position_ome.to_xml().encode("utf-8")
+            ome_xml_bytes = metadata.to_xml().encode("utf-8")
         except Exception as e:  # pragma: no cover
             raise RuntimeError(
-                f"Failed to create position-specific OME metadata for position "
-                f"{position_idx}: {e}"
+                f"Failed to serialize OME metadata for position {position_idx}: {e}"
             ) from e
 
         try:
@@ -499,8 +536,6 @@ _thread_counter = count()
 
 # ------------------------
 
-# helpers for position-specific OME metadata updates
-
 
 def _create_ome_image(
     dims: tuple[Dimension, ...],
@@ -578,65 +613,3 @@ def _create_ome_image(
         pixels=pixels,
         name=name,
     )
-
-
-def _create_position_specific_ome(position_idx: int, metadata: ome.OME) -> ome.OME:
-    """Create OME metadata for a specific position from complete metadata.
-
-    Extracts only the Image and related metadata for the given position index.
-    Assumes Image IDs follow the pattern "Image:{position_idx}".
-    """
-    target_image_id = f"Image:{position_idx}"
-
-    # Find an image by its ID in the given list of images
-    # will raise StopIteration if not found (caller should catch error)
-    position_image = next(img for img in metadata.images if img.id == target_image_id)
-    position_plates = _extract_position_plates(metadata, target_image_id)
-
-    return ome.OME(
-        uuid=metadata.uuid,
-        images=[position_image],
-        instruments=metadata.instruments,
-        plates=position_plates,
-    )
-
-
-def _extract_position_plates(ome: ome.OME, target_image_id: str) -> list[ome.Plate]:
-    """Extract plate metadata for a specific image ID.
-
-    Searches through plates to find the well sample referencing the target
-    image ID and returns a plate containing only the relevant well and sample.
-    """
-    for plate in ome.plates:
-        for well in plate.wells:
-            if _well_contains_image(well, target_image_id):
-                return [_create_position_plate(plate, well, target_image_id)]
-
-    return []
-
-
-def _well_contains_image(well: ome.Well, target_image_id: str) -> bool:
-    """Check if a well contains a sample referencing the target image ID."""
-    return any(
-        sample.image_ref and sample.image_ref.id == target_image_id
-        for sample in well.well_samples
-    )
-
-
-def _create_position_plate(
-    original_plate: ome.Plate, well: ome.Well, target_image_id: str
-) -> ome.Plate:
-    """Create a new plate containing only the relevant well and sample."""
-    # Find the specific well sample for this image
-    target_sample = next(
-        sample
-        for sample in well.well_samples
-        if sample.image_ref and sample.image_ref.id == target_image_id
-    )
-
-    # Create new plate with only the relevant well and sample
-    plate_dict = original_plate.model_dump()
-    well_dict = well.model_dump()
-    well_dict["well_samples"] = [target_sample]
-    plate_dict["wells"] = [well_dict]
-    return ome.Plate.model_validate(plate_dict)
