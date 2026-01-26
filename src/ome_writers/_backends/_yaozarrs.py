@@ -265,8 +265,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         # Accumulate frame metadata with storage index
         if frame_metadata is not None:
             mirror = self._meta_mirrors[self._image_group_paths[position_index]]
-            mirror.frame_metadata.append({**frame_metadata, "storage_index": index})
-            mirror.mark_dirty()
+            mirror.append_frame_metadata({**frame_metadata, "storage_index": index})
 
     def _write_with_buffering(
         self,
@@ -307,11 +306,13 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
     def get_metadata(self) -> dict[str, dict]:
         """Get metadata from all array groups in the zarr hierarchy.
 
-        Returns a dict mapping group paths to their .zattrs contents.
-        Each .zattrs dict typically contains:
-        - "ome": yaozarrs v05.Image model (structured OME metadata)
-        - "omero": dict with channel colors/names (if applicable)
-        - Custom keys for non-standard metadata (timestamps, etc.)
+        Returns a dict mapping group paths (relative to root) to the *attributes*
+        section of the corresponding zarr.json files (not the entire file).
+
+        Use `update_metadata()` to modify and write back.
+
+        Note: frame_metadata (appended during writes) is not included in the returned
+        value here, but is written to disk when metadata is flushed.
 
         Returns
         -------
@@ -499,18 +500,20 @@ def _build_yaozarrs_plate_model(
 class JsonDocumentMirror(MutableMapping[str, Any]):
     """In-memory mirror of a .json document with dirty tracking."""
 
+    __slots__ = ("_data", "_dirty", "_frame_metadata", "_lock", "_path")
+
     def __init__(self, path: Path | str) -> None:
         self._path = Path(path)
         self._data: dict[str, Any] = {}
         self._dirty = False
         self._lock = threading.Lock()  # for thread safety
 
-    def mark_dirty(self) -> None:
-        """Mark the document as dirty.
+        # store this outside of _data for easy access and data integrity
+        self._frame_metadata: list[dict[str, Any]] = []
 
-        Use this when making in-place modifications to nested structures, like
-        frame_metadata list.
-        """
+    def append_frame_metadata(self, metadata: dict[str, Any]) -> None:
+        """Append frame metadata entry."""
+        self._frame_metadata.append(metadata)
         self._dirty = True
 
     def __getitem__(self, key: str) -> Any:
@@ -537,6 +540,9 @@ class JsonDocumentMirror(MutableMapping[str, Any]):
         """Write data to disk if dirty."""
         with self._lock:
             if self._dirty:
+                # Ensure frame_metadata is up-to-date in the document
+                self.ome_writers["frame_metadata"] = self._frame_metadata
+
                 # NOTE:
                 # we could consider attempting to serialize certain sub-sections here
                 # (e.g., "ome_writers.frame_metadata", which contains user-data)
@@ -568,16 +574,7 @@ class JsonDocumentMirror(MutableMapping[str, Any]):
             self._dirty = False
 
     @property
-    def attributes(self) -> dict[str, Any]:
-        """Get attributes dict from data."""
-        return self._data.setdefault("attributes", {})
-
-    @property
     def ome_writers(self) -> dict[str, Any]:
         """Get ome_writers dict from attributes."""
-        return self.attributes.setdefault("ome_writers", {"version": __version__})
-
-    @property
-    def frame_metadata(self) -> list[dict[str, Any]]:
-        """Get frame_metadata list from ome_writers."""
-        return self.ome_writers.setdefault("frame_metadata", [])
+        attrs = cast("dict", self._data.setdefault("attributes", {}))
+        return attrs.setdefault("ome_writers", {"version": __version__})
