@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from ome_writers._schema import AcquisitionSettings
 
 BinaryOnly = ome.OME.BinaryOnly
+COMPANION_IDX = -1  # special index for .companion.ome files
 
 
 class MetadataMode(Enum):
@@ -49,7 +50,7 @@ class OmeXMLMirror:
         self, path: str | Path, pos_idx: int | None, model: ome.OME | None = None
     ) -> None:
         self.path: str = str(path)
-        self.pos_idx: int | None = pos_idx
+        self.pos_idx: int = COMPANION_IDX if pos_idx is None else pos_idx
         self.model = model or ome.OME()
         self._dirty: bool = False
 

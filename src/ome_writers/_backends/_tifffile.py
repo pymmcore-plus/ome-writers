@@ -10,17 +10,17 @@ from itertools import count
 from queue import Queue
 from typing import TYPE_CHECKING, Literal
 
-import numpy as np
-
 from ome_writers._backends._backend import ArrayBackend
 from ome_writers._backends._ome_xml import prepare_metadata
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    import numpy as np
+
+    from ome_writers._backends._ome_xml import OmeXMLMirror
     from ome_writers._router import FrameRouter
     from ome_writers._schema import AcquisitionSettings, Dimension
-
 
 try:
     import ome_types.model as ome
@@ -37,11 +37,9 @@ class PositionManager:
     """Per-position writer/metadata state for TIFF backend."""
 
     file_path: str
-    file_uuid: str | None
     thread: WriterThread | None
     queue: Queue[np.ndarray | None]
-    metadata: ome.OME  # Cached metadata mirroring what's in the file
-    name: str | None = None
+    metadata_mirror: OmeXMLMirror
 
     def __post_init__(self) -> None:
         self._lock = threading.Lock()
@@ -126,7 +124,6 @@ class TiffBackend(ArrayBackend):
         self._finalized = False
         self._storage_dims = storage_dims = settings.array_storage_dimensions
         self._dtype = settings.dtype
-        positions = settings.positions
 
         # Extract and validate compression
         compression = None
@@ -141,14 +138,13 @@ class TiffBackend(ArrayBackend):
 
         # Prepare OME-XML metadata mirrors
         # mapping of filepath -> OmeXMLMirror
-        self._meta_mirrors = metas = prepare_metadata(settings)
+        metas = prepare_metadata(settings)
 
-        num_pos = len(positions)
         # Create writer thread for each position
-        for p_idx, (fname, meta_mirror) in enumerate(metas.items()):
+        for fname, meta_mirror in metas.items():
             thread = q = None
             if meta_mirror.is_tiff:
-                q = Queue[np.ndarray | None]()
+                q = Queue()
                 thread = WriterThread(
                     path=fname,
                     shape=shape,
@@ -159,13 +155,11 @@ class TiffBackend(ArrayBackend):
                     compression=compression,
                 )
                 thread.start()
-            self._position_managers[p_idx] = PositionManager(
+            self._position_managers[meta_mirror.pos_idx] = PositionManager(
                 file_path=fname,
-                file_uuid=meta_mirror.model.uuid,
                 thread=thread,
                 queue=q,
-                metadata=meta_mirror.model,
-                name=positions[p_idx].name if num_pos > 1 else None,
+                metadata_mirror=meta_mirror,
             )
 
     def write(
@@ -189,13 +183,13 @@ class TiffBackend(ArrayBackend):
         """Flush and close all TIFF writers."""
         if not self._finalized:
             # Signal threads to stop
-            for writer in self._position_managers.values():
-                writer.queue.put(None)
+            for manager in self._position_managers.values():
+                manager.queue.put(None)
 
             # Wait for threads to finish
-            for writer in self._position_managers.values():
-                if writer.thread:
-                    writer.thread.join(timeout=5)
+            for manager in self._position_managers.values():
+                if manager.thread:
+                    manager.thread.join(timeout=5)
 
             # Update OME metadata if unbounded dimensions were written
             if self._storage_dims and any(d.count is None for d in self._storage_dims):
@@ -206,16 +200,19 @@ class TiffBackend(ArrayBackend):
     def get_metadata(self) -> dict[int, ome.OME]:
         """Get the base OME metadata generated from acquisition settings.
 
-        Returns a mapping of position indices to OME metadata objects that were
-        auto-generated during prepare(). Each entry mirrors exactly what was written
-        to the corresponding TIFF file.
+        Returns a mapping of position indices to `ome_types.OME` objects.  The `OME`
+        objects represent the metadata as it would appear in the TIFF or companion
+        file for that position.
 
-        For multi-position acquisitions, each position's OME contains the complete
-        metadata with all images (as per OME-TIFF companion file spec).
-        For single-position acquisitions, the single entry contains just that image.
+        !!! note
+            The special "position index" of -1, if present, represents metadata
+            in the companion.ome file, if applicable.
 
-        Users can modify these objects to add meaningful names, timestamps, etc.,
-        and pass the modified dict to update_metadata().
+        Users can modify these objects as needed and pass a mapping of position indices
+        to `ome_types.OME` objects back to `update_metadata()`.
+
+        See the `ome-types` documentation for details on modifying OME metadata:
+        <https://ome-types.readthedocs.io/en/latest/API/ome_types/>
 
         Returns
         -------
@@ -225,16 +222,18 @@ class TiffBackend(ArrayBackend):
         """
         if not self._position_managers:  # pragma: no cover
             return {}
+
         return {
-            p_idx: writer.metadata.model_copy(deep=True)
-            for p_idx, writer in self._position_managers.items()
+            p_idx: manager.metadata_mirror.model.model_copy(deep=True)
+            for p_idx, manager in self._position_managers.items()
         }
 
     def update_metadata(self, metadata: dict[int, ome.OME]) -> None:
         """Update the OME metadata in the TIFF files.
 
         The metadata argument MUST be a dict mapping position indices to
-        ome_types.OME instances.
+        `ome_types.OME` instances, with the special index -1 representing the
+        companion.ome file, if applicable.
 
         This method must be called AFTER exiting the stream context (after
         finalize() completes), as TIFF files must be closed before metadata
@@ -293,9 +292,9 @@ class TiffBackend(ArrayBackend):
         # (all positions should have written the same number of frames)
         if (
             not self._storage_dims
-            or not (writer := self._position_managers.get(0))
-            or not writer.thread
-            or not (frames_written := writer.thread.frames_written)
+            or not (manager := self._position_managers.get(0))
+            or not manager.thread
+            or not (frames_written := manager.thread.frames_written)
         ):
             return  # no frames written
 
@@ -304,13 +303,15 @@ class TiffBackend(ArrayBackend):
         actual_count = frames_written // math.prod(sizes.values())
         unbounded_dim_name = next(d.name for d in self._storage_dims if d.count is None)
 
-        for mirror in self._meta_mirrors.values():
-            if mirror.is_tiff:
-                pixels = mirror.model.images[0].pixels
+        for manager in self._position_managers.values():
+            mirror = manager.metadata_mirror
+            if images := mirror.model.images:
+                pixels = images[0].pixels
                 # fix size of unbounded dimension
                 setattr(pixels, f"size_{unbounded_dim_name.lower()}", actual_count)
                 # fix plane count in the tiff data
-                pixels.tiff_data_blocks[0].plane_count = frames_written
+                if tiff_data_blocks := pixels.tiff_data_blocks:
+                    tiff_data_blocks[0].plane_count = frames_written
                 mirror.flush(force=True)
 
 
