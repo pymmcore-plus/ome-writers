@@ -45,8 +45,9 @@ def test_update_metadata_single_file(tmp_path: Path, tiff_backend: str) -> None:
 
     # Update metadata after context exits
     metadata = stream.get_metadata()
-    metadata.images[0].name = "Updated Image"
-    metadata.images[0].pixels.channels[0].name = "Updated Channel"
+    # For single position, get position 0's metadata
+    metadata[0].images[0].name = "Updated Image"
+    metadata[0].images[0].pixels.channels[0].name = "Updated Channel"
     stream.update_metadata(metadata)
 
     # Verify on disk
@@ -85,15 +86,19 @@ def test_update_metadata_multiposition(tmp_path: Path, tiff_backend: str) -> Non
 
     # Update metadata
     metadata = stream.get_metadata()
-    metadata.images[0].name = "Position 0 Updated"
-    metadata.images[1].name = "Position 1 Updated"
+    # For multi-position, each position's metadata contains all images
+    # Update all positions to have the same updated metadata
+    for p_idx in range(2):
+        metadata[p_idx].images[0].name = "Position 0 Updated"
+        metadata[p_idx].images[1].name = "Position 1 Updated"
     stream.update_metadata(metadata)
 
-    # Verify each position file
+    # Verify each position file has the updated metadata
     for pos_idx in range(2):
         pos_file = tmp_path / f"multipos_p{pos_idx:03d}.ome.tiff"
         ome_obj = from_tiff(str(pos_file))
-        assert ome_obj.images[0].name == f"Position {pos_idx} Updated"
+        assert ome_obj.images[0].name == "Position 0 Updated"
+        assert ome_obj.images[1].name == "Position 1 Updated"
 
 
 def test_update_metadata_error_conditions(tmp_path: Path, tiff_backend: str) -> None:
@@ -111,13 +116,17 @@ def test_update_metadata_error_conditions(tmp_path: Path, tiff_backend: str) -> 
     with create_stream(settings) as stream:
         stream.append(np.random.randint(0, 1000, (32, 32), dtype=np.uint16))
 
-    # Invalid metadata type should raise TypeError
-    with pytest.raises(TypeError, match=r"Expected ome_types\.model\.OME"):
-        stream.update_metadata({"not": "an ome object"})
+    # Invalid metadata type (not a dict) should raise TypeError
+    with pytest.raises(TypeError, match=r"Expected dict\[int, ome_types.model.OME\]"):
+        stream.update_metadata("not a dict")
+
+    # Invalid value type should raise TypeError
+    with pytest.raises(TypeError, match=r"Expected ome_types.model.OME for position"):
+        stream.update_metadata({0: "not an ome object"})
 
     # Valid update should work
     metadata = stream.get_metadata()
-    metadata.images[0].name = "Fixed"
+    metadata[0].images[0].name = "Fixed"
     stream.update_metadata(metadata)
 
     ome_obj = from_tiff(str(tmp_path / "error.ome.tiff"))
@@ -159,15 +168,19 @@ def test_update_metadata_with_plates(tmp_path: Path, tiff_backend: str) -> None:
 
     # Update metadata
     metadata = stream.get_metadata()
-    metadata.images[0].name = "Well A01"
-    metadata.images[1].name = "Well A02"
+    # For multi-position, each position's metadata contains all images
+    # Update all positions to have the same updated metadata
+    for p_idx in range(2):
+        metadata[p_idx].images[0].name = "Well A01"
+        metadata[p_idx].images[1].name = "Well A02"
     stream.update_metadata(metadata)
 
-    # Verify each well file has updated name
+    # Verify each well file has updated names
     for pos_idx in range(2):
         pos_file = tmp_path / f"plate_p{pos_idx:03d}.ome.tiff"
         ome_obj = from_tiff(str(pos_file))
-        assert ome_obj.images[0].name == f"Well A0{pos_idx + 1}"
+        assert ome_obj.images[0].name == "Well A01"
+        assert ome_obj.images[1].name == "Well A02"
 
 
 def test_tiff_metadata_physical_sizes_and_names(
