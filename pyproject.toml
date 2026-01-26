@@ -74,11 +74,8 @@ acquire-zarr = [
     "ome-writers[acquire-zarr]",
     "tensorstore>=0.1.78",       # just for read validation in tests
 ]
-tifffile = [
-    { include-group = 'test' },
-    "ome-writers[tifffile]",
-    "scyjava>=1.12.1",
-]
+tifffile = [{ include-group = 'test' }, "ome-writers[tifffile]"]
+bioformats = [{ include-group = "tifffile" }, "scyjava>=1.12.1"]
 test-codspeed = [
     { include-group = "test" },
     "ome-writers[all]",

@@ -73,7 +73,13 @@ jobs:
             python-version: "3.14"
             platform: ubuntu-latest
             resolution: highest
-          - group: dev # this exercises even the tools/dir
+          # this exercises the scripts in the tools dir
+          - group: dev
+            python-version: "3.13"
+            platform: ubuntu-latest
+            resolution: highest
+          # brings in scyjava, tests tiff outputs with bioformats readers
+          - group: bioformats
             python-version: "3.13"
             platform: ubuntu-latest
             resolution: highest
