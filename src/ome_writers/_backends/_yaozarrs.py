@@ -65,7 +65,6 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         self._finalized = False
         self._root: Path | None = None
         self._chunk_buffers: list[ChunkBuffer] | None = None
-        self._frame_metadata: dict[int, list[dict[str, Any]]] = {}
 
     @abstractmethod
     def _get_yaozarrs_writer(
@@ -265,8 +264,9 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
     ) -> None:
         # Accumulate frame metadata with storage index
         if frame_metadata is not None:
-            position_meta = self._frame_metadata.setdefault(position_index, [])
-            position_meta.append({**frame_metadata, "storage_index": index})
+            mirror = self._meta_mirrors[self._image_group_paths[position_index]]
+            mirror.frame_metadata.append({**frame_metadata, "storage_index": index})
+            mirror.mark_dirty()
 
     def _write_with_buffering(
         self,
@@ -375,7 +375,6 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
             self._finalize_chunk_buffers()
             for mirror in self._meta_mirrors.values():
                 mirror.flush()
-            self._flush_frame_metadata()
             self._arrays.clear()
             self._image_group_paths.clear()
             self._finalized = True
@@ -397,48 +396,6 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
                     for storage_start, chunk_data in buffer.flush_all_partial():
                         self._write_chunk(array, storage_start, chunk_data)
         self._chunk_buffers = None
-
-    def _flush_frame_metadata(self) -> None:
-        """Write frame metadata to group-level zarr.json.
-
-        Writes position-specific metadata nested under attributes.ome_writers
-        with version information to each position's group-level zarr.json
-        (next to the "ome" key).
-        """
-        if not self._frame_metadata or self._root is None:
-            return
-
-        # Write position-specific metadata to each position's group zarr.json
-        for pos_idx, image_group_path in enumerate(self._image_group_paths):
-            # Skip positions with no metadata
-            if not (pos_meta := self._frame_metadata.get(pos_idx)):
-                continue
-
-            if not (zarr_json := self._root / image_group_path / "zarr.json").exists():
-                warnings.warn(  # pragma: no cover
-                    f"zarr.json not found at {zarr_json}. Cannot write frame_metadata.",
-                    stacklevel=2,
-                )
-                continue
-
-            try:
-                # Read existing zarr.json
-                data = json.loads(zarr_json.read_text())
-
-                # Add frame_metadata nested under ome_writers with version
-                attrs = data.setdefault("attributes", {})
-                attrs["ome_writers"] = {
-                    "version": __version__,
-                    "frame_metadata": pos_meta,
-                }
-
-                # Write back to zarr.json
-                zarr_json.write_text(json.dumps(data))
-            except Exception as e:  # pragma: no cover
-                warnings.warn(
-                    f"Failed to write frame_metadata to {zarr_json}: {e}",
-                    stacklevel=2,
-                )
 
     def _resize(self, array: _AT, new_shape: Sequence[int]) -> None:
         """Resize array to new shape."""
@@ -548,6 +505,14 @@ class JsonDocumentMirror(MutableMapping[str, Any]):
         self._dirty = False
         self._lock = threading.Lock()  # for thread safety
 
+    def mark_dirty(self) -> None:
+        """Mark the document as dirty.
+
+        Use this when making in-place modifications to nested structures, like
+        frame_metadata list.
+        """
+        self._dirty = True
+
     def __getitem__(self, key: str) -> Any:
         return self._data[key]
 
@@ -571,14 +536,43 @@ class JsonDocumentMirror(MutableMapping[str, Any]):
         """Write data to disk if dirty."""
         with self._lock:
             if self._dirty:
-                self._path.write_text(json.dumps(self._data, indent=indent))
+                # NOTE:
+                # we could consider attempting to serialize certain sub-sections here
+                # (e.g., "ome_writers.frame_metadata", which contains user-data)
+                # and pop them from the metadata if they fail to serialize...
+                # for now it's all-or-nothing
+                try:
+                    json_str = json.dumps(self._data, indent=indent)
+                except (TypeError, ValueError) as e:  # pragma: no cover
+                    raise ValueError(
+                        f"Failed to serialize zarr.json for {self._path}:\n{e}"
+                    ) from e
+
+                self._path.write_text(json_str)
                 self._dirty = False
 
     def load(self) -> None:
         """Load data from disk."""
         with self._lock:
+            assert not self._dirty, "Cannot load while dirty. Flush first."
+
             if self._path.exists():
                 self._data = cast("dict[str, Any]", json.loads(self._path.read_text()))
             else:
                 self._data = {}
             self._dirty = False
+
+    @property
+    def attributes(self) -> dict[str, Any]:
+        """Get attributes dict from data."""
+        return self._data.setdefault("attributes", {})
+
+    @property
+    def ome_writers(self) -> dict[str, Any]:
+        """Get ome_writers dict from attributes."""
+        return self.attributes.setdefault("ome_writers", {"version": __version__})
+
+    @property
+    def frame_metadata(self) -> list[dict[str, Any]]:
+        """Get frame_metadata list from ome_writers."""
+        return self.ome_writers.setdefault("frame_metadata", [])
