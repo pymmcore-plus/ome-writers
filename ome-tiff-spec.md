@@ -66,14 +66,14 @@ tag—subsequent IFDs MAY have empty or absent tag 270.
 The **DimensionOrder** attribute controls IFD rasterization. The six valid
 values specify which dimension varies fastest after X and Y:
 
-| DimensionOrder | Index Formula | Iteration Order |
-|----------------|---------------|-----------------|
-| XYZCT | `z + (c × SizeZ) + (t × SizeZ × SizeC)` | Z→C→T |
-| XYZTC | `z + (t × SizeZ) + (c × SizeZ × SizeT)` | Z→T→C |
-| XYCZT | `c + (z × SizeC) + (t × SizeC × SizeZ)` | C→Z→T |
-| XYCTZ | `c + (t × SizeC) + (z × SizeC × SizeT)` | C→T→Z |
-| XYTCZ | `t + (c × SizeT) + (z × SizeT × SizeC)` | T→C→Z |
-| XYTZC | `t + (z × SizeT) + (c × SizeT × SizeZ)` | T→Z→C |
+| DimensionOrder | Index Formula                           | Iteration Order |
+|----------------|-----------------------------------------|-----------------|
+| XYZCT          | `z + (c × SizeZ) + (t × SizeZ × SizeC)` | Z→C→T           |
+| XYZTC          | `z + (t × SizeZ) + (c × SizeZ × SizeT)` | Z→T→C           |
+| XYCZT          | `c + (z × SizeC) + (t × SizeC × SizeZ)` | C→Z→T           |
+| XYCTZ          | `c + (t × SizeC) + (z × SizeC × SizeT)` | C→T→Z           |
+| XYTCZ          | `t + (c × SizeT) + (z × SizeT × SizeC)` | T→C→Z           |
+| XYTZC          | `t + (z × SizeT) + (c × SizeT × SizeZ)` | T→Z→C           |
 
 For example, with SizeZ=10, SizeC=3, SizeT=5 and DimensionOrder=XYZCT, the plane
 at Z=4, C=1, T=2 maps to IFD index `4 + (1×10) + (2×10×3) = 74`.
@@ -99,18 +99,18 @@ this limit.
 
 The Pixels `Type` attribute maps to TIFF tags as follows:
 
-| OME Type | BitsPerSample | SampleFormat |
-|----------|---------------|--------------|
-| uint8 | 8 | 1 (UINT) |
-| uint16 | 16 | 1 (UINT) |
-| uint32 | 32 | 1 (UINT) |
-| int8 | 8 | 2 (INT) |
-| int16 | 16 | 2 (INT) |
-| int32 | 32 | 2 (INT) |
-| float | 32 | 3 (IEEEFP) |
-| double | 64 | 3 (IEEEFP) |
-| complex | 64 | 6 (COMPLEXIEEEFP) |
-| double-complex | 128 | 6 (COMPLEXIEEEFP) |
+| OME Type       | BitsPerSample | SampleFormat         |
+|----------------|---------------|----------------------|
+| uint8          | 8             | 1 (UINT)             |
+| uint16         | 16            | 1 (UINT)             |
+| uint32         | 32            | 1 (UINT)             |
+| int8           | 8             | 2 (INT)              |
+| int16          | 16            | 2 (INT)              |
+| int32          | 32            | 2 (INT)              |
+| float          | 32            | 3 (IEEEFP)           |
+| double         | 64            | 3 (IEEEFP)           |
+| complex        | 64            | 6 (COMPLEXIEEEFP)    |
+| double-complex | 128           | 6 (COMPLEXIEEEFP)    |
 
 Both little-endian (`II`) and big-endian (`MM`) byte orders are valid. The
 Pixels `BigEndian` attribute SHOULD match the actual TIFF byte order.
@@ -154,13 +154,13 @@ Optional but recommended: `Name` for human-readable identification.
 
 All these attributes are **REQUIRED**:
 
-| Attribute | Type | Description |
-|-----------|------|-------------|
-| ID | string | Unique identifier (`Pixels:n`) |
-| DimensionOrder | enum | One of the six valid values |
-| Type | enum | Pixel data type |
-| SizeX, SizeY | positiveInt | Plane dimensions |
-| SizeZ, SizeC, SizeT | positiveInt | Stack dimensions |
+| Attribute           | Type        | Description                    |
+|---------------------|-------------|--------------------------------|
+| ID                  | string      | Unique identifier (`Pixels:n`) |
+| DimensionOrder      | enum        | One of the six valid values    |
+| Type                | enum        | Pixel data type                |
+| SizeX, SizeY        | positiveInt | Plane dimensions               |
+| SizeZ, SizeC, SizeT | positiveInt | Stack dimensions               |
 
 Optional attributes include `BigEndian`, `Interleaved`, `SignificantBits`, and
 physical size attributes (`PhysicalSizeX/Y/Z` with corresponding unit
@@ -178,13 +178,13 @@ for RGB), and wavelength information.
 TiffData elements map IFDs to dimensional positions. At minimum, one TiffData
 element is REQUIRED:
 
-| Attribute | Default | Description |
-|-----------|---------|-------------|
-| IFD | 0 | Starting IFD index (0-based) |
-| FirstZ | 0 | Z position at this IFD |
-| FirstC | 0 | C position at this IFD |
-| FirstT | 0 | T position at this IFD |
-| PlaneCount | all/1 | Number of consecutive IFDs |
+| Attribute  | Default | Description                  |
+|------------|---------|------------------------------|
+| IFD        | 0       | Starting IFD index (0-based) |
+| FirstZ     | 0       | Z position at this IFD       |
+| FirstC     | 0       | C position at this IFD       |
+| FirstT     | 0       | T position at this IFD       |
+| PlaneCount | all/1   | Number of consecutive IFDs   |
 
 The simplest usage assigns all planes automatically:
 
@@ -372,12 +372,12 @@ Required attribute: **ID** (e.g., `Plate:1`)
 
 Recommended attributes:
 
-| Attribute | Description |
-|-----------|-------------|
-| Name | Human-readable identifier |
-| Rows, Columns | Plate dimensions |
-| RowNamingConvention | "letter" or "number" |
-| ColumnNamingConvention | "letter" or "number" |
+| Attribute              | Description                  |
+|------------------------|------------------------------|
+| Name                   | Human-readable identifier    |
+| Rows, Columns          | Plate dimensions             |
+| RowNamingConvention    | "letter" or "number"         |
+| ColumnNamingConvention | "letter" or "number"         |
 
 ### Well Element
 
@@ -517,25 +517,191 @@ tracking.
 - Use explicit TiffData mappings to override DimensionOrder defaults
 - Include physical size and timing metadata
 
+## OME-TIFF Metadata Modes Summary
+
+We identify four modes for distributing OME-XML metadata in OME-TIFF datasets.
+
+An OME-TIFF dataset always has exactly one authoritative OME-XML document
+containing complete metadata. The format supports four modes for distributing
+this metadata across files.
+
+### Mode Comparison
+
+| Mode | Description                 | Total Files | Full OME-XML Docs | BinaryOnly Docs |
+|------|-----------------------------|-------------|-------------------|-----------------|
+| 1    | Single file                 | 1           | 1                 | 0               |
+| 2a   | Multi-file, redundant XML   | N           | N                 | 0               |
+| 2b   | Multi-file, master TIFF     | N           | 1                 | N-1             |
+| 2c   | Multi-file, companion file  | N+1         | 1                 | N               |
+
+### Minimal XML Examples
+
+All examples assume a simple 2-channel, 2-timepoint dataset (4 planes total).
+
 ---
 
-## Implementation Checklist
+#### Mode 1: Single File
 
-A compliant OME-TIFF writer must implement:
+One `.ome.tif` containing all planes and complete metadata.
 
-1. **TIFF layer**: Valid TIFF/BigTIFF with properly sorted IFD entries and
-   correct pixel type tags
-2. **XML generation**: Schema-valid OME-XML with required elements and
-   attributes
-3. **TiffData mapping**: Correct correspondence between IFD indices and
-   dimensional coordinates
-4. **Pyramid support**: SubIFDs structure with proper NewSubFileType tagging
-5. **Multi-file support**: UUID generation and TiffData external references
-6. **HCS support**: Plate/Well/WellSample hierarchy with proper ImageRef linkage
+**file.ome.tif** (ImageDescription of IFD 0):
 
-Validation against the official XSD schema
-(`http://www.openmicroscopy.org/Schemas/OME/2016-06/ome.xsd`) is strongly
-recommended before writing.
+```xml
+<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06"
+     UUID="urn:uuid:aaaa-...">
+  <Image ID="Image:0">
+    <Pixels ID="Pixels:0" DimensionOrder="XYCZT"
+            SizeX="512" SizeY="512" SizeZ="1" SizeC="2" SizeT="2" Type="uint16">
+      <Channel ID="Channel:0:0"/><Channel ID="Channel:0:1"/>
+      <TiffData/>  <!-- all 4 IFDs follow DimensionOrder -->
+    </Pixels>
+  </Image>
+</OME>
+```
+
+---
+
+#### Mode 2a: Multi-file, Redundant Full XML
+
+Each `.ome.tif` contains complete metadata. Only the root `UUID` differs; all
+`TiffData` elements reference all files.
+
+**C0_T0.ome.tif**:
+
+```xml
+<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06"
+     UUID="urn:uuid:aaaa-...">
+  <Image ID="Image:0">
+    <Pixels ID="Pixels:0" DimensionOrder="XYCZT"
+            SizeX="512" SizeY="512" SizeZ="1" SizeC="2" SizeT="2" Type="uint16">
+      <Channel ID="Channel:0:0"/><Channel ID="Channel:0:1"/>
+      <TiffData FirstC="0" FirstT="0" IFD="0" PlaneCount="1">
+        <UUID FileName="C0_T0.ome.tif">urn:uuid:aaaa-...</UUID>
+      </TiffData>
+      <TiffData FirstC="1" FirstT="0" IFD="0" PlaneCount="1">
+        <UUID FileName="C1_T0.ome.tif">urn:uuid:bbbb-...</UUID>
+      </TiffData>
+      <TiffData FirstC="0" FirstT="1" IFD="0" PlaneCount="1">
+        <UUID FileName="C0_T1.ome.tif">urn:uuid:cccc-...</UUID>
+      </TiffData>
+      <TiffData FirstC="1" FirstT="1" IFD="0" PlaneCount="1">
+        <UUID FileName="C1_T1.ome.tif">urn:uuid:dddd-...</UUID>
+      </TiffData>
+    </Pixels>
+  </Image>
+</OME>
+```
+
+**C1_T0.ome.tif** (and other files):
+
+```xml
+<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06"
+     UUID="urn:uuid:bbbb-...">  <!-- only this differs -->
+  <!-- identical Image/Pixels/TiffData content -->
+</OME>
+```
+
+---
+
+#### Mode 2b: Multi-file, Master TIFF
+
+One `.ome.tif` contains full metadata; others contain only `BinaryOnly` pointing
+to the master.
+
+**master.ome.tif** (full metadata):
+
+```xml
+<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06"
+     UUID="urn:uuid:aaaa-...">
+  <Image ID="Image:0">
+    <Pixels ID="Pixels:0" DimensionOrder="XYCZT"
+            SizeX="512" SizeY="512" SizeZ="1" SizeC="2" SizeT="2" Type="uint16">
+      <Channel ID="Channel:0:0"/><Channel ID="Channel:0:1"/>
+      <TiffData FirstC="0" FirstT="0" IFD="0" PlaneCount="1">
+        <UUID FileName="master.ome.tif">urn:uuid:aaaa-...</UUID>
+      </TiffData>
+      <TiffData FirstC="1" FirstT="0" IFD="0" PlaneCount="1">
+        <UUID FileName="C1_T0.ome.tif">urn:uuid:bbbb-...</UUID>
+      </TiffData>
+      <TiffData FirstC="0" FirstT="1" IFD="0" PlaneCount="1">
+        <UUID FileName="C0_T1.ome.tif">urn:uuid:cccc-...</UUID>
+      </TiffData>
+      <TiffData FirstC="1" FirstT="1" IFD="0" PlaneCount="1">
+        <UUID FileName="C1_T1.ome.tif">urn:uuid:dddd-...</UUID>
+      </TiffData>
+    </Pixels>
+  </Image>
+</OME>
+```
+
+**C1_T0.ome.tif** (and other non-master files):
+
+```xml
+<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06"
+     UUID="urn:uuid:bbbb-...">
+  <BinaryOnly MetadataFile="master.ome.tif" UUID="urn:uuid:aaaa-..."/>
+</OME>
+```
+
+---
+
+#### Mode 2c: Multi-file, Companion File
+
+A separate `.companion.ome` file contains full metadata; all `.ome.tif` files
+contain only `BinaryOnly`.
+
+**dataset.companion.ome** (standalone XML file, not a TIFF):
+
+```xml
+<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06"
+     UUID="urn:uuid:0000-...">
+  <Image ID="Image:0">
+    <Pixels ID="Pixels:0" DimensionOrder="XYCZT"
+            SizeX="512" SizeY="512" SizeZ="1" SizeC="2" SizeT="2" Type="uint16">
+      <Channel ID="Channel:0:0"/><Channel ID="Channel:0:1"/>
+      <TiffData FirstC="0" FirstT="0" IFD="0" PlaneCount="1">
+        <UUID FileName="C0_T0.ome.tif">urn:uuid:aaaa-...</UUID>
+      </TiffData>
+      <TiffData FirstC="1" FirstT="0" IFD="0" PlaneCount="1">
+        <UUID FileName="C1_T0.ome.tif">urn:uuid:bbbb-...</UUID>
+      </TiffData>
+      <TiffData FirstC="0" FirstT="1" IFD="0" PlaneCount="1">
+        <UUID FileName="C0_T1.ome.tif">urn:uuid:cccc-...</UUID>
+      </TiffData>
+      <TiffData FirstC="1" FirstT="1" IFD="0" PlaneCount="1">
+        <UUID FileName="C1_T1.ome.tif">urn:uuid:dddd-...</UUID>
+      </TiffData>
+    </Pixels>
+  </Image>
+</OME>
+```
+
+**C0_T0.ome.tif** (and all other .ome.tif files):
+
+```xml
+<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06"
+     UUID="urn:uuid:aaaa-...">
+  <BinaryOnly MetadataFile="dataset.companion.ome" UUID="urn:uuid:0000-..."/>
+</OME>
+```
+
+---
+
+### Key Differences at a Glance
+
+| Element                     | Mode 1 | Mode 2a       | Mode 2b       | Mode 2c       |
+|-----------------------------|--------|---------------|---------------|---------------|
+| `<TiffData/>` (no children) | ✓      | —             | —             | —             |
+| `<TiffData><UUID>`          | —      | ✓ all files   | ✓ all files   | ✓ all files   |
+| `<BinaryOnly>`              | —      | —             | ✓ non-master  | ✓ all TIFFs   |
+| `.companion.ome` file       | —      | —             | —             | ✓             |
+
+### Additional Notes
+
+- **Dimensions**: Always exactly 5D (XYZCT), with minimum Size of 1 for each. Use Modulo annotations to encode additional dimensions.
+- **Sub-resolutions**: Pyramidal levels are stored as SubIFDs (TIFF tag 330) linked from full-resolution IFDs. Orthogonal to metadata mode.
+- **Root UUID**: In multi-file modes, identifies "which file is this" so readers can determine which TiffData planes are local.
+- **FileName attribute**: Optional but strongly recommended in UUID elements; without it, readers must scan directories matching UUIDs.
 
 ---
 

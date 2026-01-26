@@ -219,7 +219,7 @@ def test_tiff_metadata_physical_sizes_and_names(
     assert ome_obj.images[0].acquisition_date is not None
 
     # Verify image name strips .ome extension
-    assert ome_obj.images[0].name == "test_metadata"
+    assert ome_obj.images[0].name == "0"
     assert not ome_obj.images[0].name.endswith(".ome")
 
 
