@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import threading
 import uuid
@@ -21,6 +22,7 @@ from ome_writers._units import ngff_to_ome_unit
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from typing import Any
 
     from ome_writers._router import FrameRouter
     from ome_writers._schema import AcquisitionSettings, Dimension
@@ -91,6 +93,7 @@ class TiffBackend(ArrayBackend):
         self._position_managers: dict[int, PositionManager] = {}
         self._storage_dims: tuple[Dimension, ...] | None = None
         self._dtype: str = ""
+        self._frame_metadata: dict[int, list[dict[str, Any]]] = {}
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         """Check if settings are compatible with TIFF backend."""
@@ -197,6 +200,8 @@ class TiffBackend(ArrayBackend):
         position_index: int,
         index: tuple[int, ...],
         frame: np.ndarray,
+        *,
+        frame_metadata: dict[str, Any] | None = None,
     ) -> None:
         """Write frame sequentially to the appropriate position's TIFF file.
 
@@ -208,6 +213,14 @@ class TiffBackend(ArrayBackend):
             raise RuntimeError("Backend not prepared. Call prepare() first.")
 
         self._position_managers[position_index].queue.put(frame)
+
+        # Accumulate frame metadata with storage index
+        if frame_metadata is not None:
+            if position_index not in self._frame_metadata:
+                self._frame_metadata[position_index] = []
+            meta_with_idx = frame_metadata.copy()
+            meta_with_idx["storage_index"] = index
+            self._frame_metadata[position_index].append(meta_with_idx)
 
     def finalize(self) -> None:
         """Flush and close all TIFF writers."""
@@ -222,8 +235,14 @@ class TiffBackend(ArrayBackend):
                     writer.thread.join(timeout=5)
 
             # Update OME metadata if unbounded dimensions were written
-            if self._storage_dims and any(d.count is None for d in self._storage_dims):
+            has_unbounded = self._storage_dims and any(
+                d.count is None for d in self._storage_dims
+            )
+            if has_unbounded:
                 self._update_unbounded_metadata()
+            elif self._frame_metadata:
+                # For bounded dimensions with frame metadata, update metadata
+                self._flush_frame_metadata()
 
             self._finalized = True
 
@@ -307,6 +326,64 @@ class TiffBackend(ArrayBackend):
 
     # -------------------
 
+    def _flush_frame_metadata(self) -> None:
+        """Flush accumulated frame metadata into OME-XML in TIFF files."""
+        if not self._cached_metadata or not self._frame_metadata:  # pragma: no cover
+            return
+
+        # For multi-position, enhance each position's metadata separately
+        # For single position, enhance with position 0's metadata
+        if len(self._position_writers) > 1:
+            # Multi-position: collect all annotations from all positions
+            all_annotations: list[ome.StructuredAnnotations] = []
+            for p_idx, image in enumerate(self._cached_metadata.images):
+                if p_idx in self._frame_metadata:
+                    # Enhance this image with its metadata
+                    temp_ome = ome.OME(images=[image])
+                    enhanced = _enhance_ome_with_frame_metadata(
+                        temp_ome, self._frame_metadata[p_idx], position_offset=p_idx
+                    )
+                    # Update the image in place
+                    self._cached_metadata.images[p_idx] = enhanced.images[0]
+                    # Collect annotations
+                    if enhanced.structured_annotations:
+                        all_annotations.extend(enhanced.structured_annotations)
+
+            # Set all collected annotations
+            if all_annotations:
+                self._cached_metadata.structured_annotations = all_annotations  # ty: ignore
+
+            # Write full OME to each file
+            for _p_idx, writer in sorted(self._position_writers.items()):
+                try:
+                    xml = self._cached_metadata.to_xml()
+                    tifffile.tiffcomment(writer.file_path, comment=xml.encode("utf-8"))
+                except Exception as e:  # pragma: no cover
+                    warnings.warn(
+                        f"Failed to update OME metadata in {writer.file_path}: {e}",
+                        stacklevel=2,
+                    )
+        else:
+            # Single position: enhance with position 0's metadata
+            if 0 in self._frame_metadata:
+                self._cached_metadata = _enhance_ome_with_frame_metadata(
+                    self._cached_metadata, self._frame_metadata[0], position_offset=0
+                )
+
+                # Write enhanced metadata
+                try:
+                    xml = ome.OME(
+                        images=[self._cached_metadata.images[0]],
+                        structured_annotations=self._cached_metadata.structured_annotations,
+                    ).to_xml()
+                    writer = self._position_writers[0]
+                    tifffile.tiffcomment(writer.file_path, comment=xml.encode("utf-8"))
+                except Exception as e:  # pragma: no cover
+                    warnings.warn(
+                        f"Failed to update OME metadata: {e}",
+                        stacklevel=2,
+                    )
+
     def _update_unbounded_metadata(self) -> None:
         """Update OME metadata after writing unbounded dimensions.
 
@@ -345,6 +422,32 @@ class TiffBackend(ArrayBackend):
                 for p_idx, writer in sorted(self._position_managers.items())
             ]
         )
+
+        # # Enhance with frame metadata (Planes and StructuredAnnotations)
+        # if self._frame_metadata:
+        #     if len(self._position_writers) > 1:
+        #         # Multi-position: enhance each separately
+        #         all_annotations = []
+        #         for p_idx, image in enumerate(self._cached_metadata.images):
+        #             if p_idx in self._frame_metadata:
+        #                 temp_ome = ome.OME(images=[image])
+        #                 enhanced = _enhance_ome_with_frame_metadata(
+        #                     temp_ome, self._frame_metadata[p_idx], position_offset=p_idx
+        #                 )
+        #                 self._cached_metadata.images[p_idx] = enhanced.images[0]
+        #                 if enhanced.structured_annotations:
+        #                     all_annotations.extend(enhanced.structured_annotations)
+        #         if all_annotations:
+        #             self._cached_metadata.structured_annotations = all_annotations
+        #     else:
+        #         # Single position
+        #         if 0 in self._frame_metadata:
+        #             self._cached_metadata = _enhance_ome_with_frame_metadata(
+        #                 self._cached_metadata,
+        #                 self._frame_metadata[0],
+        #                 position_offset=0,
+        #             )
+
         xml_bytes = complete_ome.to_xml().encode("utf-8")
         for writer in self._position_managers.values():
             # since _update_unbounded_metadata is only called during finalize(),
@@ -484,6 +587,209 @@ class WriterThread(threading.Thread):
 _thread_counter = count()
 
 # ------------------------
+
+# helpers for frame metadata
+
+
+def _calculate_plane_indices(
+    frame_idx: int, size_c: int, size_z: int, size_t: int, dim_order: str
+) -> tuple[int, int, int]:
+    """Calculate (C, Z, T) indices for a frame based on dimension order.
+
+    Parameters
+    ----------
+    frame_idx : int
+        Frame index in acquisition order
+    size_c, size_z, size_t : int
+        Size of each dimension
+    dim_order : str
+        OME dimension order string (e.g., "XYZCT")
+
+    Returns
+    -------
+    tuple[int, int, int]
+        (the_c, the_z, the_t) indices for this frame
+    """
+    # Extract order of non-spatial dims (C, Z, T only)
+    non_spatial = "".join(d for d in dim_order if d in "CZT")
+
+    # Calculate indices based on dimension order
+    # OME-XML is fastest-varying on the RIGHT (opposite of numpy)
+    indices = {"C": 0, "Z": 0, "T": 0}
+    sizes = {"C": size_c, "Z": size_z, "T": size_t}
+
+    remaining = frame_idx
+    for dim in reversed(non_spatial):  # Right-most varies fastest
+        indices[dim] = remaining % sizes[dim]
+        remaining //= sizes[dim]
+
+    return indices["C"], indices["Z"], indices["T"]
+
+
+def _create_plane_with_metadata(
+    the_c: int,
+    the_z: int,
+    the_t: int,
+    frame_idx: int,
+    frame_metadata: dict[str, Any],
+) -> ome.Plane:
+    """Create a Plane object with recognized metadata keys mapped to attributes.
+
+    Parameters
+    ----------
+    the_c : int
+        Channel index for this plane
+    the_z : int
+        Z index for this plane
+    the_t : int
+        Time index for this plane
+    frame_idx : int
+        Frame index in acquisition order (for annotation reference)
+    frame_metadata : dict
+        Frame metadata dict with recognized and custom keys
+
+    Returns
+    -------
+    ome.Plane
+        Plane object with recognized keys mapped to attributes
+    """
+    plane_kwargs: dict[str, Any] = {
+        "the_c": the_c,
+        "the_z": the_z,
+        "the_t": the_t,
+    }
+
+    # Map recognized keys to Plane attributes
+    if "delta_t" in frame_metadata:
+        plane_kwargs["delta_t"] = float(frame_metadata["delta_t"])
+        plane_kwargs["delta_t_unit"] = ome.UnitsTime.SECOND
+
+    if "exposure_time" in frame_metadata:
+        plane_kwargs["exposure_time"] = float(frame_metadata["exposure_time"])
+        plane_kwargs["exposure_time_unit"] = ome.UnitsTime.SECOND
+
+    if "position_x" in frame_metadata:
+        plane_kwargs["position_x"] = float(frame_metadata["position_x"])
+        plane_kwargs["position_x_unit"] = ome.UnitsLength.MICROMETER
+
+    if "position_y" in frame_metadata:
+        plane_kwargs["position_y"] = float(frame_metadata["position_y"])
+        plane_kwargs["position_y_unit"] = ome.UnitsLength.MICROMETER
+
+    if "position_z" in frame_metadata:
+        plane_kwargs["position_z"] = float(frame_metadata["position_z"])
+        plane_kwargs["position_z_unit"] = ome.UnitsLength.MICROMETER
+
+    return ome.Plane(**plane_kwargs)
+
+
+def _create_map_annotation_for_frame(
+    frame_idx: int, frame_metadata: dict[str, Any], position_offset: int = 0
+) -> ome.MapAnnotation:
+    """Create a MapAnnotation containing all frame metadata.
+
+    Parameters
+    ----------
+    frame_idx : int
+        Frame index in acquisition order within this position
+    frame_metadata : dict
+        Complete frame metadata dict
+    position_offset : int
+        Position index offset for creating unique annotation IDs
+
+    Returns
+    -------
+    ome.MapAnnotation
+        MapAnnotation with all metadata as key-value pairs
+    """
+    # Convert all values to strings for MapAnnotation
+    # TODO: if there are actually nested structures (lists/dicts),
+    # we need to do better here. For now, just JSON-dump non-strings.
+    map_pairs = [
+        ome.Map.M(k=str(k), value=v if isinstance(v, str) else json.dumps(v))
+        for k, v in frame_metadata.items()
+    ]
+
+    # Use position offset in ID to ensure uniqueness across positions
+    return ome.MapAnnotation(
+        id=f"Annotation:Pos{position_offset}:Frame:{frame_idx}",
+        namespace="ome-writers.frame_metadata",
+        value=ome.Map(ms=map_pairs),
+    )
+
+
+def _enhance_ome_with_frame_metadata(
+    ome_obj: ome.OME,
+    frame_metadata: list[dict[str, Any]],
+    position_offset: int = 0,
+) -> ome.OME:
+    """Enhance OME metadata with Plane objects and StructuredAnnotations.
+
+    Parameters
+    ----------
+    ome_obj : ome.OME
+        Base OME metadata object to enhance (typically contains single image)
+    frame_metadata : list[dict]
+        List of frame metadata dicts in acquisition order for this position
+    position_offset : int
+        Position index for creating unique annotation IDs
+
+    Returns
+    -------
+    ome.OME
+        Enhanced OME object with Planes and StructuredAnnotations
+    """
+    if not frame_metadata or not ome_obj.images:
+        return ome_obj
+
+    # Create a deep copy to avoid modifying the original
+    ome_obj = ome_obj.model_copy(deep=True)
+
+    # Create MapAnnotations for all frames with metadata
+    map_annotations = [
+        _create_map_annotation_for_frame(idx, meta, position_offset)
+        for idx, meta in enumerate(frame_metadata)
+    ]
+
+    # For each image, add Plane objects to its Pixels
+    for image in ome_obj.images:
+        if not image.pixels:
+            continue
+
+        pixels = image.pixels
+        size_c = pixels.size_c or 1
+        size_z = pixels.size_z or 1
+        size_t = pixels.size_t or 1
+        dim_order = pixels.dimension_order.value
+
+        # Create Plane objects for frames with metadata
+        planes = []
+        for frame_idx, meta in enumerate(frame_metadata):
+            the_c, the_z, the_t = _calculate_plane_indices(
+                frame_idx, size_c, size_z, size_t, dim_order
+            )
+
+            plane = _create_plane_with_metadata(the_c, the_z, the_t, frame_idx, meta)
+
+            # Link to MapAnnotation with position-specific ID
+            annot_id = f"Annotation:Pos{position_offset}:Frame:{frame_idx}"
+            plane.annotation_refs.append(ome.AnnotationRef(id=annot_id))
+
+            planes.append(plane)
+
+        # Add planes to pixels
+        pixels.planes = planes
+
+    # Add StructuredAnnotations to OME root
+    if isinstance(ome_obj.structured_annotations, list):
+        ome_obj.structured_annotations.extend(map_annotations)
+    else:
+        ome_obj.structured_annotations = [map_annotations]  # ty: ignore
+
+    return ome_obj
+
+
+# helpers for position-specific OME metadata updates
 
 
 def _create_ome_image(

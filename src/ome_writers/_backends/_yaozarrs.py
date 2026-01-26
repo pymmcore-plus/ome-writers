@@ -11,6 +11,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
 
+from ome_writers import __version__
 from ome_writers._backends._backend import ArrayBackend
 from ome_writers._backends._chunk_buffer import ChunkBuffer
 
@@ -64,6 +65,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         self._finalized = False
         self._root: Path | None = None
         self._chunk_buffers: list[ChunkBuffer] | None = None
+        self._frame_metadata: dict[int, list[dict[str, Any]]] = {}
 
     @abstractmethod
     def _get_yaozarrs_writer(
@@ -226,6 +228,8 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         position_index: int,
         index: tuple[int, ...],
         frame: np.ndarray,
+        *,
+        frame_metadata: dict[str, Any] | None = None,
     ) -> None:
         """Write frame to specified location with auto-resize for unlimited dims."""
         if self._finalized:  # pragma: no cover
@@ -250,6 +254,19 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
             )
         else:
             self._write(array, index, frame)
+
+        self._store_frame_metadata(position_index, index, frame_metadata)
+
+    def _store_frame_metadata(
+        self,
+        position_index: int,
+        index: tuple[int, ...],
+        frame_metadata: dict[str, Any] | None,
+    ) -> None:
+        # Accumulate frame metadata with storage index
+        if frame_metadata is not None:
+            position_meta = self._frame_metadata.setdefault(position_index, [])
+            position_meta.append({**frame_metadata, "storage_index": index})
 
     def _write_with_buffering(
         self,
@@ -358,6 +375,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
             self._finalize_chunk_buffers()
             for mirror in self._meta_mirrors.values():
                 mirror.flush()
+            self._flush_frame_metadata()
             self._arrays.clear()
             self._image_group_paths.clear()
             self._finalized = True
@@ -379,6 +397,48 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
                     for storage_start, chunk_data in buffer.flush_all_partial():
                         self._write_chunk(array, storage_start, chunk_data)
         self._chunk_buffers = None
+
+    def _flush_frame_metadata(self) -> None:
+        """Write frame metadata to group-level zarr.json.
+
+        Writes position-specific metadata nested under attributes.ome_writers
+        with version information to each position's group-level zarr.json
+        (next to the "ome" key).
+        """
+        if not self._frame_metadata or self._root is None:
+            return
+
+        # Write position-specific metadata to each position's group zarr.json
+        for pos_idx, image_group_path in enumerate(self._image_group_paths):
+            # Skip positions with no metadata
+            if not (pos_meta := self._frame_metadata.get(pos_idx)):
+                continue
+
+            if not (zarr_json := self._root / image_group_path / "zarr.json").exists():
+                warnings.warn(  # pragma: no cover
+                    f"zarr.json not found at {zarr_json}. Cannot write frame_metadata.",
+                    stacklevel=2,
+                )
+                continue
+
+            try:
+                # Read existing zarr.json
+                data = json.loads(zarr_json.read_text())
+
+                # Add frame_metadata nested under ome_writers with version
+                attrs = data.setdefault("attributes", {})
+                attrs["ome_writers"] = {
+                    "version": __version__,
+                    "frame_metadata": pos_meta,
+                }
+
+                # Write back to zarr.json
+                zarr_json.write_text(json.dumps(data))
+            except Exception as e:  # pragma: no cover
+                warnings.warn(
+                    f"Failed to write frame_metadata to {zarr_json}: {e}",
+                    stacklevel=2,
+                )
 
     def _resize(self, array: _AT, new_shape: Sequence[int]) -> None:
         """Resize array to new shape."""
