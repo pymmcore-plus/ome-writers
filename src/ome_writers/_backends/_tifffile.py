@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from itertools import count
 from pathlib import Path
 from queue import Queue
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
@@ -37,19 +37,45 @@ except ImportError as e:
 
 
 @dataclass
-class _PositionWriter:
-    """Per-position writer state for TIFF backend."""
+class PositionManager:
+    """Per-position writer/metadata state for TIFF backend."""
 
     file_path: str
     file_uuid: str | None
     thread: WriterThread | None
-    queue: Queue[np.ndarray | None] | None
+    queue: Queue[np.ndarray | None]
+    metadata: ome.OME  # Cached metadata mirroring what's in the file
     name: str | None = None
 
-    def cleanup(self) -> None:
-        """Clean up thread and queue references while keeping file info."""
-        self.thread = None
-        self.queue = None
+    def __post_init__(self) -> None:
+        self._lock = threading.Lock()
+        self._metadata_dirty: bool = False
+
+    def update_metadata(self, metadata: ome.OME, flush: bool = False) -> None:
+        """Update cached metadata and mark as dirty.  Optionally flush to file."""
+        with self._lock:
+            self.metadata = metadata
+            self._metadata_dirty = True
+        # careful... our lock is not re-entrant, so avoid deadlock
+        if flush:
+            self.flush_metadata()
+
+    def flush_metadata(self) -> None:
+        """Flush current metadata to the TIFF file."""
+        with self._lock:
+            if not self._metadata_dirty:
+                return
+
+            try:
+                tifffile.tiffcomment(
+                    self.file_path,
+                    comment=self.metadata.to_xml().encode("utf-8"),
+                )
+            except Exception as e:  # pragma: no cover
+                warnings.warn(
+                    f"Failed to update OME metadata in {self.file_path}: {e}",
+                    stacklevel=2,
+                )
 
 
 class TiffBackend(ArrayBackend):
@@ -62,10 +88,9 @@ class TiffBackend(ArrayBackend):
 
     def __init__(self) -> None:
         self._finalized = False
-        self._position_writers: dict[int, _PositionWriter] = {}
+        self._position_managers: dict[int, PositionManager] = {}
         self._storage_dims: tuple[Dimension, ...] | None = None
         self._dtype: str = ""
-        self._cached_metadata: dict[int, ome.OME] = {}
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         """Check if settings are compatible with TIFF backend."""
@@ -126,38 +151,26 @@ class TiffBackend(ArrayBackend):
         fnames = self._prepare_files(root, len(positions), settings.overwrite)
 
         # Generate UUIDs and OME metadata for all positions
-        all_images, num_pos = [], len(positions)
-        file_uuids: dict[int, str | None] = {}
-        for p_idx, fname in enumerate(fnames):
-            file_uuids[p_idx] = file_uuid = str(uuid.uuid4()) if num_pos > 1 else None
-            all_images.append(
-                _create_ome_image(
-                    dims=storage_dims,
-                    dtype=self._dtype,
-                    filename=Path(fname).name,
-                    image_index=p_idx,
-                    file_uuid=file_uuid,
-                    position_name=positions[p_idx].name if num_pos > 1 else None,
-                )
+        num_pos = len(positions)
+        uuids = [str(uuid.uuid4()) for _ in range(num_pos)] if num_pos > 1 else [None]
+        all_images = [
+            _create_ome_image(
+                dims=storage_dims,
+                dtype=self._dtype,
+                filename=Path(fname).name,
+                image_index=p_idx,
+                file_uuid=uuids[p_idx],
+                position_name=positions[p_idx].name if num_pos > 1 else None,
             )
+            for p_idx, fname in enumerate(fnames)
+        ]
 
         # Build complete OME metadata
         complete_ome = ome.OME(images=all_images)
 
-        # Cache metadata per-position to mirror what's in each file
-        self._cached_metadata = {}
-        for p_idx in range(num_pos):
-            if num_pos > 1:
-                # Multi-position: each file gets complete OME with all images
-                self._cached_metadata[p_idx] = complete_ome.model_copy(deep=True)
-            else:
-                # Single position: file gets just its image
-                self._cached_metadata[p_idx] = ome.OME(images=[all_images[p_idx]])
-
         # Create writer thread for each position
         for p_idx, fname in enumerate(fnames):
-            # Use cached metadata that mirrors what's in this file
-            ome_xml = self._cached_metadata[p_idx].to_xml()
+            position_metadata = complete_ome.model_copy(deep=True)
 
             q = Queue[np.ndarray | None]()
             thread = WriterThread(
@@ -165,19 +178,19 @@ class TiffBackend(ArrayBackend):
                 shape=shape,
                 dtype=self._dtype,
                 image_queue=q,
-                ome_xml=ome_xml,
+                ome_xml=position_metadata.to_xml(),
                 has_unbounded=has_unbounded,
                 compression=compression,
             )
-            thread.start()
-
-            self._position_writers[p_idx] = _PositionWriter(
+            self._position_managers[p_idx] = PositionManager(
                 file_path=fname,
-                file_uuid=file_uuids[p_idx],
+                file_uuid=uuids[p_idx],
                 thread=thread,
                 queue=q,
+                metadata=position_metadata,
                 name=positions[p_idx].name if num_pos > 1 else None,
             )
+            thread.start()
 
     def write(
         self,
@@ -191,32 +204,26 @@ class TiffBackend(ArrayBackend):
         """
         if self._finalized:  # pragma: no cover
             raise RuntimeError("Cannot write after finalize().")
-        if not self._position_writers:  # pragma: no cover
+        if not self._position_managers:  # pragma: no cover
             raise RuntimeError("Backend not prepared. Call prepare() first.")
 
-        writer = self._position_writers[position_index]
-        cast("Queue[np.ndarray | None]", writer.queue).put(frame)
+        self._position_managers[position_index].queue.put(frame)
 
     def finalize(self) -> None:
         """Flush and close all TIFF writers."""
         if not self._finalized:
             # Signal threads to stop
-            for writer in self._position_writers.values():
-                if writer.queue:
-                    writer.queue.put(None)
+            for writer in self._position_managers.values():
+                writer.queue.put(None)
 
             # Wait for threads to finish
-            for writer in self._position_writers.values():
+            for writer in self._position_managers.values():
                 if writer.thread:
                     writer.thread.join(timeout=5)
 
             # Update OME metadata if unbounded dimensions were written
             if self._storage_dims and any(d.count is None for d in self._storage_dims):
                 self._update_unbounded_metadata()
-
-            # Clean thread and queue refs, but keep file info for update_metadata()
-            for writer in self._position_writers.values():
-                writer.cleanup()
 
             self._finalized = True
 
@@ -240,11 +247,11 @@ class TiffBackend(ArrayBackend):
             Mapping of position indices to OME metadata objects, or empty dict if
             prepare() has not been called yet.
         """
-        if not self._cached_metadata:  # pragma: no cover
+        if not self._position_managers:  # pragma: no cover
             return {}
         return {
-            p_idx: meta.model_copy(deep=True)
-            for p_idx, meta in self._cached_metadata.items()
+            p_idx: writer.metadata.model_copy(deep=True)
+            for p_idx, writer in self._position_managers.items()
         }
 
     def update_metadata(self, metadata: dict[int, ome.OME]) -> None:
@@ -284,21 +291,19 @@ class TiffBackend(ArrayBackend):
                 f"got {type(metadata)}"
             )
 
-        for position_idx, meta in metadata.items():
+        for pos_idx, meta in metadata.items():
             if not isinstance(meta, ome.OME):
                 raise TypeError(
-                    f"Expected ome_types.model.OME for position {position_idx}, "
+                    f"Expected ome_types.model.OME for position {pos_idx}, "
                     f"got {type(meta)}"
                 )
-            if position_idx not in self._position_writers:
-                raise KeyError(f"Unknown position index: {position_idx}")
 
-            self._update_position_metadata(position_idx, meta)
-
-        # Update cache to reflect what's now on disk
-        self._cached_metadata = {
-            p_idx: meta.model_copy(deep=True) for p_idx, meta in metadata.items()
-        }
+            try:
+                # not calling deep copy here, since this is currently only ever called
+                # after finalize().  i.e. we're done.
+                self._position_managers[pos_idx].update_metadata(meta, flush=True)
+            except KeyError as e:
+                raise KeyError(f"Unknown position index: {pos_idx}") from e
 
     # -------------------
 
@@ -308,44 +313,27 @@ class TiffBackend(ArrayBackend):
         For unbounded dimensions, we write frames without knowing the final count.
         After writing completes, update the OME-XML with the actual frame counts.
         """
-        if not self._storage_dims:  # pragma: no cover
-            return
-
-        # Get actual frame count from first position's thread
+        # Get actual frames_written from first position's thread
         # (all positions should have written the same number of frames)
-        if 0 not in self._position_writers:  # pragma: no cover
-            return
+        if (
+            not self._storage_dims
+            or not (writer := self._position_managers.get(0))
+            or not writer.thread
+            or not (frames_written := writer.thread.frames_written)
+        ):
+            return  # no frames written
 
-        writer = self._position_writers[0]
-        total_frames_written = cast("WriterThread", writer.thread).frames_written
-        if total_frames_written == 0:  # pragma: no cover
-            return
-
-        # Calculate the count for the unbounded dimension
-        # total_frames = product of all dimension counts (excluding spatial dims Y,X)
-        # For unbounded dim: unbounded_count = total_frames / product(other_dims)
-        # Product of all known (non-None) dimension counts except Y,X
-        known_product = math.prod(
-            d.count for d in self._storage_dims[:-2] if d.count is not None
-        )
-
-        # Calculate unbounded dimension count
-        unbounded_count = (
-            total_frames_written // known_product
-            if known_product > 0
-            else total_frames_written
-        )
-
-        # Create corrected dimensions with actual counts
+        # Infer unbounded dimension count from total frames written
+        known_product = math.prod(d.count or 1 for d in self._storage_dims[:-2])
+        unbounded_count = frames_written // known_product
         corrected_dims = tuple(
             d.model_copy(update={"count": unbounded_count}) if d.count is None else d
             for d in self._storage_dims
         )
 
-        # Regenerate OME metadata for each position
-        all_images = []
-        for p_idx, writer in sorted(self._position_writers.items()):
-            all_images.append(
+        # Build complete OME with corrected dimensions
+        complete_ome = ome.OME(
+            images=[
                 _create_ome_image(
                     dims=corrected_dims,
                     dtype=self._dtype,
@@ -354,60 +342,21 @@ class TiffBackend(ArrayBackend):
                     file_uuid=writer.file_uuid,
                     position_name=writer.name,
                 )
-            )
-
-        # Build complete OME with corrected dimensions
-        complete_ome = ome.OME(images=all_images)
-        num_pos = len(self._position_writers)
-
-        # Update cached metadata per-position to mirror what's in each file
-        self._cached_metadata = {}
-        for p_idx in range(num_pos):
-            if num_pos > 1:
-                # Multi-position: each file gets complete OME with all images
-                self._cached_metadata[p_idx] = complete_ome.model_copy(deep=True)
-            else:
-                # Single position: file gets just its image
-                self._cached_metadata[p_idx] = ome.OME(images=[all_images[p_idx]])
-
-        # Write metadata to each file
-        for p_idx, writer in sorted(self._position_writers.items()):
-            try:
-                xml = self._cached_metadata[p_idx].to_xml()
-                # must pre-encode to UTF-8 bytes and pass in bytes, not string
-                tifffile.tiffcomment(writer.file_path, comment=xml.encode("utf-8"))
-            except Exception as e:  # pragma: no cover
-                warnings.warn(
-                    f"Failed to update OME metadata in {writer.file_path}: {e}",
-                    stacklevel=2,
-                )
-
-    def _update_position_metadata(self, position_idx: int, metadata: ome.OME) -> None:
-        """Update OME metadata for a specific position's TIFF file."""
-        file_path = self._position_writers[position_idx].file_path
-
-        if not Path(file_path).exists():  # pragma: no cover
-            warnings.warn(
-                f"TIFF file for position {position_idx} does not exist at "
-                f"{file_path}. Not writing metadata.",
-                stacklevel=3,
-            )
-            return
-
-        try:
-            # must pre-encode to UTF-8 bytes and pass tifffile bytes, not string
-            ome_xml_bytes = metadata.to_xml().encode("utf-8")
-        except Exception as e:  # pragma: no cover
-            raise RuntimeError(
-                f"Failed to serialize OME metadata for position {position_idx}: {e}"
-            ) from e
-
-        try:
-            tifffile.tiffcomment(file_path, comment=ome_xml_bytes)
-        except Exception as e:  # pragma: no cover
-            raise RuntimeError(
-                f"Failed to update OME metadata in {file_path}: {e}"
-            ) from e
+                for p_idx, writer in sorted(self._position_managers.items())
+            ]
+        )
+        xml_bytes = complete_ome.to_xml().encode("utf-8")
+        for writer in self._position_managers.values():
+            # since _update_unbounded_metadata is only called during finalize(),
+            # we don't bother updating position_manager.metadata here
+            with writer._lock:
+                try:
+                    tifffile.tiffcomment(writer.file_path, comment=xml_bytes)
+                except Exception as e:  # pragma: no cover
+                    warnings.warn(
+                        f"Failed to update OME metadata in {writer.file_path}: {e}",
+                        stacklevel=2,
+                    )
 
     def _prepare_files(
         self, path: Path, num_positions: int, overwrite: bool
