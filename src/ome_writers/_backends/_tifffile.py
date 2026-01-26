@@ -331,46 +331,17 @@ class TiffBackend(ArrayBackend):
         if not self._position_managers or not self._frame_metadata:  # pragma: no cover
             return
 
-        # For multi-position, enhance each position's image in a complete OME
-        # For single position, enhance the single image
-        if len(self._position_managers) > 1:
-            # Multi-position: start with a complete OME from any position manager
-            # (they all have the same complete structure)
-            base_ome = next(iter(self._position_managers.values())).metadata.model_copy(
-                deep=True
-            )
+        # Get base OME (all position managers have the same complete structure)
+        base_ome = next(iter(self._position_managers.values())).metadata.model_copy(
+            deep=True
+        )
 
-            # Enhance each image that has frame metadata
-            all_annotations = []
-            for p_idx in sorted(self._position_managers.keys()):
-                if p_idx in self._frame_metadata:
-                    # Create temp OME with just this image
-                    temp_ome = ome.OME(images=[base_ome.images[p_idx]])
-                    # Enhance it
-                    enhanced = _enhance_ome_with_frame_metadata(
-                        temp_ome, self._frame_metadata[p_idx], position_offset=p_idx
-                    )
-                    # Replace the image
-                    base_ome.images[p_idx] = enhanced.images[0]
-                    # Collect annotations
-                    if enhanced.structured_annotations:
-                        all_annotations.extend(enhanced.structured_annotations)
+        # Enhance the complete OME with frame metadata from all positions
+        _enhance_ome_with_all_frame_metadata(base_ome, self._frame_metadata)
 
-            # Set all annotations
-            if all_annotations:
-                base_ome.structured_annotations = all_annotations  # type: ignore
-
-            # Update each position manager with the complete enhanced OME
-            for manager in self._position_managers.values():
-                manager.update_metadata(base_ome.model_copy(deep=True), flush=True)
-        else:
-            # Single position: enhance the single image
-            if 0 in self._frame_metadata:
-                base_ome = self._position_managers[0].metadata.model_copy(deep=True)
-                enhanced = _enhance_ome_with_frame_metadata(
-                    base_ome, self._frame_metadata[0], position_offset=0
-                )
-                self._position_managers[0].update_metadata(enhanced, flush=True)
+        # Update all position managers with the same complete enhanced OME
+        for manager in self._position_managers.values():
+            manager.update_metadata(base_ome.model_copy(deep=True), flush=True)
 
     def _update_unbounded_metadata(self) -> None:
         """Update OME metadata after writing unbounded dimensions.
@@ -413,30 +384,9 @@ class TiffBackend(ArrayBackend):
 
         # Enhance with frame metadata (Planes and StructuredAnnotations)
         if self._frame_metadata:
-            if len(self._position_managers) > 1:
-                # Multi-position: enhance each image separately
-                all_annotations = []
-                for p_idx in sorted(self._position_managers.keys()):
-                    if p_idx in self._frame_metadata:
-                        temp_ome = ome.OME(images=[complete_ome.images[p_idx]])
-                        enhanced = _enhance_ome_with_frame_metadata(
-                            temp_ome, self._frame_metadata[p_idx], position_offset=p_idx
-                        )
-                        complete_ome.images[p_idx] = enhanced.images[0]
-                        if enhanced.structured_annotations:
-                            all_annotations.extend(enhanced.structured_annotations)
-                if all_annotations:
-                    complete_ome.structured_annotations = all_annotations  # type: ignore
-            else:
-                # Single position
-                if 0 in self._frame_metadata:
-                    complete_ome = _enhance_ome_with_frame_metadata(
-                        complete_ome,
-                        self._frame_metadata[0],
-                        position_offset=0,
-                    )
+            _enhance_ome_with_all_frame_metadata(complete_ome, self._frame_metadata)
 
-        # Update each position manager with the enhanced complete OME and flush to disk
+        # Update all position managers with complete enhanced OME and flush
         for manager in self._position_managers.values():
             manager.update_metadata(complete_ome.model_copy(deep=True), flush=True)
 
@@ -697,75 +647,67 @@ def _create_map_annotation_for_frame(
     )
 
 
-def _enhance_ome_with_frame_metadata(
+def _enhance_ome_with_all_frame_metadata(
     ome_obj: ome.OME,
-    frame_metadata: list[dict[str, Any]],
-    position_offset: int = 0,
-) -> ome.OME:
-    """Enhance OME metadata with Plane objects and StructuredAnnotations.
+    frame_metadata_by_position: dict[int, list[dict[str, Any]]],
+) -> None:
+    """Enhance OME metadata with frame metadata for all positions in-place.
 
     Parameters
     ----------
     ome_obj : ome.OME
-        Base OME metadata object to enhance (typically contains single image)
-    frame_metadata : list[dict]
-        List of frame metadata dicts in acquisition order for this position
-    position_offset : int
-        Position index for creating unique annotation IDs
-
-    Returns
-    -------
-    ome.OME
-        Enhanced OME object with Planes and StructuredAnnotations
+        Complete OME metadata object with all images (modified in-place)
+    frame_metadata_by_position : dict[int, list[dict]]
+        Mapping of position indices to their frame metadata lists
     """
-    if not frame_metadata or not ome_obj.images:
-        return ome_obj
+    if not frame_metadata_by_position or not ome_obj.images:
+        return
 
-    # Create a deep copy to avoid modifying the original
-    ome_obj = ome_obj.model_copy(deep=True)
+    all_annotations = []
+    for p_idx in sorted(frame_metadata_by_position.keys()):
+        frame_metadata = frame_metadata_by_position[p_idx]
+        if not frame_metadata or p_idx >= len(ome_obj.images):
+            continue
 
-    # Create MapAnnotations for all frames with metadata
-    map_annotations = [
-        _create_map_annotation_for_frame(idx, meta, position_offset)
-        for idx, meta in enumerate(frame_metadata)
-    ]
-
-    # For each image, add Plane objects to its Pixels
-    for image in ome_obj.images:
+        image = ome_obj.images[p_idx]
         if not image.pixels:
             continue
 
+        # Create MapAnnotations for this position's frames
+        map_annotations = [
+            _create_map_annotation_for_frame(idx, meta, position_offset=p_idx)
+            for idx, meta in enumerate(frame_metadata)
+        ]
+        all_annotations.extend(map_annotations)
+
+        # Create Plane objects for this position's frames
         pixels = image.pixels
         size_c = pixels.size_c or 1
         size_z = pixels.size_z or 1
         size_t = pixels.size_t or 1
         dim_order = pixels.dimension_order.value
 
-        # Create Plane objects for frames with metadata
         planes = []
         for frame_idx, meta in enumerate(frame_metadata):
             the_c, the_z, the_t = _calculate_plane_indices(
                 frame_idx, size_c, size_z, size_t, dim_order
             )
-
             plane = _create_plane_with_metadata(the_c, the_z, the_t, frame_idx, meta)
 
             # Link to MapAnnotation with position-specific ID
-            annot_id = f"Annotation:Pos{position_offset}:Frame:{frame_idx}"
+            annot_id = f"Annotation:Pos{p_idx}:Frame:{frame_idx}"
             plane.annotation_refs.append(ome.AnnotationRef(id=annot_id))
-
             planes.append(plane)
 
-        # Add planes to pixels
+        # Add planes to this image's pixels
         pixels.planes = planes
 
-    # Add StructuredAnnotations to OME root
-    if isinstance(ome_obj.structured_annotations, list):
-        ome_obj.structured_annotations.extend(map_annotations)
-    else:
-        ome_obj.structured_annotations = map_annotations  # type: ignore
-
-    return ome_obj
+    # Add all annotations to OME root
+    if all_annotations:
+        if isinstance(ome_obj.structured_annotations, list):
+            ome_obj.structured_annotations.extend(all_annotations)
+        else:
+            ome_obj.structured_annotations = all_annotations  # type: ignore
 
 
 # helpers for position-specific OME metadata updates
