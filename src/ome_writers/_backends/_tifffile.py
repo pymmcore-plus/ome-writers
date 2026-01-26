@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 import threading
 import uuid
 import warnings
@@ -16,7 +17,7 @@ from typing import TYPE_CHECKING, Literal
 import numpy as np
 
 from ome_writers._backends._backend import ArrayBackend
-from ome_writers._schema import StandardAxis
+from ome_writers._schema import Plate, Position, StandardAxis
 from ome_writers._units import ngff_to_ome_unit
 
 if TYPE_CHECKING:
@@ -153,20 +154,30 @@ class TiffBackend(ArrayBackend):
         # Generate UUIDs and OME metadata for all positions
         num_pos = len(positions)
         uuids = [str(uuid.uuid4()) for _ in range(num_pos)] if num_pos > 1 else [None]
-        all_images = [
-            _create_ome_image(
-                dims=storage_dims,
-                dtype=self._dtype,
-                filename=Path(fname).name,
-                image_index=p_idx,
-                file_uuid=uuids[p_idx],
-                position_name=positions[p_idx].name if num_pos > 1 else None,
+        position_names: dict[int, str | None] = {}
+        all_images = []
+        for p_idx, fname in enumerate(fnames):
+            position_names[p_idx] = _build_position_name(positions[p_idx], num_pos)
+            all_images.append(
+                _create_ome_image(
+                    dims=storage_dims,
+                    dtype=self._dtype,
+                    filename=Path(fname).name,
+                    image_index=p_idx,
+                    file_uuid=uuids[p_idx],
+                    position_name=position_names[p_idx],
+                )
             )
-            for p_idx, fname in enumerate(fnames)
-        ]
+
+        # Build plate metadata if plate is defined
+        plates = (
+            [_build_ome_plate(settings.plate, positions)]
+            if settings.plate is not None
+            else []
+        )
 
         # Build complete OME metadata
-        complete_ome = ome.OME(images=all_images)
+        complete_ome = ome.OME(images=all_images, plates=plates)
 
         # Create writer thread for each position
         for p_idx, fname in enumerate(fnames):
@@ -188,7 +199,7 @@ class TiffBackend(ArrayBackend):
                 thread=thread,
                 queue=q,
                 metadata=position_metadata,
-                name=positions[p_idx].name if num_pos > 1 else None,
+                name=position_names[p_idx],
             )
             thread.start()
 
@@ -561,4 +572,90 @@ def _create_ome_image(
         acquisition_date=datetime.now(timezone.utc),
         pixels=pixels,
         name=name,
+    )
+
+
+def _build_position_name(pos: Position, num_positions: int) -> str | None:
+    """Build position name, including well info for plate mode.
+
+    Parameters
+    ----------
+    pos : Position
+        The position object.
+    num_positions : int
+        Total number of positions in the acquisition.
+
+    Returns
+    -------
+    str | None
+        If plate mode "{row}{col}_{name}" or `pos.name` if well ID (e.g. A1) already
+        present. Otherwise, `None` for single position, `pos.name` for multi-position.
+    """
+    if pos.plate_row is not None and pos.plate_column is not None:
+        # Check if well identifier is already present in the name
+        # Pattern matches plate_row followed by optional zeros, then plate_column
+        # e.g., for row="A", col="1": matches "A1", "A01", "A001", etc.
+        pattern = f"{re.escape(pos.plate_row)}0*{re.escape(pos.plate_column)}"
+        if re.search(pattern, pos.name):
+            return pos.name
+        return f"{pos.plate_row}{pos.plate_column}_{pos.name}"
+    # For single position without plate info, return None to use filename
+    if num_positions == 1:
+        return None
+    return pos.name
+
+
+def _build_ome_plate(plate: Plate, positions: tuple[Position, ...]) -> ome.Plate:
+    """Build ome-types Plate metadata from ome-writers Plate schema.
+
+    Creates a complete Plate with Wells and WellSamples, where each position
+    becomes a WellSample referencing its corresponding Image ID.
+
+    Parameters
+    ----------
+    plate : Plate
+        The ome-writers Plate schema with row_names, column_names, and name.
+    positions : tuple[Position, ...]
+        Positions in acquisition order. Each position must have plate_row
+        and plate_column defined.
+
+    Returns
+    -------
+    ome.Plate
+        OME-types Plate object with wells and well samples.
+    """
+    # Group positions by (row, column) to build wells
+    well_positions: dict[tuple[str, str], list[tuple[int, Position]]] = {}
+    for idx, pos in enumerate(positions):
+        if pos.plate_row is None or pos.plate_column is None:
+            continue
+        key = (pos.plate_row, pos.plate_column)
+        well_positions.setdefault(key, []).append((idx, pos))
+
+    # Build wells with well samples
+    wells: list[ome.Well] = []
+    for (row, col), pos_list in well_positions.items():
+        well_samples = [
+            ome.WellSample(
+                id=f"WellSample:{idx}",
+                index=idx,
+                image_ref=ome.ImageRef(id=f"Image:{idx}"),
+            )
+            for idx, _pos in pos_list
+        ]
+        wells.append(
+            ome.Well(
+                id=f"Well:{row}_{col}",
+                row=plate.row_names.index(row),
+                column=plate.column_names.index(col),
+                well_samples=well_samples,
+            )
+        )
+
+    return ome.Plate(
+        id="Plate:0",
+        name=plate.name,
+        rows=len(plate.row_names),
+        columns=len(plate.column_names),
+        wells=wells,
     )
