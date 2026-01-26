@@ -328,61 +328,49 @@ class TiffBackend(ArrayBackend):
 
     def _flush_frame_metadata(self) -> None:
         """Flush accumulated frame metadata into OME-XML in TIFF files."""
-        if not self._cached_metadata or not self._frame_metadata:  # pragma: no cover
+        if not self._position_managers or not self._frame_metadata:  # pragma: no cover
             return
 
-        # For multi-position, enhance each position's metadata separately
-        # For single position, enhance with position 0's metadata
-        if len(self._position_writers) > 1:
-            # Multi-position: collect all annotations from all positions
-            all_annotations: list[ome.StructuredAnnotations] = []
-            for p_idx, image in enumerate(self._cached_metadata.images):
+        # For multi-position, enhance each position's image in a complete OME
+        # For single position, enhance the single image
+        if len(self._position_managers) > 1:
+            # Multi-position: start with a complete OME from any position manager
+            # (they all have the same complete structure)
+            base_ome = next(iter(self._position_managers.values())).metadata.model_copy(
+                deep=True
+            )
+
+            # Enhance each image that has frame metadata
+            all_annotations = []
+            for p_idx in sorted(self._position_managers.keys()):
                 if p_idx in self._frame_metadata:
-                    # Enhance this image with its metadata
-                    temp_ome = ome.OME(images=[image])
+                    # Create temp OME with just this image
+                    temp_ome = ome.OME(images=[base_ome.images[p_idx]])
+                    # Enhance it
                     enhanced = _enhance_ome_with_frame_metadata(
                         temp_ome, self._frame_metadata[p_idx], position_offset=p_idx
                     )
-                    # Update the image in place
-                    self._cached_metadata.images[p_idx] = enhanced.images[0]
+                    # Replace the image
+                    base_ome.images[p_idx] = enhanced.images[0]
                     # Collect annotations
                     if enhanced.structured_annotations:
                         all_annotations.extend(enhanced.structured_annotations)
 
-            # Set all collected annotations
+            # Set all annotations
             if all_annotations:
-                self._cached_metadata.structured_annotations = all_annotations  # ty: ignore
+                base_ome.structured_annotations = all_annotations  # type: ignore
 
-            # Write full OME to each file
-            for _p_idx, writer in sorted(self._position_writers.items()):
-                try:
-                    xml = self._cached_metadata.to_xml()
-                    tifffile.tiffcomment(writer.file_path, comment=xml.encode("utf-8"))
-                except Exception as e:  # pragma: no cover
-                    warnings.warn(
-                        f"Failed to update OME metadata in {writer.file_path}: {e}",
-                        stacklevel=2,
-                    )
+            # Update each position manager with the complete enhanced OME
+            for manager in self._position_managers.values():
+                manager.update_metadata(base_ome.model_copy(deep=True), flush=True)
         else:
-            # Single position: enhance with position 0's metadata
+            # Single position: enhance the single image
             if 0 in self._frame_metadata:
-                self._cached_metadata = _enhance_ome_with_frame_metadata(
-                    self._cached_metadata, self._frame_metadata[0], position_offset=0
+                base_ome = self._position_managers[0].metadata.model_copy(deep=True)
+                enhanced = _enhance_ome_with_frame_metadata(
+                    base_ome, self._frame_metadata[0], position_offset=0
                 )
-
-                # Write enhanced metadata
-                try:
-                    xml = ome.OME(
-                        images=[self._cached_metadata.images[0]],
-                        structured_annotations=self._cached_metadata.structured_annotations,
-                    ).to_xml()
-                    writer = self._position_writers[0]
-                    tifffile.tiffcomment(writer.file_path, comment=xml.encode("utf-8"))
-                except Exception as e:  # pragma: no cover
-                    warnings.warn(
-                        f"Failed to update OME metadata: {e}",
-                        stacklevel=2,
-                    )
+                self._position_managers[0].update_metadata(enhanced, flush=True)
 
     def _update_unbounded_metadata(self) -> None:
         """Update OME metadata after writing unbounded dimensions.
@@ -423,43 +411,34 @@ class TiffBackend(ArrayBackend):
             ]
         )
 
-        # # Enhance with frame metadata (Planes and StructuredAnnotations)
-        # if self._frame_metadata:
-        #     if len(self._position_writers) > 1:
-        #         # Multi-position: enhance each separately
-        #         all_annotations = []
-        #         for p_idx, image in enumerate(self._cached_metadata.images):
-        #             if p_idx in self._frame_metadata:
-        #                 temp_ome = ome.OME(images=[image])
-        #                 enhanced = _enhance_ome_with_frame_metadata(
-        #                     temp_ome, self._frame_metadata[p_idx], position_offset=p_idx
-        #                 )
-        #                 self._cached_metadata.images[p_idx] = enhanced.images[0]
-        #                 if enhanced.structured_annotations:
-        #                     all_annotations.extend(enhanced.structured_annotations)
-        #         if all_annotations:
-        #             self._cached_metadata.structured_annotations = all_annotations
-        #     else:
-        #         # Single position
-        #         if 0 in self._frame_metadata:
-        #             self._cached_metadata = _enhance_ome_with_frame_metadata(
-        #                 self._cached_metadata,
-        #                 self._frame_metadata[0],
-        #                 position_offset=0,
-        #             )
-
-        xml_bytes = complete_ome.to_xml().encode("utf-8")
-        for writer in self._position_managers.values():
-            # since _update_unbounded_metadata is only called during finalize(),
-            # we don't bother updating position_manager.metadata here
-            with writer._lock:
-                try:
-                    tifffile.tiffcomment(writer.file_path, comment=xml_bytes)
-                except Exception as e:  # pragma: no cover
-                    warnings.warn(
-                        f"Failed to update OME metadata in {writer.file_path}: {e}",
-                        stacklevel=2,
+        # Enhance with frame metadata (Planes and StructuredAnnotations)
+        if self._frame_metadata:
+            if len(self._position_managers) > 1:
+                # Multi-position: enhance each image separately
+                all_annotations = []
+                for p_idx in sorted(self._position_managers.keys()):
+                    if p_idx in self._frame_metadata:
+                        temp_ome = ome.OME(images=[complete_ome.images[p_idx]])
+                        enhanced = _enhance_ome_with_frame_metadata(
+                            temp_ome, self._frame_metadata[p_idx], position_offset=p_idx
+                        )
+                        complete_ome.images[p_idx] = enhanced.images[0]
+                        if enhanced.structured_annotations:
+                            all_annotations.extend(enhanced.structured_annotations)
+                if all_annotations:
+                    complete_ome.structured_annotations = all_annotations  # type: ignore
+            else:
+                # Single position
+                if 0 in self._frame_metadata:
+                    complete_ome = _enhance_ome_with_frame_metadata(
+                        complete_ome,
+                        self._frame_metadata[0],
+                        position_offset=0,
                     )
+
+        # Update each position manager with the enhanced complete OME and flush to disk
+        for manager in self._position_managers.values():
+            manager.update_metadata(complete_ome.model_copy(deep=True), flush=True)
 
     def _prepare_files(
         self, path: Path, num_positions: int, overwrite: bool
@@ -784,7 +763,7 @@ def _enhance_ome_with_frame_metadata(
     if isinstance(ome_obj.structured_annotations, list):
         ome_obj.structured_annotations.extend(map_annotations)
     else:
-        ome_obj.structured_annotations = [map_annotations]  # ty: ignore
+        ome_obj.structured_annotations = map_annotations  # type: ignore
 
     return ome_obj
 
