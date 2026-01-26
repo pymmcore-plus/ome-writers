@@ -536,7 +536,7 @@ class JsonDocumentMirror(MutableMapping[str, Any]):
     def flush(self, indent: int | None = None) -> None:
         """Write data to disk if dirty."""
         with self._lock:
-            if not self._dirty:
+            if self._dirty:
                 # NOTE:
                 # we could consider attempting to serialize certain sub-sections here
                 # (e.g., "ome_writers.frame_metadata", which contains user-data)
