@@ -66,7 +66,6 @@ if settings.format == "zarr":
 
 if settings.format == "tiff":
     from ome_types import from_tiff
-    from rich import print
 
     npos = len(settings.positions)
     files = [f"{settings.root_path[:-9]}_p{pos:03d}{suffix}" for pos in range(npos)]
