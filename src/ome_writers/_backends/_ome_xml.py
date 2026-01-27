@@ -377,12 +377,26 @@ def _build_plate(plate: Plate, positions: tuple[Position, ...]) -> list[ome.Plat
             )
         )
 
+    row_conv = _infer_naming_convention(plate.row_names)
+    col_conv = _infer_naming_convention(plate.column_names)
+
     return [
         ome.Plate(
             id="Plate:0",
             name=plate.name,
             rows=len(plate.row_names),
             columns=len(plate.column_names),
+            row_naming_convention=row_conv,
+            column_naming_convention=col_conv,
             wells=wells,
         )
     ]
+
+
+def _infer_naming_convention(names: list[str]) -> ome.NamingConvention | None:
+    """Infer naming convention from a list of names."""
+    if all(n.isalpha() for n in names):
+        return ome.NamingConvention.LETTER
+    if all(n.isdigit() for n in names):
+        return ome.NamingConvention.NUMBER
+    return None

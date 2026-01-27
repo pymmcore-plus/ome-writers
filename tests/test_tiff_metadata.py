@@ -175,6 +175,9 @@ def test_update_metadata_with_plates(tmp_path: Path, tiff_backend: str) -> None:
     assert plate.rows == 1
     assert plate.columns == 2
     assert len(plate.wells) == 2
+    # Verify naming conventions are inferred correctly
+    assert plate.row_naming_convention.value == "letter"
+    assert plate.column_naming_convention.value == "number"
 
     # Verify wells and well samples link to images
     well_sample_refs = {}
