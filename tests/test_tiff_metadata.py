@@ -260,3 +260,27 @@ def test_tiff_multiposition_detailed_metadata(
                 assert td.uuid is not None
                 assert td.uuid.value.startswith("urn:uuid:")
                 assert f"multipos_p{img_idx:03}.ome.tiff" in (td.uuid.file_name or "")
+
+
+def test_prepare_meta(tmp_path: Path) -> None:
+    """Test _prepare_meta function for TIFF backend."""
+    from ome_writers._backends._ome_xml import MetadataMode, prepare_metadata
+
+    settings = AcquisitionSettings(
+        root_path=tmp_path / "test.ome.tiff",
+        dimensions=[
+            PositionDimension(positions=["Pos0", "Pos1"]),
+            Dimension(name="t", count=2, type="time"),
+            Dimension(name="c", count=1, type="channel"),
+            Dimension(name="y", count=32, type="space"),
+            Dimension(name="x", count=32, type="space"),
+        ],
+        dtype="uint16",
+        backend="tifffile",
+    )
+    for mode in MetadataMode:
+        meta = prepare_metadata(settings, mode)
+        assert isinstance(meta, dict)
+        assert all(str(tmp_path) in key for key in meta.keys())
+        companion = mode == MetadataMode.MULTI_MASTER_COMPANION
+        assert sum(key.endswith("companion.ome") for key in meta) == companion

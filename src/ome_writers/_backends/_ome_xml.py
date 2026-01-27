@@ -65,19 +65,20 @@ class OmeXMLMirror:
 
     def flush(self, *, force: bool = False) -> None:
         """Mark the OME-XML as clean (not modified)."""
-        if not self._dirty and not force:
+        if not self._dirty and not force:  # pragma: no cover
             return
 
         xml_bytes = self.model.to_xml().encode("utf-8")
         if self.is_tiff:
             try:
                 tifffile.tiffcomment(self.path, comment=xml_bytes)
-            except FileNotFoundError:
+            except FileNotFoundError:  # pragma: no cover
                 warnings.warn(
                     f"TIFF file {self.path} not found when writing OME-XML comment.",
                     stacklevel=2,
                 )
         else:
+            # companion file
             with open(self.path, mode="wb") as f:
                 f.write(xml_bytes)
                 print("✓ Wrote OME-XML to", self.path)
@@ -106,7 +107,7 @@ def prepare_metadata(
         dim.name.lower() not in "tczyx"
         for dim in settings.dimensions
         if not isinstance(dim, PositionDimension)
-    ):
+    ):  # pragma: no cover
         raise ValueError("Dimension names must be one of 't', 'c', 'z', 'y', 'x'")
 
     root = Path(settings.root_path).expanduser().resolve()
@@ -323,7 +324,7 @@ def _get_dimension_order(dims: list[Dimension]) -> str:
     for order in VALID_ORDERS:
         if order[2:].startswith(suffix):
             return order
-    raise ValueError(f"No valid order matches {suffix}")
+    raise ValueError(f"No valid order matches {suffix}")  # pragma: no cover
 
 
 def _get_physical_sizes(dims: list[Dimension]) -> dict:

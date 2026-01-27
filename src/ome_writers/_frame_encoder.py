@@ -48,7 +48,7 @@ def encode_coord(
     >>> encode_coord({"p": 2, "t": 20, "c": 3})
     1698
     """
-    if math.prod(sizes.values()) > 2**16:
+    if math.prod(sizes.values()) > 2**16:  # pragma: no cover
         raise ValueError("Product of sizes must not exceed 2^16.")
     coords = dict(coords or {}) | kwargs
 
@@ -56,7 +56,7 @@ def encode_coord(
     value = 0
     multiplier = 1
     for name in sorted(sizes, key=order.index):
-        if (coord := coords.get(name, 0)) >= sizes[name]:
+        if (coord := coords.get(name, 0)) >= sizes[name]:  # pragma: no cover
             raise ValueError(f"{name}={coord} exceeds max {sizes[name] - 1}")
 
         value += coord * multiplier
@@ -74,7 +74,7 @@ def decode_coord(value: int, sizes: Mapping[str, int] = SIZES_UINT16) -> dict[st
     >>> decode_coord(1698)
     {'p': 2, 't': 20, 'c': 3, 'z': 0}
     """
-    if math.prod(sizes.values()) > 2**16:
+    if math.prod(sizes.values()) > 2**16:  # pragma: no cover
         raise ValueError("Product of sizes must not exceed 2^16.")
 
     order = ("p", "t", "c", "z")

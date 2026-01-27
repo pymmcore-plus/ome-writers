@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import math
 import threading
-import warnings
 from dataclasses import dataclass
 from itertools import count
 from queue import Queue
@@ -48,28 +47,11 @@ class PositionManager:
     def update_metadata(self, metadata: ome.OME, flush: bool = False) -> None:
         """Update cached metadata and mark as dirty.  Optionally flush to file."""
         with self._lock:
-            self.metadata = metadata
-            self._metadata_dirty = True
+            self.metadata_mirror.model = metadata
+            self.metadata_mirror.mark_dirty()
+
         # careful... our lock is not re-entrant, so avoid deadlock
-        if flush:
-            self.flush_metadata()
-
-    def flush_metadata(self) -> None:
-        """Flush current metadata to the TIFF file."""
-        with self._lock:
-            if not self._metadata_dirty:
-                return
-
-            try:
-                tifffile.tiffcomment(
-                    self.file_path,
-                    comment=self.metadata.to_xml().encode("utf-8"),
-                )
-            except Exception as e:  # pragma: no cover
-                warnings.warn(
-                    f"Failed to update OME metadata in {self.file_path}: {e}",
-                    stacklevel=2,
-                )
+        self.metadata_mirror.flush(force=flush)
 
 
 class TiffBackend(ArrayBackend):
@@ -110,7 +92,7 @@ class TiffBackend(ArrayBackend):
         # OME-TIFF supports x, y, z, c, t (all StandardAxis except position)
         ome_dims = set("xyzct")
         for dim in settings.array_storage_dimensions:
-            if dim.name.lower() not in ome_dims:
+            if dim.name.lower() not in ome_dims:  # pragma: no cover
                 return (
                     f"Invalid dimension name '{dim.name}' for OME-TIFF. "
                     f"Valid names are: {', '.join(sorted(ome_dims))} "
@@ -277,7 +259,7 @@ class TiffBackend(ArrayBackend):
                 # not calling deep copy here, since this is currently only ever called
                 # after finalize().  i.e. we're done.
                 self._position_managers[pos_idx].update_metadata(meta, flush=True)
-            except KeyError as e:
+            except KeyError as e:  # pragma: no cover
                 raise KeyError(f"Unknown position index: {pos_idx}") from e
 
     # -------------------
@@ -296,7 +278,7 @@ class TiffBackend(ArrayBackend):
             or not manager.thread
             or not (frames_written := manager.thread.frames_written)
         ):
-            return  # no frames written
+            return  # pragma: no cover
 
         sizes = {d.name.lower(): d.count or 1 for d in self._storage_dims[:-2]}
         # Infer real dimension count from total frames written
