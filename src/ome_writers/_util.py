@@ -99,42 +99,37 @@ def dims_from_useq(
         An optional mapping of dimension labels to their units.
     pixel_size_um : float | None, optional
         The size of a pixel in micrometers. If provided, it will be used to set the
-        scale for the spatial dimensions.
+        scale for the spatial dimensions..
     """
     try:
         from useq import Axis, MDASequence
     except ImportError:
-        # if we can't import MDASequence, then seq must not be a MDASequence
         raise ValueError("seq must be a useq.MDASequence") from None
     else:
         if not isinstance(seq, MDASequence):  # pragma: no cover
             raise ValueError("seq must be a useq.MDASequence")
 
-    if any(pos.sequence for pos in seq.stage_positions):
-        raise NotImplementedError(
-            "Sequences with position sub-sequences are not supported."
-        )
-
     units = units or {}
-    has_grid = seq.grid_plan is not None
-    has_positions = bool(seq.stage_positions)
-    if has_grid and has_positions:
-        raise NotImplementedError(
-            "Sequences with both grid plans and stage positions are not yet supported."
-        )
+    has_position_subsequences = any(pos.sequence for pos in seq.stage_positions)
 
-    # NOTE: v1 useq schema has a terminal bug:
-    # certain MDASequences (e.g. time plans with interval=0) will trigger
-    # a ZeroDivisionError on `seq.sizes`.  but they are broken upstream until v2.
-    # with v2, we have better ways to look for unbounded dimensions.
+    if has_position_subsequences:
+        _validate_position_subsequences(seq)
+
+    combined_positions = _build_combined_positions(seq, has_position_subsequences)
+    position_insert_index: int | None = None
+
     dims: list[Dimension] = []
     for ax_name, size in seq.sizes.items():
         if not size:  # pragma: no cover
             continue
 
-        # convert useq Axis to StandardAxis
-        # (they all have the same name except for GRID) ... which we convert to 'p',
-        # having asserted above that we don't have both grid and stage positions.
+        if combined_positions is not None:
+            if ax_name == Axis.POSITION:
+                position_insert_index = len(dims)
+                continue
+            if ax_name == Axis.GRID:
+                continue
+
         _ax = "p" if ax_name == Axis.GRID else ax_name
         try:
             std_axis = StandardAxis(_ax)
@@ -143,16 +138,72 @@ def dims_from_useq(
 
         dim = std_axis.to_dimension(count=size, scale=1)
 
-        # if units are explicitly provided, set them on the dimension
-        if isinstance(dim, Dimension):
-            if _unit := units.get(ax_name):
-                dim.scale = _unit[0]
-                dim.unit = _unit[1]
+        if isinstance(dim, Dimension) and (_unit := units.get(ax_name)):
+            dim.scale = _unit[0]
+            dim.unit = _unit[1]
 
         dims.append(dim)
+
+    if combined_positions is not None:
+        insert_idx = position_insert_index if position_insert_index is not None else 0
+        dims.insert(
+            insert_idx, StandardAxis.POSITION.to_dimension(positions=combined_positions)
+        )
 
     return [
         *dims,
         StandardAxis.Y.to_dimension(count=image_height, scale=pixel_size_um),
         StandardAxis.X.to_dimension(count=image_width, scale=pixel_size_um),
     ]
+
+
+def _validate_position_subsequences(seq: useq.MDASequence) -> None:
+    """Validate that position subsequences only contain grid_plan."""
+    for pos in seq.stage_positions:
+        if not pos.sequence:
+            continue
+        if not pos.sequence.grid_plan:
+            raise NotImplementedError(
+                "Position subsequences without grid_plan are not yet supported."
+            )
+        # Check that subsequence only contains grid_plan
+        has_other = (
+            pos.sequence.time_plan is not None
+            or pos.sequence.z_plan is not None
+            or pos.sequence.channels
+            or pos.sequence.stage_positions
+        )
+        if has_other:
+            raise NotImplementedError(
+                "Position subsequences with plans other than grid_plan "
+                "(e.g., time_plan, z_plan, channels) are not yet supported."
+            )
+
+
+def _build_combined_positions(
+    seq: useq.MDASequence, has_position_subsequences: bool
+) -> list[str] | None:
+    """Build combined position names for grid+positions cases."""
+    from useq import Axis
+
+    if has_position_subsequences:
+        combined = []
+        for p_idx, pos in enumerate(seq.stage_positions):
+            pos_name = pos.name or f"p{p_idx:03d}"
+            if pos.sequence and pos.sequence.grid_plan:
+                n_grid = pos.sequence.grid_plan.num_positions()
+                combined.extend(f"{pos_name}_g{g_idx:03d}" for g_idx in range(n_grid))
+            else:
+                combined.append(pos_name)
+        return combined
+
+    if seq.grid_plan and seq.stage_positions:
+        n_positions = seq.sizes.get(Axis.POSITION, 1)
+        n_grid = seq.sizes.get(Axis.GRID) or seq.grid_plan.num_positions()
+        return [
+            f"p{p_idx:03d}g{g_idx:03d}"
+            for p_idx in range(n_positions)
+            for g_idx in range(n_grid)
+        ]
+
+    return None
