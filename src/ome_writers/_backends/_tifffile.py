@@ -2,31 +2,25 @@
 
 from __future__ import annotations
 
-import json
 import math
 import threading
-import uuid
-import warnings
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from itertools import count
-from pathlib import Path
 from queue import Queue
 from typing import TYPE_CHECKING, Literal
 
-import numpy as np
-
 from ome_writers._backends._backend import ArrayBackend
-from ome_writers._schema import StandardAxis
-from ome_writers._units import ngff_to_ome_unit
+from ome_writers._backends._ome_xml import prepare_metadata
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from typing import Any
 
+    import numpy as np
+
+    from ome_writers._backends._ome_xml import OmeXMLMirror
     from ome_writers._router import FrameRouter
     from ome_writers._schema import AcquisitionSettings, Dimension
-
 
 try:
     import ome_types.model as ome
@@ -37,17 +31,23 @@ except ImportError as e:
         "`pip install ome-writers[tifffile]`."
     ) from e
 
+PLANE_KEYS = {
+    "delta_t",
+    "exposure_time",
+    "position_x",
+    "position_y",
+    "position_z",
+}
+
 
 @dataclass
 class PositionManager:
     """Per-position writer/metadata state for TIFF backend."""
 
     file_path: str
-    file_uuid: str | None
     thread: WriterThread | None
     queue: Queue[np.ndarray | None]
-    metadata: ome.OME  # Cached metadata mirroring what's in the file
-    name: str | None = None
+    metadata_mirror: OmeXMLMirror
 
     def __post_init__(self) -> None:
         self._lock = threading.Lock()
@@ -56,28 +56,11 @@ class PositionManager:
     def update_metadata(self, metadata: ome.OME, flush: bool = False) -> None:
         """Update cached metadata and mark as dirty.  Optionally flush to file."""
         with self._lock:
-            self.metadata = metadata
-            self._metadata_dirty = True
+            self.metadata_mirror.model = metadata
+            self.metadata_mirror.mark_dirty()
+
         # careful... our lock is not re-entrant, so avoid deadlock
-        if flush:
-            self.flush_metadata()
-
-    def flush_metadata(self) -> None:
-        """Flush current metadata to the TIFF file."""
-        with self._lock:
-            if not self._metadata_dirty:
-                return
-
-            try:
-                tifffile.tiffcomment(
-                    self.file_path,
-                    comment=self.metadata.to_xml().encode("utf-8"),
-                )
-            except Exception as e:  # pragma: no cover
-                warnings.warn(
-                    f"Failed to update OME metadata in {self.file_path}: {e}",
-                    stacklevel=2,
-                )
+        self.metadata_mirror.flush(force=flush)
 
 
 class TiffBackend(ArrayBackend):
@@ -117,14 +100,12 @@ class TiffBackend(ArrayBackend):
 
         # Validate storage dimension names for OME-TIFF compatibility
         # OME-TIFF supports x, y, z, c, t (all StandardAxis except position)
-        valid_dims = {
-            axis.value for axis in StandardAxis if axis != StandardAxis.POSITION
-        }
+        ome_dims = set("xyzct")
         for dim in settings.array_storage_dimensions:
-            if dim.name.lower() not in valid_dims:
+            if dim.name.lower() not in ome_dims:  # pragma: no cover
                 return (
                     f"Invalid dimension name '{dim.name}' for OME-TIFF. "
-                    f"Valid names are: {', '.join(sorted(valid_dims))} "
+                    f"Valid names are: {', '.join(sorted(ome_dims))} "
                     f"(case-insensitive)."
                 )
 
@@ -134,14 +115,13 @@ class TiffBackend(ArrayBackend):
         """Initialize OME-TIFF files and writer threads."""
         self._finalized = False
         self._storage_dims = storage_dims = settings.array_storage_dimensions
+        # Extract index keys, excluding Y and X, example: ['t', 'c', 'z']
+        self._index_keys = [d.name for d in storage_dims[:-2]]
         self._dtype = settings.dtype
-        positions = settings.positions
-        root = Path(settings.root_path).expanduser().resolve()
 
         # Extract and validate compression
-        if settings.compression in (None, "none"):
-            compression = None
-        else:
+        compression = None
+        if settings.compression not in (None, "none"):
             compression = getattr(tifffile.COMPRESSION, settings.compression.upper())
 
         # Compute shape from storage dimensions
@@ -150,50 +130,31 @@ class TiffBackend(ArrayBackend):
         # Check if any dimension is unbounded
         has_unbounded = any(d.count is None for d in storage_dims)
 
-        # Prepare file paths
-        fnames = self._prepare_files(root, len(positions), settings.overwrite)
-
-        # Generate UUIDs and OME metadata for all positions
-        num_pos = len(positions)
-        uuids = [str(uuid.uuid4()) for _ in range(num_pos)] if num_pos > 1 else [None]
-        all_images = [
-            _create_ome_image(
-                dims=storage_dims,
-                dtype=self._dtype,
-                filename=Path(fname).name,
-                image_index=p_idx,
-                file_uuid=uuids[p_idx],
-                position_name=positions[p_idx].name if num_pos > 1 else None,
-            )
-            for p_idx, fname in enumerate(fnames)
-        ]
-
-        # Build complete OME metadata
-        complete_ome = ome.OME(images=all_images)
+        # Prepare OME-XML metadata mirrors
+        # mapping of filepath -> OmeXMLMirror
+        metas = prepare_metadata(settings)
 
         # Create writer thread for each position
-        for p_idx, fname in enumerate(fnames):
-            position_metadata = complete_ome.model_copy(deep=True)
-
-            q = Queue[np.ndarray | None]()
-            thread = WriterThread(
-                path=fname,
-                shape=shape,
-                dtype=self._dtype,
-                image_queue=q,
-                ome_xml=position_metadata.to_xml(),
-                has_unbounded=has_unbounded,
-                compression=compression,
-            )
-            self._position_managers[p_idx] = PositionManager(
+        for fname, meta_mirror in metas.items():
+            thread = q = None
+            if meta_mirror.is_tiff:
+                q = Queue()
+                thread = WriterThread(
+                    path=fname,
+                    shape=shape,
+                    dtype=self._dtype,
+                    image_queue=q,
+                    ome_xml=meta_mirror.model.to_xml(),
+                    has_unbounded=has_unbounded,
+                    compression=compression,
+                )
+                thread.start()
+            self._position_managers[meta_mirror.pos_idx] = PositionManager(
                 file_path=fname,
-                file_uuid=uuids[p_idx],
                 thread=thread,
                 queue=q,
-                metadata=position_metadata,
-                name=positions[p_idx].name if num_pos > 1 else None,
+                metadata_mirror=meta_mirror,
             )
-            thread.start()
 
     def write(
         self,
@@ -212,53 +173,91 @@ class TiffBackend(ArrayBackend):
         if not self._position_managers:  # pragma: no cover
             raise RuntimeError("Backend not prepared. Call prepare() first.")
 
-        self._position_managers[position_index].queue.put(frame)
+        manager = self._position_managers[position_index]
+        manager.queue.put(frame)
 
         # Accumulate frame metadata with storage index
         if frame_metadata is not None:
-            if position_index not in self._frame_metadata:
-                self._frame_metadata[position_index] = []
-            meta_with_idx = frame_metadata.copy()
-            meta_with_idx["storage_index"] = index
-            self._frame_metadata[position_index].append(meta_with_idx)
+            self._append_frame_metadata(position_index, index, frame_metadata)
+
+    def _append_frame_metadata(
+        self,
+        position_index: int,
+        index: tuple[int, ...],
+        frame_metadata: dict[str, Any],
+    ) -> None:
+        if position_index not in self._frame_metadata:
+            self._frame_metadata[position_index] = []
+        # self._frame_metadata[position_index].append(meta_with_idx)
+
+        mirror = self._position_managers[position_index].metadata_mirror
+        model = mirror.model
+        map_annotations = model.structured_annotations.map_annotations  # type: ignore
+        if images := model.images:
+            # {"the_z": 0, "the_c": 1, ...}
+            plane_kwargs = {
+                f"the_{k}": v for k, v in zip(self._index_keys, index, strict=False)
+            }
+            plane_kwargs.update(
+                {f"the_{k}": 0 for k in "tcz" if k not in self._index_keys}
+            )
+
+            extra_kwargs = {}
+            for key, value in frame_metadata.items():
+                if key in PLANE_KEYS:
+                    plane_kwargs[key] = value
+                else:
+                    extra_kwargs[key] = value
+
+            # meta_with_idx = {**frame_metadata, "storage_index": index}
+            annotation = ome.MapAnnotation(value=ome.Map.model_validate(extra_kwargs))
+            map_annotations.append(annotation)
+            planes = images[position_index].pixels.planes
+            planes.append(
+                ome.Plane(
+                    **plane_kwargs,
+                    annotation_refs=[ome.AnnotationRef(id=annotation.id)],
+                )
+            )
+            mirror.mark_dirty()
 
     def finalize(self) -> None:
         """Flush and close all TIFF writers."""
         if not self._finalized:
             # Signal threads to stop
-            for writer in self._position_managers.values():
-                writer.queue.put(None)
+            for manager in self._position_managers.values():
+                manager.queue.put(None)
 
             # Wait for threads to finish
-            for writer in self._position_managers.values():
-                if writer.thread:
-                    writer.thread.join(timeout=5)
+            for manager in self._position_managers.values():
+                if manager.thread:
+                    manager.thread.join(timeout=5)
 
             # Update OME metadata if unbounded dimensions were written
-            has_unbounded = self._storage_dims and any(
-                d.count is None for d in self._storage_dims
-            )
-            if has_unbounded:
+            if self._storage_dims and any(d.count is None for d in self._storage_dims):
                 self._update_unbounded_metadata()
-            elif self._frame_metadata:
-                # For bounded dimensions with frame metadata, update metadata
-                self._flush_frame_metadata()
+
+            for manager in self._position_managers.values():
+                manager.metadata_mirror.flush(force=True)
 
             self._finalized = True
 
     def get_metadata(self) -> dict[int, ome.OME]:
         """Get the base OME metadata generated from acquisition settings.
 
-        Returns a mapping of position indices to OME metadata objects that were
-        auto-generated during prepare(). Each entry mirrors exactly what was written
-        to the corresponding TIFF file.
+        Returns a mapping of position indices to `ome_types.OME` objects.  The `OME`
+        objects represent the metadata as it would appear in the TIFF or companion
+        file for that position.
 
-        For multi-position acquisitions, each position's OME contains the complete
-        metadata with all images (as per OME-TIFF companion file spec).
-        For single-position acquisitions, the single entry contains just that image.
+        !!! note
+            The special "position index" of -1, if present, represents metadata
+            in the companion.ome file, if applicable.
 
-        Users can modify these objects to add meaningful names, timestamps, etc.,
-        and pass the modified dict to update_metadata().
+        Users can modify these objects as needed and pass a mapping of position indices
+        to `ome_types.OME` objects back to `update_metadata()`.
+
+        See the `ome-types` documentation for details on modifying OME metadata:
+        <https://ome-types.readthedocs.io/en/latest/API/ome_types/>
 
         Returns
         -------
@@ -268,16 +267,18 @@ class TiffBackend(ArrayBackend):
         """
         if not self._position_managers:  # pragma: no cover
             return {}
+
         return {
-            p_idx: writer.metadata.model_copy(deep=True)
-            for p_idx, writer in self._position_managers.items()
+            p_idx: manager.metadata_mirror.model.model_copy(deep=True)
+            for p_idx, manager in self._position_managers.items()
         }
 
     def update_metadata(self, metadata: dict[int, ome.OME]) -> None:
         """Update the OME metadata in the TIFF files.
 
         The metadata argument MUST be a dict mapping position indices to
-        ome_types.OME instances.
+        `ome_types.OME` instances, with the special index -1 representing the
+        companion.ome file, if applicable.
 
         This method must be called AFTER exiting the stream context (after
         finalize() completes), as TIFF files must be closed before metadata
@@ -321,27 +322,10 @@ class TiffBackend(ArrayBackend):
                 # not calling deep copy here, since this is currently only ever called
                 # after finalize().  i.e. we're done.
                 self._position_managers[pos_idx].update_metadata(meta, flush=True)
-            except KeyError as e:
+            except KeyError as e:  # pragma: no cover
                 raise KeyError(f"Unknown position index: {pos_idx}") from e
 
     # -------------------
-
-    def _flush_frame_metadata(self) -> None:
-        """Flush accumulated frame metadata into OME-XML in TIFF files."""
-        if not self._position_managers or not self._frame_metadata:  # pragma: no cover
-            return
-
-        # Get base OME (all position managers have the same complete structure)
-        base_ome = next(iter(self._position_managers.values())).metadata.model_copy(
-            deep=True
-        )
-
-        # Enhance the complete OME with frame metadata from all positions
-        _enhance_ome_with_all_frame_metadata(base_ome, self._frame_metadata)
-
-        # Update all position managers with the same complete enhanced OME
-        for manager in self._position_managers.values():
-            manager.update_metadata(base_ome.model_copy(deep=True), flush=True)
 
     def _update_unbounded_metadata(self) -> None:
         """Update OME metadata after writing unbounded dimensions.
@@ -353,84 +337,27 @@ class TiffBackend(ArrayBackend):
         # (all positions should have written the same number of frames)
         if (
             not self._storage_dims
-            or not (writer := self._position_managers.get(0))
-            or not writer.thread
-            or not (frames_written := writer.thread.frames_written)
+            or not (manager := self._position_managers.get(0))
+            or not manager.thread
+            or not (frames_written := manager.thread.frames_written)
         ):
-            return  # no frames written
+            return  # pragma: no cover
 
-        # Infer unbounded dimension count from total frames written
-        known_product = math.prod(d.count or 1 for d in self._storage_dims[:-2])
-        unbounded_count = frames_written // known_product
-        corrected_dims = tuple(
-            d.model_copy(update={"count": unbounded_count}) if d.count is None else d
-            for d in self._storage_dims
-        )
+        sizes = {d.name.lower(): d.count or 1 for d in self._storage_dims[:-2]}
+        # Infer real dimension count from total frames written
+        actual_count = frames_written // math.prod(sizes.values())
+        unbounded_dim_name = next(d.name for d in self._storage_dims if d.count is None)
 
-        # Build complete OME with corrected dimensions
-        complete_ome = ome.OME(
-            images=[
-                _create_ome_image(
-                    dims=corrected_dims,
-                    dtype=self._dtype,
-                    filename=Path(writer.file_path).name,
-                    image_index=p_idx,
-                    file_uuid=writer.file_uuid,
-                    position_name=writer.name,
-                )
-                for p_idx, writer in sorted(self._position_managers.items())
-            ]
-        )
-
-        # Enhance with frame metadata (Planes and StructuredAnnotations)
-        if self._frame_metadata:
-            _enhance_ome_with_all_frame_metadata(complete_ome, self._frame_metadata)
-
-        # Update all position managers with complete enhanced OME and flush
         for manager in self._position_managers.values():
-            manager.update_metadata(complete_ome.model_copy(deep=True), flush=True)
-
-    def _prepare_files(
-        self, path: Path, num_positions: int, overwrite: bool
-    ) -> list[str]:
-        """Prepare file paths for each position."""
-        path_str = str(path)
-
-        # Strip known extensions
-        ext = path_root = None
-        for possible_ext in [".ome.tiff", ".ome.tif", ".tiff", ".tif"]:
-            if path_str.endswith(possible_ext):
-                ext = possible_ext
-                path_root = path_str[: -len(possible_ext)]
-                break
-
-        if ext is None:
-            # No recognized extension, default to .ome.tiff
-            path_root = path_str
-            ext = ".ome.tiff"
-
-        fnames = []
-        for p_idx in range(num_positions):
-            # Append position index only if multiple positions
-            if num_positions > 1:
-                p_path = Path(f"{path_root}_p{p_idx:03d}{ext}")
-            else:
-                p_path = path
-
-            # Handle overwrite
-            if p_path.exists():
-                if not overwrite:
-                    raise FileExistsError(
-                        f"File {p_path} already exists. "
-                        "Use overwrite=True to overwrite it."
-                    )
-                p_path.unlink()
-
-            # Ensure parent directory exists
-            p_path.parent.mkdir(parents=True, exist_ok=True)
-            fnames.append(str(p_path))
-
-        return fnames
+            mirror = manager.metadata_mirror
+            if images := mirror.model.images:
+                pixels = images[0].pixels
+                # fix size of unbounded dimension
+                setattr(pixels, f"size_{unbounded_dim_name.lower()}", actual_count)
+                # fix plane count in the tiff data
+                if tiff_data_blocks := pixels.tiff_data_blocks:
+                    tiff_data_blocks[0].plane_count = frames_written
+                mirror.flush(force=True)
 
 
 class WriterThread(threading.Thread):
@@ -514,278 +441,3 @@ class WriterThread(threading.Thread):
 
 
 _thread_counter = count()
-
-# ------------------------
-
-# helpers for frame metadata
-
-
-def _calculate_plane_indices(
-    frame_idx: int, size_c: int, size_z: int, size_t: int, dim_order: str
-) -> tuple[int, int, int]:
-    """Calculate (C, Z, T) indices for a frame based on dimension order.
-
-    Parameters
-    ----------
-    frame_idx : int
-        Frame index in acquisition order
-    size_c, size_z, size_t : int
-        Size of each dimension
-    dim_order : str
-        OME dimension order string (e.g., "XYZCT")
-
-    Returns
-    -------
-    tuple[int, int, int]
-        (the_c, the_z, the_t) indices for this frame
-    """
-    # Extract order of non-spatial dims (C, Z, T only)
-    non_spatial = "".join(d for d in dim_order if d in "CZT")
-
-    # Calculate indices based on dimension order
-    # OME-XML is fastest-varying on the RIGHT (opposite of numpy)
-    indices = {"C": 0, "Z": 0, "T": 0}
-    sizes = {"C": size_c, "Z": size_z, "T": size_t}
-
-    remaining = frame_idx
-    for dim in reversed(non_spatial):  # Right-most varies fastest
-        indices[dim] = remaining % sizes[dim]
-        remaining //= sizes[dim]
-
-    return indices["C"], indices["Z"], indices["T"]
-
-
-def _create_plane_with_metadata(
-    the_c: int,
-    the_z: int,
-    the_t: int,
-    frame_idx: int,
-    frame_metadata: dict[str, Any],
-) -> ome.Plane:
-    """Create a Plane object with recognized metadata keys mapped to attributes.
-
-    Parameters
-    ----------
-    the_c : int
-        Channel index for this plane
-    the_z : int
-        Z index for this plane
-    the_t : int
-        Time index for this plane
-    frame_idx : int
-        Frame index in acquisition order (for annotation reference)
-    frame_metadata : dict
-        Frame metadata dict with recognized and custom keys
-
-    Returns
-    -------
-    ome.Plane
-        Plane object with recognized keys mapped to attributes
-    """
-    plane_kwargs: dict[str, Any] = {
-        "the_c": the_c,
-        "the_z": the_z,
-        "the_t": the_t,
-    }
-
-    # Map recognized keys to Plane attributes
-    if "delta_t" in frame_metadata:
-        plane_kwargs["delta_t"] = float(frame_metadata["delta_t"])
-        plane_kwargs["delta_t_unit"] = ome.UnitsTime.SECOND
-
-    if "exposure_time" in frame_metadata:
-        plane_kwargs["exposure_time"] = float(frame_metadata["exposure_time"])
-        plane_kwargs["exposure_time_unit"] = ome.UnitsTime.SECOND
-
-    if "position_x" in frame_metadata:
-        plane_kwargs["position_x"] = float(frame_metadata["position_x"])
-        plane_kwargs["position_x_unit"] = ome.UnitsLength.MICROMETER
-
-    if "position_y" in frame_metadata:
-        plane_kwargs["position_y"] = float(frame_metadata["position_y"])
-        plane_kwargs["position_y_unit"] = ome.UnitsLength.MICROMETER
-
-    if "position_z" in frame_metadata:
-        plane_kwargs["position_z"] = float(frame_metadata["position_z"])
-        plane_kwargs["position_z_unit"] = ome.UnitsLength.MICROMETER
-
-    return ome.Plane(**plane_kwargs)
-
-
-def _create_map_annotation_for_frame(
-    frame_idx: int, frame_metadata: dict[str, Any], position_offset: int = 0
-) -> ome.MapAnnotation:
-    """Create a MapAnnotation containing all frame metadata.
-
-    Parameters
-    ----------
-    frame_idx : int
-        Frame index in acquisition order within this position
-    frame_metadata : dict
-        Complete frame metadata dict
-    position_offset : int
-        Position index offset for creating unique annotation IDs
-
-    Returns
-    -------
-    ome.MapAnnotation
-        MapAnnotation with all metadata as key-value pairs
-    """
-    # Convert all values to strings for MapAnnotation
-    # TODO: if there are actually nested structures (lists/dicts),
-    # we need to do better here. For now, just JSON-dump non-strings.
-    map_pairs = [
-        ome.Map.M(k=str(k), value=v if isinstance(v, str) else json.dumps(v))
-        for k, v in frame_metadata.items()
-    ]
-
-    # Use position offset in ID to ensure uniqueness across positions
-    return ome.MapAnnotation(
-        id=f"Annotation:Pos{position_offset}:Frame:{frame_idx}",
-        namespace="ome-writers.frame_metadata",
-        value=ome.Map(ms=map_pairs),
-    )
-
-
-def _enhance_ome_with_all_frame_metadata(
-    ome_obj: ome.OME,
-    frame_metadata_by_position: dict[int, list[dict[str, Any]]],
-) -> None:
-    """Enhance OME metadata with frame metadata for all positions in-place.
-
-    Parameters
-    ----------
-    ome_obj : ome.OME
-        Complete OME metadata object with all images (modified in-place)
-    frame_metadata_by_position : dict[int, list[dict]]
-        Mapping of position indices to their frame metadata lists
-    """
-    if not frame_metadata_by_position or not ome_obj.images:
-        return
-
-    all_annotations = []
-    for p_idx in sorted(frame_metadata_by_position.keys()):
-        frame_metadata = frame_metadata_by_position[p_idx]
-        if not frame_metadata or p_idx >= len(ome_obj.images):
-            continue
-
-        image = ome_obj.images[p_idx]
-        if not image.pixels:
-            continue
-
-        # Create MapAnnotations for this position's frames
-        map_annotations = [
-            _create_map_annotation_for_frame(idx, meta, position_offset=p_idx)
-            for idx, meta in enumerate(frame_metadata)
-        ]
-        all_annotations.extend(map_annotations)
-
-        # Create Plane objects for this position's frames
-        pixels = image.pixels
-        size_c = pixels.size_c or 1
-        size_z = pixels.size_z or 1
-        size_t = pixels.size_t or 1
-        dim_order = pixels.dimension_order.value
-
-        planes = []
-        for frame_idx, meta in enumerate(frame_metadata):
-            the_c, the_z, the_t = _calculate_plane_indices(
-                frame_idx, size_c, size_z, size_t, dim_order
-            )
-            plane = _create_plane_with_metadata(the_c, the_z, the_t, frame_idx, meta)
-
-            # Link to MapAnnotation with position-specific ID
-            annot_id = f"Annotation:Pos{p_idx}:Frame:{frame_idx}"
-            plane.annotation_refs.append(ome.AnnotationRef(id=annot_id))
-            planes.append(plane)
-
-        # Add planes to this image's pixels
-        pixels.planes = planes
-
-    # Add all annotations to OME root
-    if all_annotations:
-        if isinstance(ome_obj.structured_annotations, list):
-            ome_obj.structured_annotations.extend(all_annotations)
-        else:
-            ome_obj.structured_annotations = all_annotations  # type: ignore
-
-
-# helpers for position-specific OME metadata updates
-
-
-def _create_ome_image(
-    dims: tuple[Dimension, ...],
-    dtype: str,
-    filename: str,
-    image_index: int,
-    file_uuid: str | None = None,
-    position_name: str | None = None,
-) -> ome.Image:
-    """Generate OME Image object for TIFF file."""
-    # Build shape dictionary from dimensions
-    # OME-XML has fasted-varying dimension on the left (rightmost in storage order)
-    shape_dict = {d.name.upper(): d.count or 1 for d in reversed(dims)}
-    size_z = shape_dict.setdefault("Z", 1)
-    size_c = shape_dict.setdefault("C", 1)
-    size_t = shape_dict.setdefault("T", 1)
-    our_order = "".join(x for x in shape_dict if x in "ZCT")  # only Z,C,T
-    for order in ome.Pixels_DimensionOrder:
-        if order.value.endswith(our_order):
-            dim_order = order
-            break
-    else:
-        raise ValueError(
-            f"Cannot determine OME dimension order for storage dimensions: {dims}"
-        ) from None
-
-    # Build TiffData (with UUIDs for multi-position)
-    tiff_data_blocks = ome.TiffData(
-        plane_count=size_t * size_c * size_z,
-        uuid=(
-            ome.TiffData.UUID(value=f"urn:uuid:{file_uuid}", file_name=filename)
-            if file_uuid
-            else None
-        ),
-    )
-
-    pixels = ome.Pixels(
-        id=f"Pixels:{image_index}",
-        dimension_order=dim_order,
-        size_t=size_t,
-        size_c=size_c,
-        size_z=size_z,
-        size_y=shape_dict.get("Y", 1),
-        size_x=shape_dict.get("X", 1),
-        type=dtype,
-        big_endian=False,
-        channels=[
-            ome.Channel(id=f"Channel:{image_index}:{i}", samples_per_pixel=1)
-            for i in range(size_c)
-        ],
-        tiff_data_blocks=[tiff_data_blocks],
-    )
-    # Add physical sizes if available
-    dims_by_name = {d.name.lower(): d for d in dims}
-    for axis in ["x", "y", "z"]:
-        if (dim := dims_by_name.get(axis)) and dim.scale is not None:
-            setattr(pixels, f"physical_size_{axis}", dim.scale)
-            # if dim.type is space, it's guaranteed to be a valid NGFF unit
-            if dim.unit and dim.type == "space":
-                if ome_unit_str := ngff_to_ome_unit(dim.unit):
-                    try:
-                        # ome-types will validate unit assignment
-                        setattr(pixels, f"physical_size_{axis}_unit", ome_unit_str)
-                    except Exception:  # pragma: no cover  (should be unreachable)
-                        warnings.warn(
-                            f"Could not convert unit '{dim.unit}' (→ '{ome_unit_str}') "
-                            f"to ome.UnitsLength. Skipping unit assignment.",
-                            stacklevel=2,
-                        )
-
-    name = position_name if position_name else Path(filename).stem.removesuffix(".ome")
-    return ome.Image(
-        id=f"Image:{image_index}",
-        acquisition_date=datetime.now(timezone.utc),
-        pixels=pixels,
-        name=name,
-    )

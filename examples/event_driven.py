@@ -81,3 +81,10 @@ def some_event_driven_frame_generator() -> Iterator[tuple[np.ndarray, dict]]:
 with create_stream(settings) as stream:
     for frame, meta in some_event_driven_frame_generator():
         stream.append(frame, frame_metadata=meta)
+
+
+if settings.format == "tiff":
+    from ome_types import from_tiff
+
+    ome_obj = from_tiff(settings.root_path)
+    print(ome_obj.to_xml())
