@@ -11,7 +11,7 @@ import ome_types
 import ome_types.model as ome
 import tifffile
 
-from ome_writers._schema import Dimension, Position, PositionDimension
+from ome_writers._schema import Dimension, Plate, Position, PositionDimension
 from ome_writers._units import ngff_to_ome_unit
 
 if TYPE_CHECKING:
@@ -308,7 +308,8 @@ def _build_full_model(
         )
         images.append(image)
 
-    return ome_types.OME(uuid=_make_uuid(), images=images)
+    plates = _build_plate(settings.plate, settings.positions) if settings.plate else []
+    return ome_types.OME(uuid=_make_uuid(), images=images, plates=plates)
 
 
 VALID_ORDERS = [x.value for x in ome.Pixels_DimensionOrder]
@@ -338,3 +339,50 @@ def _get_physical_sizes(dims: list[Dimension]) -> dict:
             ):
                 output[f"physical_size_{axis}_unit"] = ome_unit
     return output
+
+
+def _build_plate(plate: Plate, positions: tuple[Position, ...]) -> list[ome.Plate]:
+    """Build OME Plate with Wells and WellSamples linking to Images.
+
+    Each position maps to a WellSample, which links to an Image via ImageRef.
+    Wells are determined by unique (plate_row, plate_column) combinations.
+    """
+    # Group positions by well (row, column)
+    wells_map: dict[tuple[str, str], list[tuple[int, Position]]] = {}
+    for idx, pos in enumerate(positions):
+        key = (pos.plate_row or "", pos.plate_column or "")
+        wells_map.setdefault(key, []).append((idx, pos))
+
+    # Build Well objects with WellSamples
+    wells: list[ome.Well] = []
+    for (row_name, col_name), pos_list in wells_map.items():
+        row_idx = plate.row_names.index(row_name)
+        col_idx = plate.column_names.index(col_name)
+
+        well_samples = [
+            ome.WellSample(
+                id=f"WellSample:{idx}",
+                index=idx,
+                image_ref=ome.ImageRef(id=f"Image:{idx}"),
+            )
+            for idx, _pos in pos_list
+        ]
+
+        wells.append(
+            ome.Well(
+                id=f"Well:{row_idx}_{col_idx}",
+                row=row_idx,
+                column=col_idx,
+                well_samples=well_samples,
+            )
+        )
+
+    return [
+        ome.Plate(
+            id="Plate:0",
+            name=plate.name,
+            rows=len(plate.row_names),
+            columns=len(plate.column_names),
+            wells=wells,
+        )
+    ]
