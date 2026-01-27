@@ -18,7 +18,7 @@ features = [
     "navigation.footer",
     "navigation.indexes",
     "navigation.path",
-    "navigation.sections",
+    # "navigation.sections",
     "toc.follow",
     "search.highlight",
 ]
@@ -28,6 +28,8 @@ font.code = "Fira Code"
 [project.markdown_extensions.admonition]
 [project.markdown_extensions.pymdownx.superfences]
 [project.markdown_extensions.pymdownx.snippets]
+[project.markdown_extensions.pymdownx.tabbed]
+alternate_style = true
 
 [[project.theme.palette]]
 scheme = "default"
