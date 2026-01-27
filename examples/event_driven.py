@@ -51,11 +51,15 @@ def some_event_driven_frame_generator() -> Iterator[tuple[np.ndarray, dict]]:
     while True:
         frame_idx = next(counter)
         current_time = datetime.datetime.now()
-        # Recognized keys that map to OME-TIFF Plane attributes:
+
+        # Any key-value metadata can be provided per-frame.
+        # Some keys have special format-specific meaning, and can be placed in the
+        # proper OME-Tiff metadata, while Zarr just stores everything as-is.
         # - delta_t: time from start (seconds)
         # - exposure_time: exposure duration (seconds)
         # - position_x, position_y, position_z: stage positions (micrometers)
         metadata = {
+            # Special keys:
             "delta_t": (current_time - start_time).total_seconds(),
             "exposure_time": 0.01,  # 10 ms exposure
             "position_x": 100.0 + frame_idx * 0.5,  # simulated stage drift
