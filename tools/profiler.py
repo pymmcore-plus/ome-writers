@@ -194,8 +194,8 @@ def main(
             root_path="tmp", dimensions=dims, dtype=dtype, compression=compression
         )
 
-    root = f"test_{backend}.ome.{get_format_for_backend(backend)}"
-    settings = settings.model_copy(update={"backend": backend, "root_path": root})
+    settings.root_path = f"test_{backend}.ome.{get_format_for_backend(backend)}"
+    settings.backend = backend  # type: ignore
 
     console.print(f"\n[bold]Profiling {backend}[/bold]")
     console.print(f"  Shape: {tuple(d.count for d in settings.dimensions)}")
