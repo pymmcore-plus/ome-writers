@@ -100,13 +100,14 @@ class OMEStream:
 
     def __del__(self) -> None:
         """Make sure things aren't still running on deletion."""
-        if self._has_appended and not self._closed:
-            warnings.warn(
-                "OMEStream was not closed before garbage collection. Please "
-                "use `with create_stream(...):` in a context manager or call "
-                "`stream.close()` before deletion.",
-                stacklevel=2,
-            )
+        if not self._closed:
+            if self._has_appended:
+                warnings.warn(
+                    "OMEStream was not closed before garbage collection. Please "
+                    "use `with create_stream(...):` in a context manager or call "
+                    "`stream.close()` before deletion.",
+                    stacklevel=2,
+                )
             self.close()
 
 
