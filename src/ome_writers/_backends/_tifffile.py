@@ -330,9 +330,16 @@ class WriterThread(threading.Thread):
 
     def run(self) -> None:
         """Write frames from queue to TIFF file sequentially."""
+        # Wait for first frame before opening file - if close is called before
+        # any frames are written, we get None and can return early
+        first_frame = self._image_queue.get()
+        if first_frame is None:
+            return
 
         def _queue_iterator() -> Iterator[np.ndarray]:
-            """Yield frames from the queue until None is received."""
+            """Yield first frame, then frames from queue until None."""
+            self.frames_written += 1
+            yield first_frame
             while True:
                 frame = self._image_queue.get()
                 if frame is None:

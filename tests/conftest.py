@@ -18,6 +18,12 @@ def any_backend(request: pytest.FixtureRequest) -> str:
     return request.param
 
 
+@pytest.fixture()
+def first_backend(request: pytest.FixtureRequest) -> str:
+    """Fixture to get the first available backend."""
+    return AVAILABLE_BACKENDS[0]
+
+
 @pytest.fixture(params=ZARR_BACKENDS)
 def zarr_backend(request: pytest.FixtureRequest) -> str:
     """Fixture to parametrize tests over available Zarr backends."""
