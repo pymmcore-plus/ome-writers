@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import numpy as np
-import ome_types
 import pytest
 
 from ome_writers import (
@@ -35,14 +34,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 try:
+    import ome_types
     from ome_types import from_tiff, from_xml
-
-    HAS_OME_TYPES = True
 except ImportError:
-    HAS_OME_TYPES = False
-
-
-pytestmark = pytest.mark.skipif(not HAS_OME_TYPES, reason="ome_types not installed")
+    pytest.skip("ome_types not installed", allow_module_level=True)
 
 MULTI_FILE_MODES = [
     MetadataMode.MULTI_REDUNDANT,
