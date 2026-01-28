@@ -17,6 +17,13 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
+# Check for ome_types BEFORE importing _ome_xml
+try:
+    import ome_types
+    from ome_types import from_tiff, from_xml
+except ImportError:
+    pytest.skip("ome_types not installed", allow_module_level=True)
+
 from ome_writers import (
     AcquisitionSettings,
     Dimension,
@@ -32,12 +39,6 @@ from ome_writers._backends._ome_xml import (
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-try:
-    import ome_types
-    from ome_types import from_tiff, from_xml
-except ImportError:
-    pytest.skip("ome_types not installed", allow_module_level=True)
 
 MULTI_FILE_MODES = [
     MetadataMode.MULTI_REDUNDANT,
