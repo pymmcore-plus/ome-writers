@@ -50,14 +50,14 @@ def test_acquire_zarr_full_streaming_support(tmp_path: Path) -> None:
 
 def _zarr_array_to_numpy(path: str) -> np.ndarray:
     try:
-        import zarr
-
-        return np.asarray(zarr.open_array(path))
-    except ImportError:
         import tensorstore as ts
 
         ts_array = ts.open(
-            {"driver": "zarr", "kvstore": {"driver": "file", "path": path}},
+            {"driver": "zarr3", "kvstore": {"driver": "file", "path": path}},
             open=True,
         ).result()
         return np.asarray(ts_array.read().result())
+    except ImportError:
+        import zarr
+
+        return np.asarray(zarr.open_array(path))
