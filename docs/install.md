@@ -4,8 +4,9 @@ icon: lucide/download-cloud
 
 # Installation
 
-You can install `ome-writers` via pip. You *must* also select select at least
-one backend extra:
+You can install `ome-writers` via `pip` (or `uv pip`).  
+
+You *must* also select select at least one backend extra:
 
 ```bash
 pip install ome-writers[<backend>]

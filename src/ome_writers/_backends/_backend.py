@@ -126,6 +126,8 @@ class ArrayBackend(ABC):
         position_index: int,
         index: tuple[int, ...],
         frame: np.ndarray,
+        *,
+        frame_metadata: dict[str, Any] | None = None,
     ) -> None:
         """Write a frame to the specified location.
 
@@ -138,6 +140,12 @@ class ArrayBackend(ABC):
             Sequential backends may ignore this parameter.
         frame
             2D array (Y, X) containing the frame data.
+        frame_metadata
+            Optional per-frame metadata dict. Recognized keys (delta_t,
+            exposure_time, position_x/y/z) are mapped to format-specific
+            locations. All keys are preserved generically.
+            See public-facing documentation at `ome_writers.OMEStream.append` for
+            more details.
 
         Raises
         ------

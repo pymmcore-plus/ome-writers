@@ -7,29 +7,56 @@ repo_name = "pymmcore-plus/ome-writers"
 repo_url = "https://github.com/pymmcore-plus/ome-writers"
 copyright = ""
 
+nav = [
+  "index.md",
+  "install.md",
+  "performance.md",
+  { "Formats" = [
+    "formats/index.md",
+    "formats/tiff.md",
+    "formats/zarr.md",
+  ] },
+  "reference.md",
+  { "Examples" = [
+    "examples/single_5d_image.md",
+    "examples/multiposition.md",
+    "examples/plate.md",
+    "examples/unbounded.md",
+    "examples/transposed.md",
+    "examples/event_driven.md",
+    "examples/pymmcore_plus.md",
+  ] },
+]
+
 [project.theme]
+icon.logo = "lucide/file-box"
 features = [
-    "content.code.annotate",
-    "content.code.copy",
-    "content.code.select",
-    "content.footnote.tooltips",
-    "content.tabs.link",
-    "content.tooltips",
-    "navigation.footer",
-    "navigation.indexes",
-    "navigation.path",
-    # "navigation.sections",
-    "toc.follow",
-    "search.highlight",
+  "content.code.annotate",
+  "content.code.copy",
+  "content.code.select",
+  "content.footnote.tooltips",
+  "content.tabs.link",
+  "content.tooltips",
+  "navigation.footer",
+  "navigation.indexes",
+  "navigation.path",
+  "navigation.expand",
+  "toc.follow",
+  "search.highlight",
 ]
 font.text = "Inter"
 font.code = "Fira Code"
 
+[project.markdown_extensions.pymdownx.highlight]
 [project.markdown_extensions.admonition]
-[project.markdown_extensions.pymdownx.superfences]
+[project.markdown_extensions.pymdownx.inlinehilite]
 [project.markdown_extensions.pymdownx.snippets]
+[project.markdown_extensions.pymdownx.superfences]
 [project.markdown_extensions.pymdownx.tabbed]
 alternate_style = true
+[project.markdown_extensions.pymdownx.emoji]
+emoji_index = "zensical.extensions.emoji.twemoji"
+emoji_generator = "zensical.extensions.emoji.to_svg"
 
 [[project.theme.palette]]
 scheme = "default"

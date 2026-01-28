@@ -48,13 +48,29 @@ class OMEStream:
         self._router = router
         self._iterator = iter(router)
 
-    def append(self, frame: np.ndarray) -> None:
+    def append(self, frame: np.ndarray, *, frame_metadata: dict | None = None) -> None:
         """Write the next frame in acquisition order.
 
         Parameters
         ----------
         frame : np.ndarray
             2D array containing the frame data (Y, X).
+        frame_metadata : dict, optional
+            Optional per-frame metadata.  All data *must* be JSON-serializable (or will
+            fail to be stored and a warning will be issued). The following special keys
+            are recognized and will be mapped to format-specific locations:
+
+                - `delta_t` : float
+                    Time delta in seconds since the start of the acquisition.
+                - `exposure_time` : float
+                    Exposure time in seconds for this frame.
+                - `position_x`, `position_y`, `position_z` : float
+                    Stage position in microns for this frame.
+
+            All other keys will be stored as unstructured metadata. For OME-Tiff, you
+            can find this data in the structured annotations of the OME-XML.  For
+            OME-Zarr, this data will be stored in the `"attributes.ome_writers"` key in
+            the zarr.json document in the multiscales group of each position.
 
         Raises
         ------
@@ -63,7 +79,7 @@ class OMEStream:
             For unlimited dimensions, never raises StopIteration.
         """
         pos_idx, idx = next(self._iterator)
-        self._backend.write(pos_idx, idx, frame)
+        self._backend.write(pos_idx, idx, frame, frame_metadata=frame_metadata)
 
     def get_metadata(self) -> Any:
         """Retrieve metadata from the backend.  Meaning is format-dependent."""

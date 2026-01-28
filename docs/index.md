@@ -11,6 +11,12 @@ various different backends. It is designed for **streaming acquisition**:
 receiving 2D camera frames one at a time and writing them to multi-dimensional
 arrays with proper metadata.
 
+## Installation
+
+See dedicated [installation instructions](install.md).
+
+## Usage
+
 The core API involves creating an
 [`AcquisitionSettings`][ome_writers.AcquisitionSettings] object that fully
 defines the data (dimensions, data type, etc.) as it will arrive from the
