@@ -415,6 +415,11 @@ class OmeTiff(_BaseModel):
         "or 'tifffile'. If 'auto' (the default), the backend will be chosen based on "
         "available dependencies. Currently, 'tifffile' is the only supported backend.",
     )
+    suffix: str = Field(
+        default=".ome.tiff",
+        description="File suffix/extension to use for OME-TIFF files. Default is "
+        "'.ome.tiff'.",
+    )
 
 
 class OmeZarr(_BaseModel):
@@ -431,6 +436,11 @@ class OmeZarr(_BaseModel):
         "If 'auto' (the default), the backend will be chosen based on the "
         "available dependencies, in the order: "
         "tensorstore, acquire-zarr, zarrs-python, zarr-python.",
+    )
+    suffix: str = Field(
+        default=".ome.zarr",
+        description="Directory suffix/extension to use for OME-Zarr directories. "
+        "Default is '.ome.zarr'.",
     )
 
 
@@ -529,23 +539,15 @@ class AcquisitionSettings(_BaseModel):
         "creating the stream.",
     )
 
-    # @property
-    # def format(self) -> FileFormat:
-    #     """Inferred file format.  Either (OME) 'tiff' or 'zarr'."""
-    #     if self.root_path.lower().endswith((".tiff", ".tif")):
-    #         return "tiff"
-    #     if self.root_path.lower().endswith(".zarr"):
-    #         return "zarr"
+    @property
+    def output_path(self) -> str:
+        """Output path for the acquisition data.
 
-    #     # this is for the ambiguous case where user has given a generic
-    #     # path without extension.  *and* used a specific backend.
-    #     if self.backend != "auto":
-    #         for b in BACKENDS:
-    #             if b.name == self.backend:
-    #                 return b.format
-
-    #     # all other no-extension cases default to zarr
-    #     return "zarr"  # pragma: no cover
+        This is the `root_path` provided by the user, resolved by the format, possibly
+        with appropriate suffix/extension added.
+        """
+        ome_stem, _ = _ome_stem_suffix(self.root_path)
+        return ome_stem + self.format.suffix
 
     @property
     def shape(self) -> tuple[int | None, ...]:
@@ -627,6 +629,7 @@ class AcquisitionSettings(_BaseModel):
         """Validate compression is supported for selected format."""
         if self.compression is None:
             return self
+        # TODO: move this to Format classes?
         if self.format.name == "tiff":
             tiff_args = get_args(TiffCompression)
             if self.compression not in tiff_args:  # pragma: no cover
@@ -702,13 +705,17 @@ class AcquisitionSettings(_BaseModel):
     def _pick_auto_format(cls, data: Any) -> Any:
         """If format is 'auto', pick first available format/backend."""
         if isinstance(data, dict):
-            if data.get("format", "auto") == "auto":
-                path = data.get("root_path", "").lower()
-                if path.endswith((".tiff", ".tif")):
-                    data["format"] = "ome-tiff"
-                elif path.endswith(".zarr"):
-                    data["format"] = "ome-zarr"
-                else:
+            _stem, suffix = _ome_stem_suffix(data.get("root_path", ""))
+            fmt = data.get("format", "auto")
+            if isinstance(fmt, dict):
+                fmt.setdefault("suffix", suffix)
+            elif fmt == "auto":
+                # suffix-based inference
+                if suffix.endswith((".tiff", ".tif")):
+                    data["format"] = {"name": "tiff", "suffix": suffix}
+                elif suffix.endswith(".zarr"):
+                    data["format"] = {"name": "zarr", "suffix": suffix}
+                else:  # pick first available backend
                     data["format"] = next(iter(AVAILABLE_BACKENDS))
         return data
 
@@ -849,3 +856,34 @@ def _compute_permutation(
     """Compute permutation to convert acquisition indices to storage indices."""
     dim_names = [dim.name for dim in acq_dims]
     return tuple(dim_names.index(dim.name) for dim in storage_names)
+
+
+def _ome_stem_suffix(path: str) -> tuple[str, str]:
+    """Return the stem of an OME file, removing .ome and image container suffixes.
+
+    Examples
+    --------
+    >>> _ome_stem_suffix("data/image.tiff")
+    ('data/image', '.tiff')
+    >>> _ome_stem_suffix("data/image.ome.tiff")
+    ('data/image', '.ome.tiff')
+
+    # other periods are preserved
+    >>> _ome_stem_suffix("data/image.test.ome.tiff")
+    ('data/image.test', '.ome.tiff')
+
+    # only *trailing* [.ome].ext is removed
+    >>> _ome_stem_suffix("data/image.ome.test.zarr")
+    ('data/image.ome.test', '.zarr')
+    >>> _ome_stem_suffix("data/image.ome.test")
+    ('data/image.ome.test', '')
+    """
+    str_path = str(path)
+    lower = str_path.lower()
+    for ext in (".tiff", ".tif", ".zarr"):
+        if lower.endswith(ext):
+            result = str_path[: -len(ext)]
+            if result.lower().endswith(".ome"):
+                return result[:-4], f".ome{ext}"
+            return result, ext
+    return path, ""

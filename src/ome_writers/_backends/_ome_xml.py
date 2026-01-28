@@ -110,7 +110,7 @@ def prepare_metadata(
     ):  # pragma: no cover
         raise ValueError("Dimension names must be one of 't', 'c', 'z', 'y', 'x'")
 
-    root = Path(settings.root_path).expanduser().resolve()
+    root = Path(settings.output_path).expanduser().resolve()
     if len(settings.positions) <= 1:
         mode = MetadataMode.SINGLE_FILE
 

@@ -8,12 +8,11 @@ from ome_writers import AcquisitionSettings, Dimension, create_stream
 
 # Derive backend from command line argument (default: auto)
 FORMAT = "auto" if len(sys.argv) < 2 else sys.argv[1]
-suffix = ".ome.tiff" if FORMAT == "tifffile" else ".ome.zarr"
 UM = "micrometer"
 
 # create acquisition settings
 settings = AcquisitionSettings(
-    root_path=f"example_5d_image{suffix}",
+    root_path="example_5d_image",
     # declare dimensions in order of acquisition (slowest to fastest)
     dimensions=[
         Dimension(name="t", count=2, chunk_size=1, type="time"),
@@ -40,11 +39,11 @@ with create_stream(settings) as stream:
 if settings.format.name == "zarr":
     import yaozarrs
 
-    yaozarrs.validate_zarr_store(settings.root_path)
+    yaozarrs.validate_zarr_store(settings.output_path)
     print("✓ Zarr store is valid")
 
 if settings.format.name == "tiff":
     from ome_types import from_tiff
 
-    from_tiff(settings.root_path)
+    from_tiff(settings.output_path)
     print("✓ TIFF file is valid")

@@ -1,6 +1,7 @@
 """Basic example of using ome_writers to write a multiposition 5D image series."""
 
 import sys
+from pathlib import Path
 
 import numpy as np
 
@@ -8,12 +9,11 @@ from ome_writers import AcquisitionSettings, Dimension, PositionDimension, creat
 
 # Derive backend from command line argument (default: auto)
 FORMAT = "auto" if len(sys.argv) < 2 else sys.argv[1]
-suffix = ".ome.tiff" if FORMAT == "tifffile" else ".ome.zarr"
 UM = "micrometer"
 
 # create acquisition settings
 settings = AcquisitionSettings(
-    root_path=f"example_5d_series{suffix}",
+    root_path="example_5d_series",
     # declare dimensions in order of acquisition (slowest to fastest)
     dimensions=[
         Dimension(name="t", count=2, chunk_size=1, type="time"),
@@ -41,13 +41,12 @@ with create_stream(settings) as stream:
 if settings.format.name == "zarr":
     import yaozarrs
 
-    yaozarrs.validate_zarr_store(settings.root_path)
+    yaozarrs.validate_zarr_store(settings.output_path)
     print("✓ Zarr store is valid")
 
 if settings.format.name == "tiff":
     from ome_types import from_tiff
 
-    files = [f"{settings.root_path[:-9]}_p{pos:03d}.ome.tiff" for pos in range(2)]
-    for idx, file in enumerate(files):
+    for file in Path(settings.output_path).glob("*.tiff"):
         from_tiff(file)
-        print(f"✓ TIFF file {idx} is valid")
+        print(f"✓ TIFF file {file} is valid")

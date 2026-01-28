@@ -44,5 +44,5 @@ with create_stream(settings) as stream:
 if settings.format.name == "zarr":
     import yaozarrs
 
-    yaozarrs.validate_zarr_store(settings.root_path)
+    yaozarrs.validate_zarr_store(settings.output_path)
     print("✓ Zarr store is valid")
