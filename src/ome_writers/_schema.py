@@ -620,7 +620,7 @@ class AcquisitionSettings(_BaseModel):
                             (c := pos.plate_column) and c not in self.plate.column_names
                         )
                     ]
-                    if names_with_bad_coords:  # pragma: no cover
+                    if names_with_bad_coords:
                         warnings.warn(
                             f"Some positions have row/column values not in the plate "
                             f"definition: {names_with_bad_coords}. "
