@@ -399,4 +399,4 @@ def _infer_naming_convention(names: list[str]) -> ome.NamingConvention | None:
         return ome.NamingConvention.LETTER
     if all(n.isdigit() for n in names):
         return ome.NamingConvention.NUMBER
-    return None
+    return None  # pragma: no cover
