@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import sys
+import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -41,12 +42,21 @@ class OMEStream:
         for frame in frames:
             stream.append(frame)
     ```
+
+    !!! warning
+
+        If not used as a context manager, you must call
+        [`close()`][ome_writers.OMEStream.close] to ensure all data is flushed
+        and resources are released.  A warning will be emitted if the object is
+        garbage collected without being closed.
+
     """
 
     def __init__(self, backend: ArrayBackend, router: FrameRouter) -> None:
         self._backend = backend
         self._router = router
         self._iterator = iter(router)
+        self._closed = False
 
     def append(self, frame: np.ndarray) -> None:
         """Write the next frame in acquisition order.
@@ -79,7 +89,23 @@ class OMEStream:
 
     def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
         """Exit context manager, finalizing the backend."""
+        self.close()
+
+    def close(self) -> None:
+        """Finalize the backend, flush any pending writes, and release resources."""
+        self._closed = True
         self._backend.finalize()
+
+    def __del__(self) -> None:
+        """Make sure things aren't still running on deletion."""
+        if not self._closed:
+            warnings.warn(
+                "OMEStream was not closed before garbage collection. Please "
+                "use `with create_stream(...):` in a context manager or call "
+                "`stream.close()` before deletion.",
+                stacklevel=2,
+            )
+            self.close()
 
 
 def get_format_for_backend(backend: str) -> FileFormat:
@@ -178,6 +204,13 @@ AVAILABLE_BACKENDS: dict[str, BackendMetadata] = {
 
 def create_stream(settings: AcquisitionSettings) -> OMEStream:
     """Create a stream for writing OME-TIFF or OME-ZARR data.
+
+    !!! warning
+
+        If not used as a context manager, you must call
+        [`stream.close()`][ome_writers.OMEStream.close] to ensure all data is flushed
+        and resources are released.  A warning will be emitted if the object is
+        garbage collected without being closed.
 
     Parameters
     ----------
