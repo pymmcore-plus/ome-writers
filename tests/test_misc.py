@@ -58,17 +58,17 @@ def test_stream_safety(tmp_path: Path, first_backend: str) -> None:
         del stream
         gc.collect()
 
-    stream = create_stream(settings)
-    del stream  # nothing appended, no warning
+    stream2 = create_stream(settings)
+    del stream2  # nothing appended, no warning
     gc.collect()
 
-    stream = create_stream(settings)
-    stream.append(frame)
-    stream.close()
-    del stream  # close called no warning
+    stream3 = create_stream(settings)
+    stream3.append(frame)
+    stream3.close()
+    del stream3  # close called no warning
     gc.collect()
 
-    with create_stream(settings) as stream:
-        stream.append(frame)
-    del stream  # context manager used, no warning
+    with create_stream(settings) as stream4:
+        stream4.append(frame)
+    del stream4  # context manager used, no warning
     gc.collect()
