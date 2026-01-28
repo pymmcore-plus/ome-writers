@@ -6,7 +6,7 @@ import numpy as np
 
 from ome_writers import AcquisitionSettings, Dimension, create_stream
 
-# Derive backend from command line argument (default: auto)
+# Derive format/backend from command line argument (default: auto)
 FORMAT = "auto" if len(sys.argv) < 2 else sys.argv[1]
 UM = "micrometer"
 

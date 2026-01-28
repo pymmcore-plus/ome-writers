@@ -7,9 +7,8 @@ import numpy as np
 
 from ome_writers import AcquisitionSettings, Dimension, PositionDimension, create_stream
 
-# Derive backend from command line argument (default: auto)
+# Derive format/backend from command line argument (default: auto)
 FORMAT = "auto" if len(sys.argv) < 2 else sys.argv[1]
-UM = "micrometer"
 
 # create acquisition settings
 settings = AcquisitionSettings(
@@ -19,9 +18,9 @@ settings = AcquisitionSettings(
         Dimension(name="t", count=2, chunk_size=1, type="time"),
         PositionDimension(positions=["Pos0", "Pos1"]),
         Dimension(name="c", count=3, chunk_size=1, type="channel"),
-        Dimension(name="z", count=4, chunk_size=1, type="space", scale=5, unit=UM),
-        Dimension(name="y", count=256, chunk_size=64, type="space", scale=2, unit=UM),
-        Dimension(name="x", count=256, chunk_size=64, type="space", scale=2, unit=UM),
+        Dimension(name="z", count=4, chunk_size=1, type="space", scale=5, unit="um"),
+        Dimension(name="y", count=256, chunk_size=64, type="space", scale=2, unit="um"),
+        Dimension(name="x", count=256, chunk_size=64, type="space", scale=2, unit="um"),
     ],
     dtype="uint16",
     overwrite=True,

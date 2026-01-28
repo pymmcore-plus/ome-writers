@@ -705,7 +705,8 @@ class AcquisitionSettings(_BaseModel):
     def _pick_auto_format(cls, data: Any) -> Any:
         """If format is 'auto', pick first available format/backend."""
         if isinstance(data, dict):
-            _stem, suffix = _ome_stem_suffix(data.get("root_path", ""))
+            root = data.get("root_path", "")
+            _stem, suffix = _ome_stem_suffix(root)
             fmt = data.get("format", "auto")
             if isinstance(fmt, dict):
                 fmt.setdefault("suffix", suffix)
@@ -716,7 +717,18 @@ class AcquisitionSettings(_BaseModel):
                 elif suffix.endswith(".zarr"):
                     data["format"] = {"name": "zarr", "suffix": suffix}
                 else:  # pick first available backend
-                    data["format"] = next(iter(AVAILABLE_BACKENDS))
+                    backend = next(iter(AVAILABLE_BACKENDS.values()))
+                    warnings.warn(
+                        f"\n\nOutput format could not be inferred from root_path "
+                        f"{root!r}. \nPicking the first available format/backend: "
+                        f"{backend.format!r}/{backend.name!r}. "
+                        "\nThis may not be what you want, and may be an error in "
+                        "future versions.\n"
+                        "Please specify the desired format explicitly "
+                        "(e.g. format='zarr') or via the extension of `root_path`.\n",
+                        stacklevel=3,
+                    )
+                    data["format"] = backend.name
         return data
 
 

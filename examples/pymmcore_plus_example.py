@@ -32,12 +32,11 @@ seq = useq.MDASequence(
 )
 
 # Setup the AcquisitionSettings, converting the MDASequence to ome-writers Dimensions
-# Derive backend from command line argument (default: auto)
+# Derive format/backend from command line argument (default: auto)
 FORMAT = "auto" if len(sys.argv) < 2 else sys.argv[1]
-suffix = ".ome.tiff" if FORMAT == "tifffile" else ".ome.zarr"
 
 settings = AcquisitionSettings(
-    root_path=f"example_pymmcore_plus{suffix}",
+    root_path="example_pymmcore_plus",
     # use dims_from_useq to convert MDASequence to ome_writers.Dimensions
     dimensions=dims_from_useq(
         seq,

@@ -13,13 +13,12 @@ from ome_writers import (
     create_stream,
 )
 
-# Derive backend from command line argument (default: auto)
+# Derive format/backend from command line argument (default: auto)
 FORMAT = "auto" if len(sys.argv) < 2 else sys.argv[1]
-suffix = ".ome.tiff" if FORMAT == "tifffile" else ".ome.zarr"
 
 # create acquisition settings
 settings = AcquisitionSettings(
-    root_path=f"example_5d_plate{suffix}",
+    root_path="example_5d_plate",
     # declare dimensions in order of acquisition (slowest to fastest)
     dimensions=[
         Dimension(name="t", count=2, chunk_size=1, type="time"),
