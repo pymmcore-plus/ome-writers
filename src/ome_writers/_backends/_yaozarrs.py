@@ -455,7 +455,14 @@ def _build_yaozarrs_image_model(dims: list[Dimension]) -> v05.Image:
         )
         for dim in dims
     ]
-    return v05.Image(multiscales=[v05.Multiscale.from_dims(dim_specs)])
+    channel_dim = next((d for d in dims if d.type == "channel"), None)
+    if channel_dim is not None and channel_dim.coords:
+        omero = v05.Omero(
+            channels=[v05.OmeroChannel(label=str(c)) for c in channel_dim.coords]
+        )
+    else:
+        omero = None
+    return v05.Image(multiscales=[v05.Multiscale.from_dims(dim_specs)], omero=omero)
 
 
 def _build_yaozarrs_plate_model(

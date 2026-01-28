@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -13,10 +14,6 @@ from ome_writers import (
     PositionDimension,
     create_stream,
 )
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
 
 pytest.importorskip("zarr", reason="zarr not available")
 
@@ -220,3 +217,27 @@ def test_zarr_metadata_workflow_example(tmp_path: Path) -> None:
     assert "omero" in attrs
     assert attrs["omero"]["channels"][0]["label"] == "DAPI"
     assert attrs["omero"]["channels"][1]["label"] == "GFP"
+
+
+def test_channel_names_in_zarr(tmp_path: Path, zarr_backend: str) -> None:
+    """Test that channel names are correctly written and read in Zarr."""
+    CHANNELS = ["DAPI", "FITC"]
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "channel_names.ome.zarr"),
+        dimensions=[
+            Dimension(name="c", type="channel", coords=CHANNELS),
+            Dimension(name="y", count=16, type="space"),
+            Dimension(name="x", count=16, type="space"),
+        ],
+        dtype="uint16",
+        backend=zarr_backend,
+    )
+
+    with create_stream(settings) as stream:
+        for _ in range(2):  # 2 channels
+            stream.append(np.random.randint(0, 1000, (16, 16), dtype=np.uint16))
+
+    data = json.loads(Path(f"{settings.root_path}/zarr.json").read_text())
+    ome = data["attributes"]["ome"]
+    channel_names = [ch["label"] for ch in ome["omero"]["channels"]]
+    assert channel_names == CHANNELS

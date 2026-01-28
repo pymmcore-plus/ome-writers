@@ -258,7 +258,7 @@ def _build_full_model(
     """Build complete OME model with all series/images."""
     dims = [d for d in settings.dimensions if not isinstance(d, PositionDimension)]
     dimension_order = _get_dimension_order(dims)
-
+    channel_dimension = next((d for d in dims if d.name.lower() == "c"), None)
     pixel_sizes = {"z": 1, "c": 1, "t": 1}
     pixel_sizes.update({d.name.lower(): d.count or 1 for d in dims})
 
@@ -285,7 +285,17 @@ def _build_full_model(
                 uuid=ome.TiffData.UUID(file_name=relative_path, value=file_info.uuid),
             )
 
-        channels = [ome.Channel(id=f"Channel:{i}:{c}") for c in range(pixel_sizes["c"])]
+        if channel_dimension and channel_dimension.coords:
+            # Use channel names from channel dimension if available
+            channels = [
+                ome.Channel(id=f"Channel:{i}:{cidx}", name=name)
+                for cidx, name in enumerate(channel_dimension.coords)
+            ]
+        else:
+            # should we just omit this?
+            channels = [
+                ome.Channel(id=f"Channel:{i}:{c}") for c in range(pixel_sizes["c"])
+            ]
         physical_sizes = _get_physical_sizes(dims)
         pixels = ome.Pixels(
             id=f"Pixels:{i}",
