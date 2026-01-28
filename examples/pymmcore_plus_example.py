@@ -32,12 +32,11 @@ seq = useq.MDASequence(
 )
 
 # Setup the AcquisitionSettings, converting the MDASequence to ome-writers Dimensions
-# Derive backend from command line argument (default: auto)
-BACKEND = "auto" if len(sys.argv) < 2 else sys.argv[1]
-suffix = ".ome.tiff" if BACKEND == "tifffile" else ".ome.zarr"
+# Derive format/backend from command line argument (default: auto)
+FORMAT = "auto" if len(sys.argv) < 2 else sys.argv[1]
 
 settings = AcquisitionSettings(
-    root_path=f"example_pymmcore_plus{suffix}",
+    root_path="example_pymmcore_plus",
     # use dims_from_useq to convert MDASequence to ome_writers.Dimensions
     dimensions=dims_from_useq(
         seq,
@@ -47,7 +46,7 @@ settings = AcquisitionSettings(
     ),
     dtype=f"uint{core.getImageBitDepth()}",
     overwrite=True,
-    backend=BACKEND,
+    format=FORMAT,
 )
 
 # Open the stream and run the sequence
@@ -61,13 +60,13 @@ with create_stream(settings) as stream:
     core.mda.run(seq)
 
 
-if settings.format == "zarr":
+if settings.format.name == "zarr":
     import yaozarrs
 
-    yaozarrs.validate_zarr_store(settings.root_path)
+    yaozarrs.validate_zarr_store(settings.output_path)
     print("✓ Zarr store is valid")
 
-if settings.format == "tiff":
+if settings.format.name == "tiff":
     from ome_types import from_tiff
 
     if len(seq.stage_positions) == 0:

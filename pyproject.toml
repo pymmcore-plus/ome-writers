@@ -180,6 +180,7 @@ filterwarnings = [
     "ignore:Failing to pass a value:DeprecationWarning",
     "ignore:Benchmarks are automatically disabled because xdist plugin is active:",
     "ignore:Valgrind instrument ignores rounds:UserWarning",
+    "ignore:\\s*Output format could not be inferred from root_path:UserWarning",
 ]
 
 # https://coverage.readthedocs.io/

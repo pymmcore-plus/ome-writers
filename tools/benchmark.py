@@ -61,7 +61,7 @@ from rich.progress import track
 from rich.table import Table
 
 from ome_writers import AcquisitionSettings, _schema, create_stream
-from ome_writers._stream import AVAILABLE_BACKENDS, get_format_for_backend
+from ome_writers._stream import AVAILABLE_BACKENDS
 
 if TYPE_CHECKING:
     from typing import TypedDict
@@ -139,14 +139,14 @@ def run_benchmark_iteration(
 def run_benchmark(
     settings: AcquisitionSettings,
     frames: list[np.ndarray],
-    backend: str,
+    format: str,
     warmups: int,
     iterations: int,
 ) -> ResultsDict:
     """Run benchmark for a single backend with multiple iterations."""
     settings = settings.model_copy(deep=True)
-    settings.root_path = f"test_{backend}.ome.{get_format_for_backend(backend)}"
-    settings.backend = backend  # type: ignore
+    settings.root_path = f"test_{format}"
+    settings.format = format  # type: ignore
 
     # Warmup runs
     if warmups > 0:
@@ -190,7 +190,7 @@ def run_all_benchmarks(
             results[b] = run_benchmark(
                 settings=settings,
                 frames=frames,
-                backend=b,
+                format=b,
                 warmups=warmups,
                 iterations=iterations,
             )

@@ -33,7 +33,7 @@ files in the output directory**
 
     Any acquisition with a combination of no more than "TCZXY" dimensions is
     stored as a single OME-TIFF file, directly at the
-    `AcquisitionSettings.root_path`.
+    `AcquisitionSettings.output_path`.
 
     !!! example "Example Code"
         [Writing a single ≤5D image](../examples/single_5d_image.md)

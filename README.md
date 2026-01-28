@@ -69,7 +69,6 @@ settings = AcquisitionSettings(
     ],
     dtype="uint16",
     overwrite=True,
-    backend="auto",
 )
 
 with create_stream(settings) as stream:

@@ -41,9 +41,6 @@ class AcquireZarrBackend(YaozarrsBackend):
         self._zarr_json_backup: dict[Path, bytes] = {}
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
-        if not settings.root_path.endswith(".zarr"):  # pragma: no cover
-            return "Root path must end with .zarr for AcquireZarrBackend."
-
         if settings.storage_index_permutation is not None:
             return (
                 "AcquireZarrBackend does not support permuted storage order. "

@@ -70,14 +70,6 @@ class TiffBackend(ArrayBackend):
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         """Check if settings are compatible with TIFF backend."""
-        path = settings.root_path.lower()
-        valid_extensions = [".tif", ".tiff", ".ome.tif", ".ome.tiff"]
-        if not any(path.endswith(ext) for ext in valid_extensions):  # pragma: no cover
-            return (
-                "Root path must end with .tif, .tiff, .ome.tif, or .ome.tiff "
-                "for TiffBackend."
-            )
-
         # for now, assume we use the same compression strings as tifffile
         if settings.compression not in (None, "none") and not hasattr(
             tifffile.COMPRESSION, settings.compression.upper()
