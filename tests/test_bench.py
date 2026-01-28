@@ -132,10 +132,11 @@ def test_bench_append(
         return
 
     benchmark.group = _name_case(case)
-    settings = case.model_copy(
-        update={
-            "root_path": str(tmp_path / f"output.ome.{case.format}"),
-            "backend": backend,
+    settings = AcquisitionSettings.model_validate(
+        {
+            **case.model_dump(),
+            "root_path": str(tmp_path / "output"),
+            "format": backend,
             "overwrite": True,
         }
     )
