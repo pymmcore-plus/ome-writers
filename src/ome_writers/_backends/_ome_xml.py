@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import uuid
 import warnings
 from datetime import datetime, timezone
@@ -11,7 +12,7 @@ import ome_types
 import ome_types.model as ome
 import tifffile
 
-from ome_writers._schema import Dimension, Plate, Position, PositionDimension
+from ome_writers._schema import Dimension, Position, PositionDimension
 from ome_writers._units import ngff_to_ome_unit
 
 if TYPE_CHECKING:
@@ -308,7 +309,7 @@ def _build_full_model(
         )
         images.append(image)
 
-    plates = _build_plate(settings.plate, settings.positions) if settings.plate else []
+    plates = _build_plates(settings)
     return ome_types.OME(uuid=_make_uuid(), images=images, plates=plates)
 
 
@@ -341,21 +342,32 @@ def _get_physical_sizes(dims: list[Dimension]) -> dict:
     return output
 
 
-def _build_plate(plate: Plate, positions: tuple[Position, ...]) -> list[ome.Plate]:
+def _build_plates(settings: AcquisitionSettings) -> list[ome.Plate]:
     """Build OME Plate with Wells and WellSamples linking to Images.
 
     Each position maps to a WellSample, which links to an Image via ImageRef.
     Wells are determined by unique (plate_row, plate_column) combinations.
     """
-    # Group positions by well (row, column)
+    if not (positions := settings.positions) or not (plate := settings.plate):
+        return []
+
+    # all known (row, column) keys based on plate definition
+    valid_keys = set(itertools.product(plate.row_names, plate.column_names))
+
+    # Group positions by well (row, column), filtering out invalid coordinates
     wells_map: dict[tuple[str, str], list[tuple[int, Position]]] = {}
     for idx, pos in enumerate(positions):
-        key = (pos.plate_row or "", pos.plate_column or "")
-        wells_map.setdefault(key, []).append((idx, pos))
+        # in AcquisitionSettings._validate_plate_positions, we already warned the user
+        # that positions with with plate_row/plate_column that aren't represented
+        # in the plate definition will be skipped from the metadata.
+        # So here we just skip them here silently.
+        key = (pos.plate_row, pos.plate_column)
+        if key in valid_keys:
+            wells_map.setdefault(key, []).append((idx, pos))
 
     # Build Well objects with WellSamples
     wells: list[ome.Well] = []
-    for (row_name, col_name), pos_list in wells_map.items():
+    for (row_name, col_name), positions in wells_map.items():
         row_idx = plate.row_names.index(row_name)
         col_idx = plate.column_names.index(col_name)
 
@@ -365,7 +377,7 @@ def _build_plate(plate: Plate, positions: tuple[Position, ...]) -> list[ome.Plat
                 index=idx,
                 image_ref=ome.ImageRef(id=f"Image:{idx}"),
             )
-            for idx, _pos in pos_list
+            for idx, _pos in positions
         ]
 
         wells.append(

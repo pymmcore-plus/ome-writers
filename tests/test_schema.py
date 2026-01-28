@@ -124,6 +124,30 @@ def test_plate_requires_position_dimension() -> None:
         )
 
 
+def test_plate_position_warnings(caplog: pytest.LogCaptureFixture) -> None:
+    """Test warnings for plate position row/column issues."""
+    # Test bad row/column values
+    with pytest.warns(
+        UserWarning, match="Some positions have row/column values not in the plate"
+    ):
+        AcquisitionSettings(
+            root_path="plate.zarr",
+            dimensions=[
+                Dimension(name="t", count=2, type="time"),
+                PositionDimension(
+                    positions=[
+                        Position(name="Pos1", plate_row="A", plate_column="1"),
+                        Position(name="Pos2", plate_row="C", plate_column="3"),  # Bad
+                    ]
+                ),
+                Dimension(name="y", count=16, type="space"),
+                Dimension(name="x", count=16, type="space"),
+            ],
+            dtype="uint16",
+            plate=Plate(row_names=["A"], column_names=["1"]),
+        )
+
+
 def test_duplicate_names_rejected() -> None:
     """Test that duplicate position names within the same well are rejected."""
     with pytest.raises(
