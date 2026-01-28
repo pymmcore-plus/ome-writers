@@ -209,6 +209,10 @@ def create_stream(settings: AcquisitionSettings) -> OMEStream:
     ...     for i in range(20):  # 10 timepoints x 2 channels
     ...         stream.append(np.zeros((512, 512), dtype=np.uint16))
     """
+    # rather than making AcquisitionSettings a frozen model,
+    # copy the settings once here.  The point is that no modifications made
+    # to the settings after this call will be reflected in the stream.
+    settings = settings.model_copy(deep=True)
 
     backend: ArrayBackend = _create_backend(settings)
     router = FrameRouter(settings)

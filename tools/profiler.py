@@ -29,7 +29,7 @@ from rich.console import Console
 from rich.table import Table
 
 from ome_writers import AcquisitionSettings, _schema, create_stream
-from ome_writers._stream import AVAILABLE_BACKENDS, get_format_for_backend
+from ome_writers._stream import AVAILABLE_BACKENDS
 
 sys.path.insert(0, str(Path(__file__).parent))
 from _common import generate_frames, parse_dimensions, parse_settings_file
@@ -194,10 +194,8 @@ def main(
             root_path="tmp", dimensions=dims, dtype=dtype, compression=compression
         )
 
-    root = f"test_{backend}.ome.{get_format_for_backend(backend)}"
-    settings = AcquisitionSettings.model_validate(
-        {**settings.model_dump(), "format": backend, "root_path": root}
-    )
+    settings.root_path = f"test_{backend}"
+    settings.format = backend  # type: ignore
 
     console.print(f"\n[bold]Profiling {backend}[/bold]")
     console.print(f"  Shape: {tuple(d.count for d in settings.dimensions)}")
