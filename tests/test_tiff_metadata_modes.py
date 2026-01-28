@@ -53,6 +53,7 @@ MULTI_FILE_MODES = [
 ]
 
 
+# this will be removed once we expose the modes via the public API
 def _write_with_mode(
     tmp_path: Path,
     dimensions: list[Dimension | PositionDimension],
@@ -195,9 +196,9 @@ def test_plate_multiple_fields(tmp_path: Path, mode: MetadataMode) -> None:
     dimensions = [
         PositionDimension(
             positions=[
-                Position(name="A1_F1", plate_row="A", plate_column="1"),
-                Position(name="A1_F2", plate_row="A", plate_column="1"),
-                Position(name="A2_F1", plate_row="A", plate_column="2"),
+                Position(name="fov1", plate_row="A", plate_column="1"),
+                Position(name="fov2", plate_row="A", plate_column="1"),
+                Position(name="fov1", plate_row="A", plate_column="2"),
             ]
         ),
         Dimension(name="y", count=32, type="space"),
