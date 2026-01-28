@@ -83,7 +83,7 @@ def _get_full_ome(tmp_path: Path, mode: MetadataMode) -> ome_types.OME | None:
     """Get OME model with full metadata for the given mode."""
     if mode == MetadataMode.MULTI_MASTER_COMPANION:
         companion = next(tmp_path.glob("*.companion.ome"))
-        with open(companion) as f:
+        with open(companion, encoding="utf-8") as f:
             return from_xml(f.read())
     elif mode == MetadataMode.MULTI_MASTER_TIFF:
         master = next(f for f in tmp_path.glob("*.ome.tiff") if "_p000" in f.name)
@@ -261,7 +261,7 @@ def test_file_structure_by_mode(tmp_path: Path, mode: MetadataMode) -> None:
     elif mode == MetadataMode.MULTI_MASTER_COMPANION:
         # Companion has full metadata, all TIFFs have BinaryOnly
         assert len(companion_files) == 1
-        with open(companion_files[0]) as f:
+        with open(companion_files[0], encoding="utf-8") as f:
             companion_ome = from_xml(f.read())
         assert companion_ome.binary_only is None
         assert len(companion_ome.images) == 2
