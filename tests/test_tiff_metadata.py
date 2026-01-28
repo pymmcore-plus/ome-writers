@@ -304,3 +304,26 @@ def test_prepare_meta(tmp_path: Path) -> None:
         assert all(str(tmp_path) in key for key in meta.keys())
         companion = mode == MetadataMode.MULTI_MASTER_COMPANION
         assert sum(key.endswith("companion.ome") for key in meta) == companion
+
+
+def test_channel_names_in_tiff(tmp_path: Path, tiff_backend: str) -> None:
+    """Test that channel names are correctly written and read in TIFF files."""
+    CHANNELS = ["DAPI", "FITC"]
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "channel_names.ome.tiff"),
+        dimensions=[
+            Dimension(name="c", type="channel", coords=CHANNELS),
+            Dimension(name="y", count=16, type="space"),
+            Dimension(name="x", count=16, type="space"),
+        ],
+        dtype="uint16",
+        backend=tiff_backend,
+    )
+
+    with create_stream(settings) as stream:
+        for _ in range(2):  # 2 channels
+            stream.append(np.random.randint(0, 1000, (16, 16), dtype=np.uint16))
+
+    ome_obj = from_tiff(str(tmp_path / "channel_names.ome.tiff"))
+    channel_names = [ch.name for ch in ome_obj.images[0].pixels.channels]
+    assert channel_names == CHANNELS

@@ -3,8 +3,17 @@
 from __future__ import annotations
 
 import warnings
+from collections.abc import Sized
 from enum import Enum
-from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeAlias, cast, get_args
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    Literal,
+    TypeAlias,
+    cast,
+    get_args,
+)
 
 import numpy as np
 from annotated_types import Len
@@ -175,10 +184,18 @@ class Dimension(_BaseModel):
         "in the specified `unit`. (e.g. the physical coordinate of the first pixel "
         "or timepoint, in some XYZ stage or other coordinate system).",
     )
+    coords: list[str | float] | None = Field(
+        default=None,
+        description="Explicit coordinate values for each element along this dimension."
+        "This is primarily a convenience for specifying categorical coordinates, such "
+        "as channel names, and may also be used explicitly listing non-uniform spatial "
+        "or temporal coordinates. If provided, the length of this list must match "
+        "the `count` of this dimension.",
+    )
 
     @model_validator(mode="before")
     @classmethod
-    def _validate_unit(cls, data: Any) -> Any:
+    def _validate_model(cls, data: Any) -> Any:
         """Validate that unit is NGFF-compliant if specified.
 
         Ensure that unit matches dim type, and infer dim type from unit if missing.
@@ -192,6 +209,23 @@ class Dimension(_BaseModel):
                 cast_unit, dim_type = cast_unit_to_ngff(unit, data.get("type"))
                 data["unit"] = cast_unit
                 data["type"] = dim_type
+
+            if (coords := data.get("coords")) is not None:
+                count = data.get("count")
+                if count is None:
+                    data["count"] = len(coords)
+                else:
+                    if not isinstance(coords, Sized):
+                        raise ValueError(
+                            f"Cannot validate coords length against unbounded count: "
+                            f"{count!r}."
+                        )
+                    if len(coords) != count:
+                        raise ValueError(
+                            f"Length of coords ({len(coords)}) does not match count "
+                            f"({count})."
+                        )
+
         return data
 
 
