@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from ome_writers import AcquisitionSettings, Dimension, create_stream
+from ome_writers._stream import get_format_for_backend
 from ome_writers._util import fake_data_for_sizes
 
 if TYPE_CHECKING:
@@ -35,8 +36,9 @@ def test_fake_data() -> None:
 
 def test_stream_safety(tmp_path: Path, first_backend: str) -> None:
     """Deleting a stream that appended but wasn't closed should warn."""
+    suffix = get_format_for_backend(first_backend)
     settings = AcquisitionSettings(
-        root_path=tmp_path / "test.ome.zarr",
+        root_path=tmp_path / f"test.ome.{suffix}",
         dimensions=[
             Dimension(name="t", count=2, type="time"),
             Dimension(name="y", count=32, type="space"),
