@@ -38,7 +38,7 @@ def test_tiff_compression(compression: str, tmp_path: Path, tiff_backend: str) -
         ],
         dtype="uint16",
         compression=compression,
-        backend=tiff_backend,
+        format={"name": "tiff", "backend": tiff_backend},
     )
 
     # Write data
@@ -62,7 +62,7 @@ def test_zarr_compression(compression: str, zarr_backend: str, tmp_path: Path) -
     """Test Zarr backends with different compression options."""
     settings = AcquisitionSettings(
         root_path=str(tmp_path / "test.ome.zarr"),
-        backend=zarr_backend,
+        format={"name": "zarr", "backend": zarr_backend},
         dimensions=[
             Dimension(name="z", count=2, type="space"),
             Dimension(name="y", count=64, type="space"),

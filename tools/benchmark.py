@@ -143,14 +143,15 @@ def run_benchmark_iteration(
 def run_benchmark(
     settings: AcquisitionSettings,
     frames: list[np.ndarray],
-    backend: str,
+    format: str,
     warmups: int,
     iterations: int,
 ) -> ResultsDict:
     """Run benchmark for a single backend with multiple iterations."""
-    root = f"test_{backend}.ome.{get_format_for_backend(backend)}"
-    settings = settings.model_copy(update={"backend": backend, "root_path": root})
-
+    root = f"test_{format}.ome.{get_format_for_backend(format)}"
+    settings = AcquisitionSettings.model_validate(
+        {**settings.model_dump(), "format": format, "root_path": root}
+    )
     # Warmup runs
     if warmups > 0:
         console.print(f"  [dim]Running {warmups} warmup(s)...[/dim]")
@@ -193,7 +194,7 @@ def run_all_benchmarks(
             results[b] = run_benchmark(
                 settings=settings,
                 frames=frames,
-                backend=b,
+                format=b,
                 warmups=warmups,
                 iterations=iterations,
             )

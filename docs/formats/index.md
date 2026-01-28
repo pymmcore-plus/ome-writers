@@ -12,8 +12,7 @@ icon: lucide/file-text
 
 Selecting and output formats is as simple as changing the target
 [`AcquisitionSettings.root_path`][ome_writers.AcquisitionSettings] to end in
-`.tiff` or `.zarr`. Or, explicitly select a `AcquisitionSettings.backend` that
-supports the desired format.
+`.tiff` or `.zarr`. Or, explicitly select a `Acquisitionsettings.format.backend`.
 
 See the individual format pages linked above for more details on each format and
 their specific options.

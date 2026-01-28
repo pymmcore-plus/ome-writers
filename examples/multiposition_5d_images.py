@@ -7,8 +7,8 @@ import numpy as np
 from ome_writers import AcquisitionSettings, Dimension, PositionDimension, create_stream
 
 # Derive backend from command line argument (default: auto)
-BACKEND = "auto" if len(sys.argv) < 2 else sys.argv[1]
-suffix = ".ome.tiff" if BACKEND == "tifffile" else ".ome.zarr"
+FORMAT = "auto" if len(sys.argv) < 2 else sys.argv[1]
+suffix = ".ome.tiff" if FORMAT == "tifffile" else ".ome.zarr"
 UM = "micrometer"
 
 # create acquisition settings
@@ -25,7 +25,7 @@ settings = AcquisitionSettings(
     ],
     dtype="uint16",
     overwrite=True,
-    backend=BACKEND,
+    format=FORMAT,
 )
 
 num_frames = np.prod(settings.shape[:-2])
@@ -38,13 +38,13 @@ with create_stream(settings) as stream:
         stream.append(frame)
 
 
-if settings.format == "zarr":
+if settings.format.name == "zarr":
     import yaozarrs
 
     yaozarrs.validate_zarr_store(settings.root_path)
     print("✓ Zarr store is valid")
 
-if settings.format == "tiff":
+if settings.format.name == "tiff":
     from ome_types import from_tiff
 
     files = [f"{settings.root_path[:-9]}_p{pos:03d}.ome.tiff" for pos in range(2)]

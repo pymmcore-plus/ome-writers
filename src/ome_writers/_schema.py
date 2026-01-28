@@ -4,7 +4,15 @@ from __future__ import annotations
 
 import warnings
 from enum import Enum
-from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeAlias, cast, get_args
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    Literal,
+    TypeAlias,
+    cast,
+    get_args,
+)
 
 import numpy as np
 from annotated_types import Len
@@ -19,16 +27,18 @@ from pydantic import (
 )
 
 from ome_writers._memory import warn_if_high_memory_usage
-from ome_writers._stream import BACKENDS
+from ome_writers._stream import AVAILABLE_BACKENDS
 from ome_writers._units import cast_unit_to_ngff
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
 FileFormat: TypeAlias = Literal["tiff", "zarr"]
-BackendName: TypeAlias = Literal[
-    "acquire-zarr", "tensorstore", "zarrs-python", "zarr-python", "tifffile"
+TiffBackendName: TypeAlias = Literal["tifffile"]
+ZarrBackendName: TypeAlias = Literal[
+    "acquire-zarr", "tensorstore", "zarrs-python", "zarr-python"
 ]
+BackendName: TypeAlias = TiffBackendName | ZarrBackendName
 DimensionType: TypeAlias = Literal["space", "time", "channel", "other"]
 StandardAxisKey: TypeAlias = Literal["x", "y", "z", "c", "t", "p"]
 
@@ -392,6 +402,62 @@ ZarrCompression: TypeAlias = Literal["blosc-zstd", "blosc-lz4", "zstd", "none"]
 Compression: TypeAlias = Literal["blosc-zstd", "blosc-lz4", "zstd", "lzw", "none"]
 
 
+class OmeTiff(_BaseModel):
+    """Settings specific to OME-TIFF format."""
+
+    name: Literal["tiff"] = Field(
+        default="tiff",
+        description="File format identifier for OME-TIFF.",
+    )
+    backend: TiffBackendName | Literal["auto"] = Field(
+        default="auto",
+        description="Storage backend to use for writing data.  Must be one of 'auto', "
+        "or 'tifffile'. If 'auto' (the default), the backend will be chosen based on "
+        "available dependencies. Currently, 'tifffile' is the only supported backend.",
+    )
+
+
+class OmeZarr(_BaseModel):
+    """Settings specific to OME-Zarr format."""
+
+    name: Literal["zarr"] = Field(
+        default="zarr",
+        description="File format identifier for OME-Zarr.",
+    )
+    backend: ZarrBackendName | Literal["auto"] = Field(
+        default="auto",
+        description="Storage backend to use for writing data.  Must be one of 'auto', "
+        "'tensorstore', 'acquire-zarr', 'zarrs-python', or 'zarr-python'. "
+        "If 'auto' (the default), the backend will be chosen based on the "
+        "available dependencies, in the order: "
+        "tensorstore, acquire-zarr, zarrs-python, zarr-python.",
+    )
+
+
+def _cast_format(value: Any) -> Any:
+    if isinstance(value, str):
+        match value.lower():
+            case "ome-tiff" | "tiff":
+                return OmeTiff()
+            case "ome-zarr" | "zarr":
+                return OmeZarr()
+            case "tensorstore":
+                return OmeZarr(backend="tensorstore")
+            case "acquire-zarr":
+                return OmeZarr(backend="acquire-zarr")
+            case "zarrs-python":
+                return OmeZarr(backend="zarrs-python")
+            case "zarr-python":
+                return OmeZarr(backend="zarr-python")
+            case "tifffile":
+                return OmeTiff(backend="tifffile")
+
+    return value
+
+
+Format: TypeAlias = Annotated[OmeTiff | OmeZarr, BeforeValidator(_cast_format)]
+
+
 class AcquisitionSettings(_BaseModel):
     """Top-level acquisition settings.
 
@@ -426,6 +492,14 @@ class AcquisitionSettings(_BaseModel):
         description="Data type of the pixel data to be written, e.g. 'uint8', "
         "'uint16', 'float32', etc. Must be a valid numpy DTypeLike string.",
     )
+    format: Format = Field(  # type: ignore
+        default="auto",
+        description="Desired output format/backend. Can be a simple string: 'ome-tiff' "
+        "or 'ome-zarr', in which case the first available format-appropriate backend "
+        "will be used; Or it may be a full format specification dict/object "
+        "([`ome_writers.OmeTiff`][] or [`ome_writers.OmeZarr`][]), to configure "
+        "format-specific options such as backend selection.",
+    )
     compression: Compression | None = Field(
         default=None,
         description="Compression algorithm for the storage backend. "
@@ -454,32 +528,24 @@ class AcquisitionSettings(_BaseModel):
         "and data already exists at the path, an error will be raised when "
         "creating the stream.",
     )
-    backend: BackendName | Literal["auto"] = Field(
-        default="auto",
-        description="Storage backend to use for writing data.  Must be one of 'auto', "
-        "'tensorstore', 'acquire-zarr', 'zarrs-python', 'zarr-python', or 'tifffile'. "
-        "If 'auto' (the default), the backend will be chosen based on the `root_path` "
-        "extension and available dependencies. Zarr backends are chosen in the order: "
-        "tensorstore, acquire-zarr, zarr-python, zarr-python.",
-    )
 
-    @property
-    def format(self) -> FileFormat:
-        """Inferred file format.  Either (OME) 'tiff' or 'zarr'."""
-        if self.root_path.lower().endswith((".tiff", ".tif")):
-            return "tiff"
-        if self.root_path.lower().endswith(".zarr"):
-            return "zarr"
+    # @property
+    # def format(self) -> FileFormat:
+    #     """Inferred file format.  Either (OME) 'tiff' or 'zarr'."""
+    #     if self.root_path.lower().endswith((".tiff", ".tif")):
+    #         return "tiff"
+    #     if self.root_path.lower().endswith(".zarr"):
+    #         return "zarr"
 
-        # this is for the ambiguous case where user has given a generic
-        # path without extension.  *and* used a specific backend.
-        if self.backend != "auto":
-            for b in BACKENDS:
-                if b.name == self.backend:
-                    return b.format
+    #     # this is for the ambiguous case where user has given a generic
+    #     # path without extension.  *and* used a specific backend.
+    #     if self.backend != "auto":
+    #         for b in BACKENDS:
+    #             if b.name == self.backend:
+    #                 return b.format
 
-        # all other no-extension cases default to zarr
-        return "zarr"  # pragma: no cover
+    #     # all other no-extension cases default to zarr
+    #     return "zarr"  # pragma: no cover
 
     @property
     def shape(self) -> tuple[int | None, ...]:
@@ -539,7 +605,7 @@ class AcquisitionSettings(_BaseModel):
     def storage_index_dimensions(self) -> tuple[Dimension, ...]:
         """NON-frame Dimensions in storage order."""
         return _sort_dims_to_storage_order(
-            self.index_dimensions, self.storage_order, self.format
+            self.index_dimensions, self.storage_order, self.format.name
         )
 
     @property
@@ -561,7 +627,7 @@ class AcquisitionSettings(_BaseModel):
         """Validate compression is supported for selected format."""
         if self.compression is None:
             return self
-        if self.format == "tiff":
+        if self.format.name == "tiff":
             tiff_args = get_args(TiffCompression)
             if self.compression not in tiff_args:  # pragma: no cover
                 raise ValueError(
@@ -630,6 +696,21 @@ class AcquisitionSettings(_BaseModel):
         """Warn if chunk buffering may use excessive memory (Windows only)."""
         warn_if_high_memory_usage(self)
         return self
+
+    @model_validator(mode="before")
+    @classmethod
+    def _pick_auto_format(cls, data: Any) -> Any:
+        """If format is 'auto', pick first available format/backend."""
+        if isinstance(data, dict):
+            if data.get("format", "auto") == "auto":
+                path = data.get("root_path", "").lower()
+                if path.endswith((".tiff", ".tif")):
+                    data["format"] = "ome-tiff"
+                elif path.endswith(".zarr"):
+                    data["format"] = "ome-zarr"
+                else:
+                    data["format"] = next(iter(AVAILABLE_BACKENDS))
+        return data
 
 
 # ---------------------------------------------------------------------------

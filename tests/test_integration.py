@@ -230,10 +230,11 @@ FrameExpectation: TypeAlias = dict[int, StorageIdxToFrame]
 @pytest.mark.parametrize("case", CASES, ids=_name_case)
 def test_cases(case: AcquisitionSettings, any_backend: str, tmp_path: Path) -> None:
     # Use model_copy to avoid cached_property contamination across tests
-    case = case.model_copy(
-        update={
+    case = AcquisitionSettings.model_validate(
+        {
+            **case.model_dump(),
             "root_path": str(tmp_path / f"output{BACKEND_TO_EXT[any_backend]}"),
-            "backend": any_backend,
+            "format": any_backend,
         }
     )
 
@@ -247,7 +248,7 @@ def test_cases(case: AcquisitionSettings, any_backend: str, tmp_path: Path) -> N
             return
         raise
 
-    if case.format == "tiff":
+    if case.format.name == "tiff":
         _assert_valid_ome_tiff(case)
     else:
         _assert_valid_ome_zarr(case)
@@ -257,12 +258,12 @@ def test_cases(case: AcquisitionSettings, any_backend: str, tmp_path: Path) -> N
 def test_auto_backend(tmp_path: Path, fmt: str) -> None:
     # just exercise the "auto" backend selection path
     suffix = f".{fmt}"
-    settings = CASES[1].model_copy(
-        update={
-            "root_path": str(tmp_path / f"output.ome{suffix}"),
-            "backend": "auto",
-        }
-    )
+    data = {
+        **CASES[1].model_dump(),
+        "root_path": str(tmp_path / f"output.ome{suffix}"),
+        "format": "auto",
+    }
+    settings = AcquisitionSettings.model_validate(data)
     frame_shape = tuple(d.count for d in settings.dimensions[-2:])
     try:
         stream = create_stream(settings)
@@ -293,7 +294,7 @@ def test_overwrite_safety(tmp_path: Path, any_backend: str) -> None:
             D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
         ],
         dtype="uint16",
-        backend=any_backend,
+        format=any_backend,
     )
 
     # First write should succeed
@@ -354,7 +355,7 @@ def test_chunk_memory_warning(
                 D(name="x", count=2048, chunk_size=64, type="space"),
             ],
             dtype="uint16",
-            backend="zarr-python",
+            format={"name": "zarr", "backend": "zarr-python"},
         )
 
 

@@ -195,7 +195,9 @@ def main(
         )
 
     root = f"test_{backend}.ome.{get_format_for_backend(backend)}"
-    settings = settings.model_copy(update={"backend": backend, "root_path": root})
+    settings = AcquisitionSettings.model_validate(
+        {**settings.model_dump(), "format": backend, "root_path": root}
+    )
 
     console.print(f"\n[bold]Profiling {backend}[/bold]")
     console.print(f"  Shape: {tuple(d.count for d in settings.dimensions)}")

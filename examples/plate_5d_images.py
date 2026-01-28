@@ -14,8 +14,8 @@ from ome_writers import (
 )
 
 # Derive backend from command line argument (default: auto)
-BACKEND = "auto" if len(sys.argv) < 2 else sys.argv[1]
-suffix = ".ome.tiff" if BACKEND == "tifffile" else ".ome.zarr"
+FORMAT = "auto" if len(sys.argv) < 2 else sys.argv[1]
+suffix = ".ome.tiff" if FORMAT == "tifffile" else ".ome.zarr"
 
 # create acquisition settings
 settings = AcquisitionSettings(
@@ -45,7 +45,7 @@ settings = AcquisitionSettings(
         column_names=["1", "2", "3", "4", "5", "6", "7", "8"],
     ),
     overwrite=True,
-    backend=BACKEND,
+    format=FORMAT,
 )
 
 num_frames = np.prod(settings.shape[:-2])
@@ -57,7 +57,7 @@ with create_stream(settings) as stream:
         stream.append(np.full(frame_shape, fill_value=i, dtype=settings.dtype))
 
 
-if settings.format == "zarr":
+if settings.format.name == "zarr":
     import yaozarrs
 
     yaozarrs.validate_zarr_store(settings.root_path)

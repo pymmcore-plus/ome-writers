@@ -217,9 +217,6 @@ def create_stream(settings: AcquisitionSettings) -> OMEStream:
     except FileExistsError:
         backend.finalize()
         raise
-    except Exception as e:  # pragma: no cover
-        backend.finalize()
-        raise RuntimeError(f"Unexpected error during backend preparation: {e}") from e
     return OMEStream(backend, router)
 
 
@@ -244,7 +241,7 @@ def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:
         If the backend doesn't support the given settings.
     """
     # Validate backend name
-    requested_backend = settings.backend.lower()
+    requested_backend = settings.format.backend.lower()
     if requested_backend not in VALID_BACKEND_NAMES:  # pragma: no cover
         raise ValueError(
             f"Unknown backend requested: '{requested_backend}'. "
@@ -257,7 +254,7 @@ def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:
         )
 
     # Determine candidates to try
-    target_format = settings.format
+    target_format = settings.format.name
     if requested_backend == "auto":
         candidates = [
             name

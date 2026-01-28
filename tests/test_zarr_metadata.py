@@ -32,7 +32,7 @@ def test_get_metadata_single_position(tmp_path: Path) -> None:
         ],
         dtype="uint16",
         overwrite=True,
-        backend="zarr-python",
+        format={"name": "zarr", "backend": "zarr-python"},
     )
 
     # Create and write data
@@ -89,7 +89,7 @@ def test_get_metadata_multiposition(tmp_path: Path) -> None:
         ],
         dtype="uint16",
         overwrite=True,
-        backend="zarr-python",
+        format={"name": "zarr", "backend": "zarr-python"},
     )
 
     # Create and write data
@@ -139,7 +139,7 @@ def test_update_metadata_error_handling(tmp_path: Path) -> None:
         ],
         dtype="uint16",
         overwrite=True,
-        backend="zarr-python",
+        format={"name": "zarr", "backend": "zarr-python"},
     )
 
     with create_stream(settings) as stream:
@@ -165,7 +165,7 @@ def test_zarr_metadata_workflow_example(tmp_path: Path) -> None:
         ],
         dtype="uint16",
         overwrite=True,
-        backend="zarr-python",
+        format={"name": "zarr", "backend": "zarr-python"},
     )
 
     # Create and write data
