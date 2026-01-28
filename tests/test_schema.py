@@ -335,7 +335,8 @@ def test_tiff_backend_format(tiff_backend: str) -> None:
     )
     assert settings.format == "tiff"
 
-    settings2 = settings.model_copy(update={"backend": "acquire-zarr"})
+    settings2 = settings.model_copy(deep=True)
+    settings2.backend = "acquire-zarr"
     assert settings2.format == "zarr"
 
 

@@ -34,7 +34,7 @@ StandardAxisKey: TypeAlias = Literal["x", "y", "z", "c", "t", "p"]
 
 
 class _BaseModel(BaseModel):
-    """Base model with frozen config."""
+    """Base model with common configuration."""
 
     model_config = ConfigDict(
         validate_default=True,
@@ -401,13 +401,7 @@ class AcquisitionSettings(_BaseModel):
 
     Pass this object to [ome_writers.create_stream][] to create a data stream
     for writing acquisition data.
-
-    !!! note
-        This is a frozen model.  Use `.model_copy(update={...})` to create modified
-        copies.
     """
-
-    model_config = ConfigDict(frozen=True, validate_default=True)
 
     root_path: Annotated[str, BeforeValidator(str)] = Field(
         description="Root output path for the acquisition data.  This may be a "
