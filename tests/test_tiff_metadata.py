@@ -166,6 +166,26 @@ def test_update_metadata_with_plates(tmp_path: Path, tiff_backend: str) -> None:
         assert len(ome_obj.images) == 2
         assert ome_obj.images[pos_idx].name == expected_name
 
+    # Verify plate structure
+    ome_obj = from_tiff(str(tmp_path / "plate_p000.ome.tiff"))
+    assert len(ome_obj.plates) == 1
+    plate = ome_obj.plates[0]
+    assert plate.id == "Plate:0"
+    assert plate.name == "Test Plate"
+    assert plate.rows == 1
+    assert plate.columns == 2
+    assert len(plate.wells) == 2
+    # Verify naming conventions are inferred correctly
+    assert plate.row_naming_convention.value == "letter"
+    assert plate.column_naming_convention.value == "number"
+
+    # Verify wells and well samples link to images
+    well_sample_refs = {}
+    for well in plate.wells:
+        for ws in well.well_samples:
+            well_sample_refs[ws.index] = ws.image_ref.id if ws.image_ref else None
+    assert well_sample_refs == {0: "Image:0", 1: "Image:1"}
+
     # Update metadata
     metadata = stream.get_metadata()
     # For multi-position, each position's metadata contains all images
