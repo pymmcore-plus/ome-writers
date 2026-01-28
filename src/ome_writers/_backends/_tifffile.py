@@ -166,7 +166,8 @@ class TiffBackend(ArrayBackend):
         if not self._finalized:
             # Signal threads to stop
             for manager in self._position_managers.values():
-                manager.queue.put(None)
+                if manager.queue is not None:
+                    manager.queue.put(None)
 
             # Wait for threads to finish
             for manager in self._position_managers.values():
@@ -176,6 +177,11 @@ class TiffBackend(ArrayBackend):
             # Update OME metadata if unbounded dimensions were written
             if self._storage_dims and any(d.count is None for d in self._storage_dims):
                 self._update_unbounded_metadata()
+
+            # Flush companion files (MULTI_MASTER_COMPANION mode)
+            for manager in self._position_managers.values():
+                if not manager.metadata_mirror.is_tiff:
+                    manager.metadata_mirror.flush(force=True)
 
             self._finalized = True
 
