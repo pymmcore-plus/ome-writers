@@ -57,6 +57,7 @@ class OMEStream:
         self._router = router
         self._iterator = iter(router)
         self._closed = False
+        self._has_appended = False
 
     def append(self, frame: np.ndarray) -> None:
         """Write the next frame in acquisition order.
@@ -74,6 +75,7 @@ class OMEStream:
         """
         pos_idx, idx = next(self._iterator)
         self._backend.write(pos_idx, idx, frame)
+        self._has_appended = True
 
     def get_metadata(self) -> Any:
         """Retrieve metadata from the backend.  Meaning is format-dependent."""
@@ -98,7 +100,7 @@ class OMEStream:
 
     def __del__(self) -> None:
         """Make sure things aren't still running on deletion."""
-        if not self._closed:
+        if self._has_appended and not self._closed:
             warnings.warn(
                 "OMEStream was not closed before garbage collection. Please "
                 "use `with create_stream(...):` in a context manager or call "
