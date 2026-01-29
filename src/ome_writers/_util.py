@@ -101,7 +101,7 @@ def dims_from_useq(
         An optional mapping of dimension labels to their units.
     pixel_size_um : float | None, optional
         The size of a pixel in micrometers. If provided, it will be used to set the
-        scale for the spatial dimensions..
+        scale for the spatial dimensions.
     """
     try:
         from useq import Axis, MDASequence
