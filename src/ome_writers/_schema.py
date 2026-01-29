@@ -369,9 +369,17 @@ def _validate_unique_names_per_group(positions: list[Position]) -> None:
                 )
             else:
                 # Format error based on coordinate type
+                plate_row, plate_column, grid_row, grid_column = key
+                parts = []
+                if plate_row is not None and plate_column is not None:
+                    parts.append(f'well ("{plate_row}", "{plate_column}")')
+                if grid_row is not None and grid_column is not None:
+                    parts.append(f"grid position ({grid_row}, {grid_column})")
+
+                group_desc = ", ".join(parts) if parts else f"group {key}"
                 raise ValueError(
                     f"Position names must be unique within each group. "
-                    f"Group {key} has duplicate names: {duplicates}"
+                    f"Duplicate names in {group_desc}: {duplicates}"
                 )
 
 
