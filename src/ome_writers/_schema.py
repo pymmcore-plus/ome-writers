@@ -351,11 +351,8 @@ def _validate_unique_names_per_group(positions: list[Position]) -> None:
     # Group positions by their hierarchical coordinates
     groups: dict[tuple, list[str]] = defaultdict(list)
     for pos in positions:
-        # Use grid coordinates if present, otherwise plate coordinates
-        if pos.grid_row is not None or pos.grid_column is not None:
-            key = (pos.grid_row, pos.grid_column)
-        else:
-            key = (pos.plate_row, pos.plate_column)
+        # Use plate and grid coordinates to form the key
+        key = (pos.plate_row, pos.plate_column, pos.grid_row, pos.grid_column)
         groups[key].append(pos.name)
 
     # Check for duplicates within each group
