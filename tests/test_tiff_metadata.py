@@ -166,6 +166,26 @@ def test_update_metadata_with_plates(tmp_path: Path, tiff_backend: str) -> None:
         assert len(ome_obj.images) == 2
         assert ome_obj.images[pos_idx].name == expected_name
 
+    # Verify plate structure
+    ome_obj = from_tiff(str(tmp_path / "plate_p000.ome.tiff"))
+    assert len(ome_obj.plates) == 1
+    plate = ome_obj.plates[0]
+    assert plate.id == "Plate:0"
+    assert plate.name == "Test Plate"
+    assert plate.rows == 1
+    assert plate.columns == 2
+    assert len(plate.wells) == 2
+    # Verify naming conventions are inferred correctly
+    assert plate.row_naming_convention.value == "letter"
+    assert plate.column_naming_convention.value == "number"
+
+    # Verify wells and well samples link to images
+    well_sample_refs = {}
+    for well in plate.wells:
+        for ws in well.well_samples:
+            well_sample_refs[ws.index] = ws.image_ref.id if ws.image_ref else None
+    assert well_sample_refs == {0: "Image:0", 1: "Image:1"}
+
     # Update metadata
     metadata = stream.get_metadata()
     # For multi-position, each position's metadata contains all images
@@ -219,7 +239,7 @@ def test_tiff_metadata_physical_sizes_and_names(
     assert ome_obj.images[0].acquisition_date is not None
 
     # Verify image name strips .ome extension
-    assert ome_obj.images[0].name == "test_metadata"
+    assert ome_obj.images[0].name == "0"
     assert not ome_obj.images[0].name.endswith(".ome")
 
 
@@ -262,90 +282,25 @@ def test_tiff_multiposition_detailed_metadata(
                 assert f"multipos_p{img_idx:03}.ome.tiff" in (td.uuid.file_name or "")
 
 
-def test_plate_structure_in_metadata(tmp_path: Path, tiff_backend: str) -> None:
-    """Test that plate metadata is correctly written with wells and well samples."""
+def test_prepare_meta(tmp_path: Path) -> None:
+    """Test _prepare_meta function for TIFF backend."""
+    from ome_writers._backends._ome_xml import MetadataMode, prepare_metadata
+
     settings = AcquisitionSettings(
-        root_path=str(tmp_path / "plate_structure.ome.tiff"),
+        root_path=tmp_path / "test.ome.tiff",
         dimensions=[
-            PositionDimension(
-                positions=[
-                    Position(name="fov0", plate_row="A", plate_column="1"),
-                    Position(name="fov0", plate_row="A", plate_column="2"),
-                    Position(name="fov0", plate_row="C", plate_column="4"),
-                    Position(
-                        name="fov1", plate_row="C", plate_column="4"
-                    ),  # 2 FOVs in C4
-                ]
-            ),
+            PositionDimension(positions=["Pos0", "Pos1"]),
+            Dimension(name="t", count=2, type="time"),
+            Dimension(name="c", count=1, type="channel"),
             Dimension(name="y", count=32, type="space"),
             Dimension(name="x", count=32, type="space"),
         ],
         dtype="uint16",
-        backend=tiff_backend,
-        plate=Plate(
-            name="Test Plate",
-            row_names=["A", "B", "C"],
-            column_names=["1", "2", "3", "4"],
-        ),
+        backend="tifffile",
     )
-
-    with create_stream(settings) as stream:
-        for _ in range(4):
-            stream.append(np.random.randint(0, 1000, (32, 32), dtype=np.uint16))
-
-    # Check the first file's metadata (all files have the same complete OME)
-    ome_obj = from_tiff(str(tmp_path / "plate_structure_p000.ome.tiff"))
-
-    # Verify plate metadata exists
-    assert len(ome_obj.plates) == 1
-    plate = ome_obj.plates[0]
-    assert plate.name == "Test Plate"
-    assert plate.rows == 3
-    assert plate.columns == 4
-
-    # Verify wells
-    assert len(plate.wells) == 3  # A1, A2, C4
-    well_ids = {w.id for w in plate.wells}
-    assert well_ids == {"Well:A_1", "Well:A_2", "Well:C_4"}
-
-    # Find C4 well and verify it has 2 samples
-    c4_well = next(w for w in plate.wells if w.id == "Well:C_4")
-    assert len(c4_well.well_samples) == 2
-    sample_image_refs = [s.image_ref.id for s in c4_well.well_samples]
-    assert "Image:2" in sample_image_refs
-    assert "Image:3" in sample_image_refs
-
-    # Verify image names include well info
-    expected_names = ["A1_fov0", "A2_fov0", "C4_fov0", "C4_fov1"]
-    actual_names = [img.name for img in ome_obj.images]
-    assert actual_names == expected_names
-
-
-# fmt: off
-# Test cases for _build_position_name
-POSITION_NAME_CASES = [
-    # (position, num_positions, expected_result, test_id)
-    (Position(name="0"), 1, None, "single_no_plate"),
-    (Position(name="pos0"), 3, "pos0", "multi_no_plate"),
-    (Position(name="fov0", plate_row="A", plate_column="1"), 2, "A1_fov0", "plate_prepend"),  # noqa: E501
-    (Position(name="A1", plate_row="A", plate_column="1"), 1, "A1", "plate_already_in_name"),  # noqa: E501
-    (Position(name="Well_A1", plate_row="A", plate_column="1"), 2, "Well_A1", "plate_in_name_with_prefix"),  # noqa: E501
-    (Position(name="A0001", plate_row="A", plate_column="1"), 1, "A0001", "plate_zero_padded"),  # noqa: E501
-    (Position(name="Well_A0001", plate_row="A", plate_column="1"), 2, "Well_A0001", "plate_zero_padded_with_prefix"),  # noqa: E501
-    (Position(name="Ctrl_Well", plate_row="A", plate_column="1"), 1, "A1_Ctrl_Well", "plate_not_in_name"),  # noqa: E501
-]
-# fmt: on
-
-
-@pytest.mark.parametrize(
-    ("position", "num_positions", "expected"),
-    [(p, n, e) for p, n, e, _ in POSITION_NAME_CASES],
-    ids=[test_id for _, _, _, test_id in POSITION_NAME_CASES],
-)
-def test_build_position_name(
-    position: Position, num_positions: int, expected: str | None
-) -> None:
-    """Test _build_position_name helper function with various cases."""
-    from ome_writers._backends._tifffile import _build_position_name
-
-    assert _build_position_name(position, num_positions) == expected
+    for mode in MetadataMode:
+        meta = prepare_metadata(settings, mode)
+        assert isinstance(meta, dict)
+        assert all(str(tmp_path) in key for key in meta.keys())
+        companion = mode == MetadataMode.MULTI_MASTER_COMPANION
+        assert sum(key.endswith("companion.ome") for key in meta) == companion

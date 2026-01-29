@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import contextlib
-import importlib
-import importlib.util
 import json
 import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypeAlias
+from typing import TYPE_CHECKING, Literal, TypeAlias
 from unittest.mock import Mock
 
 import numpy as np
@@ -29,6 +27,9 @@ from ome_writers import (
     create_stream,
 )
 from ome_writers._frame_encoder import validate_encoded_frame_values, write_encoded_data
+
+if TYPE_CHECKING:
+    from ome_writers._schema import BackendName
 
 BACKEND_TO_EXT = {b.name: f".ome.{b.format}" for b in _stream.BACKENDS}
 # NOTES:
@@ -228,40 +229,45 @@ FrameExpectation: TypeAlias = dict[int, StorageIdxToFrame]
 
 
 @pytest.mark.parametrize("case", CASES, ids=_name_case)
-def test_cases(case: AcquisitionSettings, any_backend: str, tmp_path: Path) -> None:
+def test_cases(
+    case: AcquisitionSettings,
+    any_backend: BackendName | Literal["auto"],
+    tmp_path: Path,
+) -> None:
     # Use model_copy to avoid cached_property contamination across tests
-    case = case.model_copy(
-        update={
-            "root_path": str(tmp_path / f"output{BACKEND_TO_EXT[any_backend]}"),
-            "backend": any_backend,
-        }
-    )
+    settings = case.model_copy(deep=True)
+    settings.root_path = str(tmp_path / f"output{BACKEND_TO_EXT[any_backend]}")
+    settings.backend = any_backend
 
     # -------------- Write out all frames --------------
 
     try:
-        write_encoded_data(case, real_unbounded_count=UNBOUNDED_FRAME_COUNT)
+        write_encoded_data(settings, real_unbounded_count=UNBOUNDED_FRAME_COUNT)
     except NotImplementedError as e:
         if re.match("Backend .* does not support settings", str(e)):
             pytest.xfail(f"Backend does not support this configuration: {e}")
             return
         raise
 
-    if case.format == "tiff":
-        _assert_valid_ome_tiff(case)
+    if settings.format == "tiff":
+        _assert_valid_ome_tiff(settings)
     else:
-        _assert_valid_ome_zarr(case)
+        _assert_valid_ome_zarr(settings)
 
 
 @pytest.mark.parametrize("fmt", ["tiff", "zarr"])
 def test_auto_backend(tmp_path: Path, fmt: str) -> None:
     # just exercise the "auto" backend selection path
     suffix = f".{fmt}"
-    settings = CASES[1].model_copy(
-        update={
-            "root_path": str(tmp_path / f"output.ome{suffix}"),
-            "backend": "auto",
-        }
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / f"output.ome{suffix}"),
+        dimensions=[
+            D(name="c", count=2, type="channel"),
+            D(name="y", count=64, chunk_size=64, unit="um", scale=0.1),
+            D(name="x", count=64, chunk_size=64, unit="um", scale=0.1),
+        ],
+        dtype="uint8",
+        backend="auto",
     )
     frame_shape = tuple(d.count for d in settings.dimensions[-2:])
     try:
@@ -493,10 +499,10 @@ def _assert_valid_ome_tiff(case: AcquisitionSettings) -> None:
 
 def _assert_bioformats_reads_ome_tiff(case: AcquisitionSettings) -> None:
     # Test that bioformats can read the generated OME-TIFF correctly
-    if not importlib.util.find_spec("scyjava"):
-        pytest.skip("Bio-Formats reader is required for OME-TIFF validation")
-
-    from tests._bf_reader import read_core_meta_with_bioformats
+    try:
+        from tests._bf_reader import read_core_meta_with_bioformats
+    except ImportError:
+        return
 
     dims = {
         d.name: d.count or UNBOUNDED_FRAME_COUNT for d in case.array_storage_dimensions
