@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from itertools import product
 from typing import TYPE_CHECKING, cast
 
@@ -116,7 +117,7 @@ def dims_from_useq(
     if has_position_subsequences:
         _validate_position_subsequences(seq)
 
-    combined_positions = _build_combined_positions(seq, has_position_subsequences)
+    combined_positions = _build_positions(seq, has_position_subsequences)
     position_insert_index: int | None = None
 
     dims: list[Dimension] = []
@@ -181,37 +182,136 @@ def _validate_position_subsequences(seq: useq.MDASequence) -> None:
             )
 
 
-def _build_combined_positions(
+def _build_positions(
     seq: useq.MDASequence, has_position_subsequences: bool
 ) -> list[Position] | None:
-    """Build combined positions for grid+positions cases."""
+    """Build Position list from useq stage_positions, handling special cases.
+
+    Handles: WellPlatePlan, position subsequences with grids, and sequence-level grids.
+    Returns None for simple stage_positions that don't need special handling.
+    """
+    from useq import WellPlatePlan
+
+    if isinstance(seq.stage_positions, WellPlatePlan):
+        return _build_positions_from_well_plate_plan(seq)
     if has_position_subsequences:
-        combined: list[Position] = []
-        for p_idx, pos in enumerate(seq.stage_positions):
-            pos_name = pos.name or f"{p_idx:04d}"
-            if pos.sequence and pos.sequence.grid_plan:
-                for grid_pos in pos.sequence.grid_plan:
-                    combined.append(
-                        Position(
-                            name=pos_name,
-                            grid_row=grid_pos.row,
-                            grid_column=grid_pos.col,
-                        )
-                    )
-            else:
-                combined.append(Position(name=pos_name))
-        return combined
-
+        return _build_positions_from_subsequences(seq)
     if seq.grid_plan and seq.stage_positions:
-        combined = []
-        for p_idx, stage_pos in enumerate(seq.stage_positions):
-            pos_name = stage_pos.name or f"{p_idx:04d}"
-            for grid_pos in seq.grid_plan:
-                combined.append(
-                    Position(
-                        name=pos_name, grid_row=grid_pos.row, grid_column=grid_pos.col
-                    )
-                )
-        return combined
-
+        return _build_positions_with_grid(seq)
     return None
+
+
+def _build_positions_from_subsequences(seq: useq.MDASequence) -> list[Position]:
+    """Build positions from stage positions that have grid subsequences."""
+    combined: list[Position] = []
+    for idx, pos in enumerate(seq.stage_positions):
+        pos_name = pos.name or f"{idx:04d}"
+        plate_row, plate_col = _parse_plate_coords(pos)
+        grid_plan = pos.sequence.grid_plan if pos.sequence else None
+
+        if grid_plan:
+            combined.extend(
+                Position(
+                    name=pos_name,
+                    plate_row=plate_row,
+                    plate_column=plate_col,
+                    grid_row=g.row,
+                    grid_column=g.col,
+                )
+                for g in grid_plan
+            )
+        else:
+            combined.append(
+                Position(name=pos_name, plate_row=plate_row, plate_column=plate_col)
+            )
+    return combined
+
+
+def _build_positions_with_grid(seq: useq.MDASequence) -> list[Position]:
+    """Build positions by expanding stage positions with sequence-level grid."""
+    if seq.grid_plan is None:
+        raise ValueError(
+            "MDASequence grid_plan must be defined to build positions with grid."
+        )
+    return [
+        Position(
+            name=pos.name or f"{idx:04d}",
+            plate_row=plate_row,
+            plate_column=plate_col,
+            grid_row=g.row,
+            grid_column=g.col,
+        )
+        for idx, pos in enumerate(seq.stage_positions)
+        for plate_row, plate_col in [_parse_plate_coords(pos)]
+        for g in seq.grid_plan
+    ]
+
+
+def _build_positions_from_well_plate_plan(seq: useq.MDASequence) -> list[Position]:
+    """Build positions from a WellPlatePlan, extracting well and grid coordinates."""
+    from useq import GridRowsColumns, WellPlatePlan
+
+    wpp = cast("WellPlatePlan", seq.stage_positions)
+    well_names = [str(n) for n in wpp.selected_well_names]
+    num_points = wpp.num_points_per_well
+
+    # Get grid coordinates from well_points_plan if it's a grid
+    grid_coords = (
+        [(g.row, g.col) for g in wpp.well_points_plan]
+        if isinstance(wpp.well_points_plan, GridRowsColumns)
+        else None
+    )
+    # Get sequence-level grid coordinates if present
+    seq_grid = [(g.row, g.col) for g in seq.grid_plan] if seq.grid_plan else None
+
+    combined: list[Position] = []
+    for i, pos in enumerate(wpp):
+        well_idx, point_idx = divmod(i, num_points)
+        well_name = well_names[well_idx]
+
+        # Parse plate row/col from well name (e.g., 'A1' -> 'A', '1')
+        match = re.match(r"([A-Za-z]+)(\d+)", well_name)
+        plate_row, plate_col = match.groups() if match else (None, None)
+
+        pos_name = pos.name or f"{well_idx:04d}"
+        grid_row, grid_col = (
+            grid_coords[point_idx]
+            if grid_coords and point_idx < len(grid_coords)
+            else (None, None)
+        )
+
+        # Expand with sequence-level grid if present, otherwise use well_points grid
+        if seq_grid:
+            combined.extend(
+                Position(
+                    name=pos_name,
+                    plate_row=plate_row,
+                    plate_column=plate_col,
+                    grid_row=gr,
+                    grid_column=gc,
+                )
+                for gr, gc in seq_grid
+            )
+        else:
+            combined.append(
+                Position(
+                    name=pos_name,
+                    plate_row=plate_row,
+                    plate_column=plate_col,
+                    grid_row=grid_row,
+                    grid_column=grid_col,
+                )
+            )
+
+    return combined
+
+
+def _parse_plate_coords(pos: useq.Position) -> tuple[str | None, str | None]:
+    """Extract plate_row and plate_column from a useq Position if available."""
+    plate_row = getattr(pos, "row", None)
+    plate_col = getattr(pos, "col", None)
+    if plate_row is not None:
+        plate_row = str(plate_row)
+    if plate_col is not None:
+        plate_col = str(plate_col)
+    return plate_row, plate_col

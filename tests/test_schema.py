@@ -194,21 +194,21 @@ def test_same_name_allowed_in_different_groups() -> None:
     well has the same grid layout with the same site names.
     """
     # Same name, same grid coords, but different plate coords
-    # (e.g., "Site1" at grid position (0,0) in wells A/1 and B/2)
+    # (e.g., "fov0" at grid position (0,0) in wells A/1 and B/2)
     settings = AcquisitionSettings(
         root_path="test.zarr",
         dimensions=[
             PositionDimension(
                 positions=[
                     Position(
-                        name="Site1",
+                        name="fov0",
                         plate_row="A",
                         plate_column="1",
                         grid_row=0,
                         grid_column=0,
                     ),
                     Position(
-                        name="Site1",
+                        name="fov0",
                         plate_row="B",
                         plate_column="2",
                         grid_row=0,
@@ -263,14 +263,14 @@ def test_same_name_allowed_in_different_groups() -> None:
                 PositionDimension(
                     positions=[
                         Position(
-                            name="Site1",
+                            name="fov0",
                             plate_row="A",
                             plate_column="1",
                             grid_row=0,
                             grid_column=0,
                         ),
                         Position(
-                            name="Site1",
+                            name="fov0",
                             plate_row="A",
                             plate_column="1",
                             grid_row=0,

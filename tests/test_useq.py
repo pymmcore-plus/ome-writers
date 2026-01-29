@@ -136,3 +136,91 @@ def test_useq_to_dims(seq: "useq.MDASequence") -> None:
         elif dim.name == "c":
             assert dim.unit is None
             assert dim.scale == 1.0
+
+
+# WellPlatePlan test cases: (sequence, expected_positions)
+# expected_positions format: [(name, plate_row, plate_col, grid_row, grid_col), ...]
+WELL_PLATE_CASES = [
+    pytest.param(
+        useq.MDASequence(
+            axis_order="ptcz",
+            stage_positions=useq.WellPlatePlan(
+                plate=useq.WellPlate.from_str("96-well"),
+                a1_center_xy=(0.0, 0.0),
+                selected_wells=((0, 1), (0, 1)),  # Wells A1 and B2
+                well_points_plan=useq.GridRowsColumns(rows=1, columns=2),
+            ),
+            time_plan={"interval": 0.1, "loops": 2},
+            channels=["DAPI"],
+        ),
+        [
+            ("A1_0000", "A", "1", 0, 0),
+            ("A1_0001", "A", "1", 0, 1),
+            ("B2_0000", "B", "2", 0, 0),
+            ("B2_0001", "B", "2", 0, 1),
+        ],
+        id="well_points_plan_only",
+    ),
+    pytest.param(
+        useq.MDASequence(
+            axis_order="ptcz",
+            stage_positions=useq.WellPlatePlan(
+                plate=useq.WellPlate.from_str("96-well"),
+                a1_center_xy=(0.0, 0.0),
+                selected_wells=((0, 1), (0, 1)),  # Wells A1 and B2
+            ),
+            time_plan={"interval": 0.1, "loops": 2},
+            channels=["DAPI"],
+            grid_plan=useq.GridRowsColumns(rows=1, columns=2),
+        ),
+        [
+            ("A1", "A", "1", 0, 0),
+            ("A1", "A", "1", 0, 1),
+            ("B2", "B", "2", 0, 0),
+            ("B2", "B", "2", 0, 1),
+        ],
+        id="sequence_grid_only",
+    ),
+    pytest.param(
+        useq.MDASequence(
+            axis_order="ptcz",
+            stage_positions=useq.WellPlatePlan(
+                plate=useq.WellPlate.from_str("96-well"),
+                a1_center_xy=(0.0, 0.0),
+                selected_wells=((0,), (0,)),  # Just well A1
+                well_points_plan=useq.GridRowsColumns(rows=1, columns=2),
+            ),
+            time_plan={"interval": 0.1, "loops": 2},
+            channels=["DAPI"],
+            grid_plan=useq.GridRowsColumns(rows=2, columns=1),
+        ),
+        [
+            ("A1_0000", "A", "1", 0, 0),
+            ("A1_0000", "A", "1", 1, 0),
+            ("A1_0001", "A", "1", 0, 0),
+            ("A1_0001", "A", "1", 1, 0),
+        ],
+        id="both_grids",
+    ),
+]
+
+
+@pytest.mark.parametrize(("seq", "expected"), WELL_PLATE_CASES)
+def test_well_plate_plan(seq: "useq.MDASequence", expected: list) -> None:
+    """Test dims_from_useq with WellPlatePlan extracts plate and grid coordinates."""
+    from ome_writers._schema import PositionDimension
+
+    dims = dims_from_useq(seq, image_width=64, image_height=64)
+
+    pos_dim = dims[0]
+    assert isinstance(pos_dim, PositionDimension)
+    assert len(pos_dim.positions) == len(expected)
+
+    for pos, (name, plate_row, plate_col, grid_row, grid_col) in zip(
+        pos_dim.positions, expected, strict=True
+    ):
+        assert pos.name == name
+        assert pos.plate_row == plate_row
+        assert pos.plate_column == plate_col
+        assert pos.grid_row == grid_row
+        assert pos.grid_column == grid_col
