@@ -200,7 +200,8 @@ class Position(_BaseModel):
 
     name: Annotated[str, Len(min_length=1)] = Field(
         description="Unique name for this position. Within a list of positions, "
-        "names must be unique within each `(plate_row, plate_column)` pair.",
+        "names must be unique within each `(plate_row, plate_column)` or "
+        "`(grid_row, grid_column)` pair.",
     )
     plate_row: str | None = Field(
         default=None,
@@ -209,6 +210,14 @@ class Position(_BaseModel):
     plate_column: str | None = Field(
         default=None,
         description="Column name for plate position.",
+    )
+    grid_row: int | None = Field(
+        default=None,
+        description="Row index for this position in a grid layout (if any).",
+    )
+    grid_column: int | None = Field(
+        default=None,
+        description="Column index for this position in a grid layout (if any).",
     )
     # TODO
     # These could be used to specify the coordinateTransform.translate for

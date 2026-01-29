@@ -27,19 +27,13 @@ UM = "micrometer"
 seq = useq.MDASequence(
     axis_order="ptcz",
     stage_positions=[
-        useq.Position(x=0.0, y=0.0, name="single_pos"),
-        useq.Position(
-            x=10.0,
-            y=10.0,
-            name="grid_pos",
-            sequence=useq.MDASequence(
-                grid_plan=useq.GridRowsColumns(rows=1, columns=2)
-            ),
-        ),
+        useq.Position(name="0000", x=0.0, y=0.0),
+        useq.Position(name="0001", x=10.0, y=10.0),
     ],
     time_plan={"interval": 0.1, "loops": 3},
     channels=["DAPI", "Cy5"],
     z_plan={"range": 2, "step": 1.0},
+    grid_plan=useq.GridRowsColumns(rows=1, columns=2),
 )
 
 # Convert the useq.MDASequence to ome-writers Dimensions

@@ -53,19 +53,25 @@ SEQ = [
 ]
 
 # Expected results for each test case
+# Format: (dim_names, pos_names, grid_info)
+# grid_info is a list of (grid_row, grid_column) tuples or None for non-grid positions
 EXPECTED_RESULTS = [
-    (["p", "t", "c", "z", "y", "x"], ["0", "1"]),  # simple positions
+    # simple positions
+    (["p", "t", "c", "z", "y", "x"], ["0", "1"], None),
     (
         ["p", "t", "c", "z", "y", "x"],
-        ["p000g000", "p000g001", "p001g000", "p001g001"],
+        ["0000_0000", "0000_0001", "0001_0000", "0001_0001"],
+        [(0, 0), (0, 1), (0, 0), (0, 1)],
     ),  # grid+positions (ptgcz)
     (
         ["p", "t", "z", "c", "y", "x"],
-        ["p000g000", "p000g001", "p001g000", "p001g001"],
+        ["0000_0000", "0000_0001", "0001_0000", "0001_0001"],
+        [(0, 0), (0, 1), (0, 0), (0, 1)],
     ),  # grid+positions (ptgzc)
     (
         ["p", "t", "c", "z", "y", "x"],
-        ["single_pos", "grid_g000", "grid_g001"],
+        ["single_pos", "grid_0000", "grid_0001"],
+        [None, (0, 0), (0, 1)],
     ),  # position subsequences
 ]
 
@@ -87,7 +93,7 @@ def test_useq_to_dims(seq: "useq.MDASequence") -> None:
 
     # Get expected results for this sequence
     seq_idx = SEQ.index(seq)
-    expected_names, expected_pos_names = EXPECTED_RESULTS[seq_idx]
+    expected_names, expected_pos_names, expected_grid_info = EXPECTED_RESULTS[seq_idx]
 
     # Test with units and pixel_size_um
     dims = dims_from_useq(
@@ -105,6 +111,16 @@ def test_useq_to_dims(seq: "useq.MDASequence") -> None:
     pos_dim = dims[0]
     assert isinstance(pos_dim, PositionDimension)
     assert pos_dim.names == expected_pos_names
+
+    # Check grid_row and grid_column for positions with grid info
+    if expected_grid_info is not None:
+        for pos, grid_info in zip(pos_dim.positions, expected_grid_info, strict=True):
+            if grid_info is None:
+                assert pos.grid_row is None
+                assert pos.grid_column is None
+            else:
+                assert pos.grid_row == grid_info[0]
+                assert pos.grid_column == grid_info[1]
 
     # Check units and scales for non-position dimensions
     for dim in dims[1:]:

@@ -8,6 +8,7 @@ import numpy.typing as npt
 
 from ome_writers._schema import (
     Dimension,
+    Position,
     PositionDimension,
     StandardAxis,
     dims_from_standard_axes,
@@ -182,28 +183,37 @@ def _validate_position_subsequences(seq: useq.MDASequence) -> None:
 
 def _build_combined_positions(
     seq: useq.MDASequence, has_position_subsequences: bool
-) -> list[str] | None:
-    """Build combined position names for grid+positions cases."""
-    from useq import Axis
-
+) -> list[Position] | None:
+    """Build combined positions for grid+positions cases."""
     if has_position_subsequences:
-        combined = []
+        combined: list[Position] = []
         for p_idx, pos in enumerate(seq.stage_positions):
-            pos_name = pos.name or f"p{p_idx:03d}"
+            pos_name = pos.name or f"{p_idx:04d}"
             if pos.sequence and pos.sequence.grid_plan:
-                n_grid = pos.sequence.grid_plan.num_positions()
-                combined.extend(f"{pos_name}_g{g_idx:03d}" for g_idx in range(n_grid))
+                for grid_pos in pos.sequence.grid_plan:
+                    combined.append(
+                        Position(
+                            name=f"{pos_name}_{grid_pos.name}",
+                            grid_row=grid_pos.row,
+                            grid_column=grid_pos.col,
+                        )
+                    )
             else:
-                combined.append(pos_name)
+                combined.append(Position(name=pos_name))
         return combined
 
     if seq.grid_plan and seq.stage_positions:
-        n_positions = seq.sizes.get(Axis.POSITION, 1)
-        n_grid = seq.sizes.get(Axis.GRID) or seq.grid_plan.num_positions()
-        return [
-            f"p{p_idx:03d}g{g_idx:03d}"
-            for p_idx in range(n_positions)
-            for g_idx in range(n_grid)
-        ]
+        combined = []
+        for p_idx, stage_pos in enumerate(seq.stage_positions):
+            pos_name = stage_pos.name or f"{p_idx:04d}"
+            for grid_pos in seq.grid_plan:
+                combined.append(
+                    Position(
+                        name=f"{pos_name}_{grid_pos.name}",
+                        grid_row=grid_pos.row,
+                        grid_column=grid_pos.col,
+                    )
+                )
+        return combined
 
     return None
