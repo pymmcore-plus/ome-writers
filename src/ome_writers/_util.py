@@ -127,6 +127,10 @@ def dims_from_useq(
     combined_positions = _build_positions(seq, has_position_subsequences, is_well_plate)
     position_insert_index: int | None = None
 
+    # NOTE: v1 useq schema has a terminal bug:
+    # certain MDASequences (e.g. time plans with interval=0) will trigger
+    # a ZeroDivisionError on `seq.sizes`.  but they are broken upstream until v2.
+    # with v2, we have better ways to look for unbounded dimensions.
     dims: list[Dimension] = []
     for ax_name, size in seq.sizes.items():
         if not size:  # pragma: no cover
