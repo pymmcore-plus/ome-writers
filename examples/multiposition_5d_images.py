@@ -4,7 +4,13 @@ import sys
 
 import numpy as np
 
-from ome_writers import AcquisitionSettings, Dimension, PositionDimension, create_stream
+from ome_writers import (
+    AcquisitionSettings,
+    Dimension,
+    Position,
+    PositionDimension,
+    create_stream,
+)
 
 # Derive backend from command line argument (default: auto)
 BACKEND = "auto" if len(sys.argv) < 2 else sys.argv[1]
@@ -17,7 +23,16 @@ settings = AcquisitionSettings(
     # declare dimensions in order of acquisition (slowest to fastest)
     dimensions=[
         Dimension(name="t", count=2, chunk_size=1, type="time"),
-        PositionDimension(positions=["Pos0", "Pos1"]),
+        # PositionDimension(positions=["Pos0", "Pos1"]),
+        PositionDimension(
+            positions=[
+                Position(name="Pos0", grid_row=0, grid_column=0),
+                Position(name="Pos0", grid_row=0, grid_column=1),
+                Position(name="Pos1", grid_row=0, grid_column=0),
+                Position(name="Pos1", grid_row=0, grid_column=1),
+            ],
+            name="p",
+        ),
         Dimension(name="c", count=3, chunk_size=1, type="channel"),
         Dimension(name="z", count=4, chunk_size=1, type="space", scale=5, unit=UM),
         Dimension(name="y", count=256, chunk_size=64, type="space", scale=2, unit=UM),

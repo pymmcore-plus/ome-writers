@@ -295,7 +295,7 @@ def _validate_dims_list(
         if isinstance(dim, PositionDimension):
             if has_pos:
                 raise ValueError("Only one PositionDimension is allowed.")
-            _validate_unique_names_per_well(dim.positions)
+            _validate_unique_names_per_group(dim.positions)
             has_pos = True
         else:
             n_dims += 1
@@ -337,32 +337,42 @@ def _validate_dims_list(
     return tuple(dims)
 
 
-def _validate_unique_names_per_well(positions: list[Position]) -> None:
-    """Validate position names are unique within each well.
+def _validate_unique_names_per_group(positions: list[Position]) -> None:
+    """Validate position names are unique within each hierarchical group.
 
-    For positions with row/column defined, names must be unique within each
-    (row, column) group. This allows the same name across different wells,
-    but not multiple positions with the same name in the same well.
+    For positions with plate coordinates or grid coordinates, names must be unique
+    within each group. This allows the same name across different wells/cells,
+    but not multiple positions with the same name in the same group.
+
+    Positions without any hierarchical coordinates (plate or grid) must have
+    globally unique names.
     """
-    # Group positions by (row, column) - only for positions with both defined
-    wells = {}
+    # Group positions by their hierarchical coordinates
+    groups: dict[tuple, list[str]] = {}
     for pos in positions:
-        key = (pos.plate_row, pos.plate_column)
-        wells.setdefault(key, []).append(pos.name)
+        # Use grid coordinates if present, otherwise plate coordinates
+        if pos.grid_row is not None or pos.grid_column is not None:
+            key = (pos.grid_row, pos.grid_column)
+        else:
+            key = (pos.plate_row, pos.plate_column)
+        groups.setdefault(key, []).append(pos.name)
 
-    # Check for duplicates within each well
-    for (row, col), names in wells.items():
+    # Check for duplicates within each group
+    for key, names in groups.items():
         if len(names) != len(set(names)):
             seen: set[str] = set()
             duplicates = [n for n in names if n in seen or seen.add(n)]
-            if row is None and col is None:
+
+            # All values None means no hierarchical structure
+            if all(v is None for v in key):
                 raise ValueError(
                     "All positions without row/column must have unique names."
                 )
             else:
+                # Format error based on coordinate type
                 raise ValueError(
-                    f"Position names must be unique within each well. "
-                    f"Well ({row}, {col}) has duplicate names: {duplicates}"
+                    f"Position names must be unique within each group. "
+                    f"Group {key} has duplicate names: {duplicates}"
                 )
 
 

@@ -193,7 +193,7 @@ def _build_combined_positions(
                 for grid_pos in pos.sequence.grid_plan:
                     combined.append(
                         Position(
-                            name=f"{pos_name}_{grid_pos.name}",
+                            name=pos_name,
                             grid_row=grid_pos.row,
                             grid_column=grid_pos.col,
                         )
@@ -209,9 +209,7 @@ def _build_combined_positions(
             for grid_pos in seq.grid_plan:
                 combined.append(
                     Position(
-                        name=f"{pos_name}_{grid_pos.name}",
-                        grid_row=grid_pos.row,
-                        grid_column=grid_pos.col,
+                        name=pos_name, grid_row=grid_pos.row, grid_column=grid_pos.col
                     )
                 )
         return combined

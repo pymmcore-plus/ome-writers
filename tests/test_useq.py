@@ -60,17 +60,17 @@ EXPECTED_RESULTS = [
     (["p", "t", "c", "z", "y", "x"], ["0", "1"], None),
     (
         ["p", "t", "c", "z", "y", "x"],
-        ["0000_0000", "0000_0001", "0001_0000", "0001_0001"],
+        ["0000", "0000", "0001", "0001"],  # Same name, different grid coords
         [(0, 0), (0, 1), (0, 0), (0, 1)],
     ),  # grid+positions (ptgcz)
     (
         ["p", "t", "z", "c", "y", "x"],
-        ["0000_0000", "0000_0001", "0001_0000", "0001_0001"],
+        ["0000", "0000", "0001", "0001"],  # Same name, different grid coords
         [(0, 0), (0, 1), (0, 0), (0, 1)],
     ),  # grid+positions (ptgzc)
     (
         ["p", "t", "c", "z", "y", "x"],
-        ["single_pos", "grid_0000", "grid_0001"],
+        ["single_pos", "grid", "grid"],  # Same name, different grid coords
         [None, (0, 0), (0, 1)],
     ),  # position subsequences
 ]
