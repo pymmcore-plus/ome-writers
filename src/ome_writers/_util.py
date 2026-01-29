@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections import defaultdict
 from itertools import product
 from typing import TYPE_CHECKING, cast
 
@@ -102,223 +103,174 @@ def dims_from_useq(
     pixel_size_um : float | None, optional
         The size of a pixel in micrometers. If provided, it will be used to set the
         scale for the spatial dimensions.
+
+    Raises
+    ------
+    NotImplementedError
+        If the sequence would produce ragged (non-rectangular) dimensions.
     """
     try:
         from useq import Axis, MDASequence
     except ImportError:
         raise ValueError("seq must be a useq.MDASequence") from None
-    else:
-        if not isinstance(seq, MDASequence):  # pragma: no cover
-            raise ValueError("seq must be a useq.MDASequence")
 
-    from useq import WellPlatePlan
+    if not isinstance(seq, MDASequence):  # pragma: no cover
+        raise ValueError("seq must be a useq.MDASequence")
+
+    events = _validate_events_not_ragged(seq)
 
     units = units or {}
+    dims: list[Dimension | PositionDimension] = []
 
-    # WellPlatePlan positions never have subsequences, so skip the check
-    is_well_plate = isinstance(seq.stage_positions, WellPlatePlan)
-    has_position_subsequences = (
-        False if is_well_plate else any(pos.sequence for pos in seq.stage_positions)
+    for ax_name in seq.axis_order:
+        if ax_name == Axis.POSITION:
+            positions = _build_positions_from_events(seq, events)
+            position_dim = StandardAxis.POSITION.to_dimension(positions=positions)
+            dims.append(position_dim)
+        elif ax_name != Axis.GRID and seq.sizes.get(ax_name, 0):
+            size = seq.sizes.get(ax_name, 0)
+            std_axis = StandardAxis(str(ax_name))
+            dim = std_axis.to_dimension(count=size, scale=1)
+            if isinstance(dim, Dimension):
+                if unit := units.get(str(ax_name)):
+                    dim.scale, dim.unit = unit
+                else:
+                    # Default units for known axes
+                    if std_axis == StandardAxis.TIME and seq.time_plan:
+                        dim.scale = seq.time_plan.interval.total_seconds()
+                        dim.unit = "second"
+                    elif std_axis == StandardAxis.Z and seq.z_plan:
+                        dim.scale = seq.z_plan.step
+                        dim.unit = "micrometer"
+            dims.append(dim)
+
+    dims.extend(
+        [
+            StandardAxis.Y.to_dimension(count=image_height, scale=pixel_size_um),
+            StandardAxis.X.to_dimension(count=image_width, scale=pixel_size_um),
+        ]
     )
 
-    if has_position_subsequences:
-        _validate_position_subsequences(seq)
-
-    combined_positions = _build_positions(seq, has_position_subsequences, is_well_plate)
-    position_insert_index: int | None = None
-
-    # NOTE: v1 useq schema has a terminal bug:
-    # certain MDASequences (e.g. time plans with interval=0) will trigger
-    # a ZeroDivisionError on `seq.sizes`.  but they are broken upstream until v2.
-    # with v2, we have better ways to look for unbounded dimensions.
-    dims: list[Dimension] = []
-    for ax_name, size in seq.sizes.items():
-        if not size:  # pragma: no cover
-            continue
-
-        if combined_positions is not None:
-            if ax_name == Axis.POSITION:
-                position_insert_index = len(dims)
-                continue
-            if ax_name == Axis.GRID:
-                continue
-
-        _ax = "p" if ax_name == Axis.GRID else ax_name
-        try:
-            std_axis = StandardAxis(_ax)
-        except ValueError:  # pragma: no cover
-            raise ValueError(f"Unsupported axis for OME: {ax_name}") from None
-
-        dim = std_axis.to_dimension(count=size, scale=1)
-
-        if isinstance(dim, Dimension) and (_unit := units.get(ax_name)):
-            dim.scale = _unit[0]
-            dim.unit = _unit[1]
-
-        dims.append(dim)
-
-    if combined_positions is not None:
-        insert_idx = position_insert_index if position_insert_index is not None else 0
-        dims.insert(
-            insert_idx, StandardAxis.POSITION.to_dimension(positions=combined_positions)
-        )
-
-    return [
-        *dims,
-        StandardAxis.Y.to_dimension(count=image_height, scale=pixel_size_um),
-        StandardAxis.X.to_dimension(count=image_width, scale=pixel_size_um),
-    ]
+    return dims
 
 
-def _validate_position_subsequences(seq: useq.MDASequence) -> None:
-    """Validate that position subsequences only contain grid_plan."""
-    for pos in seq.stage_positions:
-        if not pos.sequence:
-            continue
-        if not pos.sequence.grid_plan:
-            raise NotImplementedError(
-                "Position subsequences without grid_plan are not yet supported."
-            )
-        # Check that subsequence only contains grid_plan
-        has_other = (
-            pos.sequence.time_plan is not None
-            or pos.sequence.z_plan is not None
-            or pos.sequence.channels
-            or pos.sequence.stage_positions
-        )
-        if has_other:
-            raise NotImplementedError(
-                "Position subsequences with plans other than grid_plan "
-                "(e.g., time_plan, z_plan, channels) are not yet supported."
-            )
+def _validate_events_not_ragged(seq: useq.MDASequence) -> list[useq.MDAEvent]:
+    """Validate that the sequence produces rectangular (non-ragged) dimensions.
 
+    Parameters
+    ----------
+    seq : useq.MDASequence
+        The sequence to validate.
 
-def _build_positions(
-    seq: useq.MDASequence, has_position_subsequences: bool, is_well_plate: bool
-) -> list[Position] | None:
-    """Build Position list from useq stage_positions, handling special cases.
-
-    Handles: WellPlatePlan, position subsequences with grids, and sequence-level grids.
-    Returns None for simple stage_positions that don't need special handling.
+    Raises
+    ------
+    NotImplementedError
+        If the sequence would produce ragged dimensions.
     """
-    if is_well_plate:
-        return _build_positions_from_well_plate_plan(seq)
-    if has_position_subsequences:
-        return _build_positions_from_subsequences(seq)
-    if seq.grid_plan and seq.stage_positions:
-        return _build_positions_with_grid(seq)
-    return None
 
-
-def _build_positions_from_subsequences(seq: useq.MDASequence) -> list[Position]:
-    """Build positions from stage positions that have grid subsequences."""
-    combined: list[Position] = []
-    for idx, pos in enumerate(seq.stage_positions):
-        pos_name = pos.name or f"{idx:04d}"
-        plate_row, plate_col = _parse_plate_coords(pos)
-        grid_plan = pos.sequence.grid_plan if pos.sequence else None
-
-        if grid_plan:
-            combined.extend(
-                Position(
-                    name=pos_name,
-                    plate_row=plate_row,
-                    plate_column=plate_col,
-                    grid_row=g.row,
-                    grid_column=g.col,
-                )
-                for g in grid_plan
+    # Check 1: Channel.do_stack=False with z_plan creates ragged z dimension
+    if seq.z_plan and seq.channels:
+        do_stack_values = {c.do_stack for c in seq.channels}
+        if len(do_stack_values) > 1:
+            raise NotImplementedError(
+                "Sequences with mixed Channel.do_stack values are not supported. "
+                "This creates ragged dimensions where different channels have "
+                "different z-stack sizes."
             )
-        else:
-            combined.append(
-                Position(name=pos_name, plate_row=plate_row, plate_column=plate_col)
-            )
-    return combined
 
+    # Check 2: Validate by actually iterating through events
+    # This catches all forms of raggedness including position subsequences
+    dims_per_position = defaultdict(lambda: {"t": set(), "c": set(), "z": set()})
+    events = list(seq)
+    for event in events:
+        # Track which t/c/z indices this (p, g) sees
+        pos_key = (event.index.get("p", 0), event.index.get("g"))
+        dims_per_position[pos_key]["t"].add(event.index.get("t", 0))
+        dims_per_position[pos_key]["c"].add(event.index.get("c", 0))
+        dims_per_position[pos_key]["z"].add(event.index.get("z", 0))
 
-def _build_positions_with_grid(seq: useq.MDASequence) -> list[Position]:
-    """Build positions by expanding stage positions with sequence-level grid."""
-    if seq.grid_plan is None:
-        raise ValueError(
-            "MDASequence grid_plan must be defined to build positions with grid."
-        )
-    return [
-        Position(
-            name=pos.name or f"{idx:04d}",
-            plate_row=plate_row,
-            plate_column=plate_col,
-            grid_row=g.row,
-            grid_column=g.col,
-        )
-        for idx, pos in enumerate(seq.stage_positions)
-        for plate_row, plate_col in [_parse_plate_coords(pos)]
-        for g in seq.grid_plan
+    # All positions should have the same number of t/c/z values
+    dim_sizes = [
+        (len(dims["t"]), len(dims["c"]), len(dims["z"]))
+        for dims in dims_per_position.values()
     ]
+    unique_sizes = set(dim_sizes)
+    if len(unique_sizes) > 1:
+        raise NotImplementedError(
+            "Ragged dimensions detected: different positions have different "
+            f"dimensionality. Found dimension sizes (t,c,z): {unique_sizes}. "
+            "This is not supported."
+        )
+    return events
 
 
-def _build_positions_from_well_plate_plan(seq: useq.MDASequence) -> list[Position]:
-    """Build positions from a WellPlatePlan, extracting well and grid coordinates."""
-    from useq import GridRowsColumns, WellPlatePlan
+def _build_positions_from_events(
+    seq: useq.MDASequence, events: list[useq.MDAEvent]
+) -> list[Position]:
+    """Build Position list by observing useq iteration."""
+    from useq import WellPlatePlan
 
-    wpp = cast("WellPlatePlan", seq.stage_positions)
-    well_names = [str(n) for n in wpp.selected_well_names]
-    num_points = wpp.num_points_per_well
+    is_well_plate = isinstance(seq.stage_positions, WellPlatePlan)
+    seq_grid_list = list(seq.grid_plan) if seq.grid_plan else None
+    pos_grids = {}
+    well_points_list = None
+    if is_well_plate:
+        well_points_list = list(seq.stage_positions.well_points_plan)
+    else:
+        for i, pos in enumerate(seq.stage_positions):
+            if pos.sequence and pos.sequence.grid_plan:
+                pos_grids[i] = list(pos.sequence.grid_plan)
 
-    # Get sequence-level grid coordinates if present (takes precedence)
-    seq_grid = [(g.row, g.col) for g in seq.grid_plan] if seq.grid_plan else None
+    seen = {}
+    for event in events:
+        key = (event.index.get("p", 0), event.index.get("g"))
+        if key not in seen:
+            p_idx, g_idx = key
+            plate_row, plate_col = None, None
+            if event.pos_name not in (None, "None"):
+                name = event.pos_name
+                if is_well_plate:
+                    well_name = event.pos_name.split("_")[0]
+                    if match := re.match(r"([A-Za-z]+)(\d+)", well_name):
+                        plate_row, plate_col = match.groups()
+            else:
+                name = f"{p_idx:04d}" if g_idx is not None else str(p_idx)
 
-    # Get grid coordinates from well_points_plan only if no sequence-level grid
-    grid_coords: list[tuple[int | None, int | None]] | None = None
-    if seq_grid is None and isinstance(wpp.well_points_plan, GridRowsColumns):
-        grid_coords = [(g.row, g.col) for g in wpp.well_points_plan]
-
-    combined: list[Position] = []
-    for i, pos in enumerate(wpp):
-        well_idx, point_idx = divmod(i, num_points)
-        well_name = well_names[well_idx]
-
-        # Parse plate row/col from well name (e.g., 'A1' -> 'A', '1')
-        match = re.compile(r"([A-Za-z]+)(\d+)").match(well_name)
-        plate_row, plate_col = match.groups() if match else (None, None)
-        pos_name = pos.name or f"{well_idx:04d}"
-
-        # Expand with sequence-level grid if present, otherwise use well_points grid
-        if seq_grid:
-            combined.extend(
-                Position(
-                    name=pos_name,
-                    plate_row=plate_row,
-                    plate_column=plate_col,
-                    grid_row=gr,
-                    grid_column=gc,
-                )
-                for gr, gc in seq_grid
+            grid_row, grid_col = _extract_grid_coords(
+                p_idx, g_idx, is_well_plate, seq_grid_list, well_points_list, pos_grids
             )
-        else:
-            grid_row, grid_col = (
-                grid_coords[point_idx]
-                if grid_coords and point_idx < len(grid_coords)
-                else (None, None)
-            )
-            combined.append(
-                Position(
-                    name=pos_name,
-                    plate_row=plate_row,
-                    plate_column=plate_col,
-                    grid_row=grid_row,
-                    grid_column=grid_col,
-                )
+            seen[key] = Position(
+                name=name,
+                plate_row=plate_row,
+                plate_column=plate_col,
+                grid_row=grid_row,
+                grid_column=grid_col,
             )
 
-    return combined
+    return [seen[k] for k in sorted(seen.keys())]
 
 
-def _parse_plate_coords(pos: useq.Position) -> tuple[str | None, str | None]:
-    """Extract plate_row and plate_column from a useq Position if available."""
-    plate_row = getattr(pos, "row", None)
-    plate_col = getattr(pos, "col", None)
-    if plate_row is not None:
-        plate_row = str(plate_row)
-    if plate_col is not None:
-        plate_col = str(plate_col)
-    return plate_row, plate_col
+def _extract_grid_coords(
+    p_idx: int,
+    g_idx: int | None,
+    is_well_plate: bool,
+    seq_grid_list: list | None,
+    well_points_list: list | None,
+    pos_grids: dict[int, list],
+) -> tuple[int | None, int | None]:
+    """Extract grid row/col from grid lists."""
+    if g_idx is None:
+        if is_well_plate and well_points_list:
+            point_idx = p_idx % len(well_points_list)
+            if point_idx < len(well_points_list):
+                if pos := well_points_list[point_idx]:
+                    return pos.row, pos.col
+        return None, None
+
+    if seq_grid_list and g_idx < len(seq_grid_list):
+        return seq_grid_list[g_idx].row, seq_grid_list[g_idx].col
+
+    if (grid_list := pos_grids.get(p_idx)) and g_idx < len(grid_list):
+        return grid_list[g_idx].row, grid_list[g_idx].col
+
+    return None, None
