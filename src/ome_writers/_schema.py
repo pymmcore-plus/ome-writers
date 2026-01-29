@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import warnings
+from collections import Counter, defaultdict
 from enum import Enum
 from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeAlias, cast, get_args
 
@@ -348,21 +349,22 @@ def _validate_unique_names_per_group(positions: list[Position]) -> None:
     globally unique names.
     """
     # Group positions by their hierarchical coordinates
-    groups: dict[tuple, list[str]] = {}
+    groups: dict[tuple, list[str]] = defaultdict(list)
     for pos in positions:
         # Use grid coordinates if present, otherwise plate coordinates
         if pos.grid_row is not None or pos.grid_column is not None:
             key = (pos.grid_row, pos.grid_column)
         else:
             key = (pos.plate_row, pos.plate_column)
-        groups.setdefault(key, []).append(pos.name)
+        groups[key].append(pos.name)
 
     # Check for duplicates within each group
     for key, names in groups.items():
-        if len(names) != len(set(names)):
-            seen: set[str] = set()
-            duplicates = [n for n in names if n in seen or seen.add(n)]
+        # Use Counter to find duplicates in a single pass
+        counts = Counter(names)
+        duplicates = [name for name, count in counts.items() if count > 1]
 
+        if duplicates:
             # All values None means no hierarchical structure
             if all(v is None for v in key):
                 raise ValueError(
