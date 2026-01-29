@@ -151,7 +151,7 @@ def test_plate_position_warnings(caplog: pytest.LogCaptureFixture) -> None:
 def test_duplicate_names_rejected() -> None:
     """Test that duplicate position names within the same well are rejected."""
     with pytest.raises(
-        ValueError, match="Position names must be unique within each well"
+        ValueError, match="Position names must be unique within each group"
     ):
         AcquisitionSettings(
             root_path="test.zarr",
