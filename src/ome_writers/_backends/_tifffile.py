@@ -14,6 +14,7 @@ from ome_writers._backends._ome_xml import prepare_metadata
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from typing import Any
 
     import numpy as np
 
@@ -29,6 +30,14 @@ except ImportError as e:
         f"{__name__} requires tifffile and ome-types: "
         "`pip install ome-writers[tifffile]`."
     ) from e
+
+PLANE_KEYS = {
+    "delta_t",
+    "exposure_time",
+    "position_x",
+    "position_y",
+    "position_z",
+}
 
 
 @dataclass
@@ -67,6 +76,7 @@ class TiffBackend(ArrayBackend):
         self._position_managers: dict[int, PositionManager] = {}
         self._storage_dims: tuple[Dimension, ...] | None = None
         self._dtype: str = ""
+        self._frame_metadata: dict[int, list[dict[str, Any]]] = {}
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         """Check if settings are compatible with TIFF backend."""
@@ -105,6 +115,8 @@ class TiffBackend(ArrayBackend):
         """Initialize OME-TIFF files and writer threads."""
         self._finalized = False
         self._storage_dims = storage_dims = settings.array_storage_dimensions
+        # Extract index keys, excluding Y and X, example: ['t', 'c', 'z']
+        self._index_keys = [d.name for d in storage_dims[:-2]]
         self._dtype = settings.dtype
 
         # Extract and validate compression
@@ -149,6 +161,8 @@ class TiffBackend(ArrayBackend):
         position_index: int,
         index: tuple[int, ...],
         frame: np.ndarray,
+        *,
+        frame_metadata: dict[str, Any] | None = None,
     ) -> None:
         """Write frame sequentially to the appropriate position's TIFF file.
 
@@ -159,7 +173,53 @@ class TiffBackend(ArrayBackend):
         if not self._position_managers:  # pragma: no cover
             raise RuntimeError("Backend not prepared. Call prepare() first.")
 
-        self._position_managers[position_index].queue.put(frame)
+        manager = self._position_managers[position_index]
+        manager.queue.put(frame)
+
+        # Accumulate frame metadata with storage index
+        if frame_metadata is not None:
+            self._append_frame_metadata(position_index, index, frame_metadata)
+
+    def _append_frame_metadata(
+        self,
+        position_index: int,
+        index: tuple[int, ...],
+        frame_metadata: dict[str, Any],
+    ) -> None:
+        if position_index not in self._frame_metadata:
+            self._frame_metadata[position_index] = []
+        # self._frame_metadata[position_index].append(meta_with_idx)
+
+        mirror = self._position_managers[position_index].metadata_mirror
+        model = mirror.model
+        map_annotations = model.structured_annotations.map_annotations  # type: ignore
+        if images := model.images:
+            # {"the_z": 0, "the_c": 1, ...}
+            plane_kwargs = {
+                f"the_{k}": v for k, v in zip(self._index_keys, index, strict=False)
+            }
+            plane_kwargs.update(
+                {f"the_{k}": 0 for k in "tcz" if k not in self._index_keys}
+            )
+
+            extra_kwargs = {}
+            for key, value in frame_metadata.items():
+                if key in PLANE_KEYS:
+                    plane_kwargs[key] = value
+                else:
+                    extra_kwargs[key] = value
+
+            # meta_with_idx = {**frame_metadata, "storage_index": index}
+            annotation = ome.MapAnnotation(value=ome.Map.model_validate(extra_kwargs))
+            map_annotations.append(annotation)
+            planes = images[position_index].pixels.planes
+            planes.append(
+                ome.Plane(
+                    **plane_kwargs,
+                    annotation_refs=[ome.AnnotationRef(id=annotation.id)],
+                )
+            )
+            mirror.mark_dirty()
 
     def finalize(self) -> None:
         """Flush and close all TIFF writers."""
@@ -176,6 +236,9 @@ class TiffBackend(ArrayBackend):
             # Update OME metadata if unbounded dimensions were written
             if self._storage_dims and any(d.count is None for d in self._storage_dims):
                 self._update_unbounded_metadata()
+
+            for manager in self._position_managers.values():
+                manager.metadata_mirror.flush(force=True)
 
             self._finalized = True
 
