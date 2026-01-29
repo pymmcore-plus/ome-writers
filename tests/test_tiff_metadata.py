@@ -156,7 +156,7 @@ def test_update_metadata_with_plates(tmp_path: Path, tiff_backend: str) -> None:
         for _ in range(2):
             stream.append(np.random.randint(0, 1000, (32, 32), dtype=np.uint16))
 
-    # Verify names
+    # Verify default names are position names
     # Note: Each file contains companion OME-XML with ALL positions,
     # but the actual image data in each file corresponds to its position index
     for pos_idx, expected_name in enumerate(["Well_A01", "Well_A02"]):
