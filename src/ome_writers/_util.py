@@ -111,13 +111,20 @@ def dims_from_useq(
         if not isinstance(seq, MDASequence):  # pragma: no cover
             raise ValueError("seq must be a useq.MDASequence")
 
+    from useq import WellPlatePlan
+
     units = units or {}
-    has_position_subsequences = any(pos.sequence for pos in seq.stage_positions)
+
+    # WellPlatePlan positions never have subsequences, so skip the check
+    is_well_plate = isinstance(seq.stage_positions, WellPlatePlan)
+    has_position_subsequences = (
+        False if is_well_plate else any(pos.sequence for pos in seq.stage_positions)
+    )
 
     if has_position_subsequences:
         _validate_position_subsequences(seq)
 
-    combined_positions = _build_positions(seq, has_position_subsequences)
+    combined_positions = _build_positions(seq, has_position_subsequences, is_well_plate)
     position_insert_index: int | None = None
 
     dims: list[Dimension] = []
@@ -183,16 +190,14 @@ def _validate_position_subsequences(seq: useq.MDASequence) -> None:
 
 
 def _build_positions(
-    seq: useq.MDASequence, has_position_subsequences: bool
+    seq: useq.MDASequence, has_position_subsequences: bool, is_well_plate: bool
 ) -> list[Position] | None:
     """Build Position list from useq stage_positions, handling special cases.
 
     Handles: WellPlatePlan, position subsequences with grids, and sequence-level grids.
     Returns None for simple stage_positions that don't need special handling.
     """
-    from useq import WellPlatePlan
-
-    if isinstance(seq.stage_positions, WellPlatePlan):
+    if is_well_plate:
         return _build_positions_from_well_plate_plan(seq)
     if has_position_subsequences:
         return _build_positions_from_subsequences(seq)
@@ -255,14 +260,13 @@ def _build_positions_from_well_plate_plan(seq: useq.MDASequence) -> list[Positio
     well_names = [str(n) for n in wpp.selected_well_names]
     num_points = wpp.num_points_per_well
 
-    # Get grid coordinates from well_points_plan if it's a grid
-    grid_coords = (
-        [(g.row, g.col) for g in wpp.well_points_plan]
-        if isinstance(wpp.well_points_plan, GridRowsColumns)
-        else None
-    )
-    # Get sequence-level grid coordinates if present
+    # Get sequence-level grid coordinates if present (takes precedence)
     seq_grid = [(g.row, g.col) for g in seq.grid_plan] if seq.grid_plan else None
+
+    # Get grid coordinates from well_points_plan only if no sequence-level grid
+    grid_coords: list[tuple[int | None, int | None]] | None = None
+    if seq_grid is None and isinstance(wpp.well_points_plan, GridRowsColumns):
+        grid_coords = [(g.row, g.col) for g in wpp.well_points_plan]
 
     combined: list[Position] = []
     for i, pos in enumerate(wpp):
@@ -270,15 +274,9 @@ def _build_positions_from_well_plate_plan(seq: useq.MDASequence) -> list[Positio
         well_name = well_names[well_idx]
 
         # Parse plate row/col from well name (e.g., 'A1' -> 'A', '1')
-        match = re.match(r"([A-Za-z]+)(\d+)", well_name)
+        match = re.compile(r"([A-Za-z]+)(\d+)").match(well_name)
         plate_row, plate_col = match.groups() if match else (None, None)
-
         pos_name = pos.name or f"{well_idx:04d}"
-        grid_row, grid_col = (
-            grid_coords[point_idx]
-            if grid_coords and point_idx < len(grid_coords)
-            else (None, None)
-        )
 
         # Expand with sequence-level grid if present, otherwise use well_points grid
         if seq_grid:
@@ -293,6 +291,11 @@ def _build_positions_from_well_plate_plan(seq: useq.MDASequence) -> list[Positio
                 for gr, gc in seq_grid
             )
         else:
+            grid_row, grid_col = (
+                grid_coords[point_idx]
+                if grid_coords and point_idx < len(grid_coords)
+                else (None, None)
+            )
             combined.append(
                 Position(
                     name=pos_name,
