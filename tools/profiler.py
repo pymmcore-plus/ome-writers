@@ -84,7 +84,7 @@ def write_frames(stream: Stream, frames: list[np.ndarray]) -> None:
     """Profile target: append loop + finalize."""
     for frame in frames:
         stream.append(frame)
-    stream._backend.finalize()
+    stream.close()
 
 
 def do_profiling(settings: AcquisitionSettings) -> cProfile.Profile:

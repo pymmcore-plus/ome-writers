@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import warnings
+from collections import Counter, defaultdict
 from enum import Enum
 from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeAlias, cast, get_args
 
@@ -196,11 +197,19 @@ class Dimension(_BaseModel):
 
 
 class Position(_BaseModel):
-    """A single acquisition position."""
+    """A single acquisition position.
+
+    This represents a physical position in space associated with a single camera frame
+    or field of view.  Optional fields such as `grid/plate_row/column` indicate that the
+    position is a member of a larger coordinate system (e.g. well plate or grid).  The
+    `x_coord`, `y_coord`, and `z_coord` fields represent physical coordinates.  Units
+    should match those used in the spatial Dimensions of the acquisition.
+    """
 
     name: Annotated[str, Len(min_length=1)] = Field(
         description="Unique name for this position. Within a list of positions, "
-        "names must be unique within each `(plate_row, plate_column)` pair.",
+        "names must be unique within each `(plate_row, plate_column)` or "
+        "`(grid_row, grid_column)` pair.",
     )
     plate_row: str | None = Field(
         default=None,
@@ -210,11 +219,26 @@ class Position(_BaseModel):
         default=None,
         description="Column name for plate position.",
     )
-    # TODO
-    # These could be used to specify the coordinateTransform.translate for
-    # different positions
-    # x_translation: float | None = None
-    # y_translation: float | None = None
+    grid_row: int | None = Field(
+        default=None,
+        description="Row index for this position in a grid layout (if any).",
+    )
+    grid_column: int | None = Field(
+        default=None,
+        description="Column index for this position in a grid layout (if any).",
+    )
+    x_coord: float | None = Field(
+        default=None,
+        description="Physical X coordinate of this position (e.g., stage coordinate).",
+    )
+    y_coord: float | None = Field(
+        default=None,
+        description="Physical Y coordinate of this position (e.g., stage coordinate).",
+    )
+    z_coord: float | None = Field(
+        default=None,
+        description="Physical Z coordinate of this position (e.g., stage coordinate).",
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -223,6 +247,54 @@ class Position(_BaseModel):
         if isinstance(value, str):
             return {"name": value}
         return value
+
+
+def _validate_unique_names_per_group(positions: list[Position]) -> list[Position]:
+    """Validate position names are unique within each hierarchical group.
+
+    For positions with plate coordinates or grid coordinates, names must be unique
+    within each group. This allows the same name across different wells/cells,
+    but not multiple positions with the same name in the same group.
+
+    Positions without any hierarchical coordinates (plate or grid) must have
+    globally unique names.
+    """
+    # Group positions by their hierarchical coordinates
+    counters: dict[tuple, Counter] = defaultdict(Counter)
+    for pos in positions:
+        key = (pos.plate_row, pos.plate_column, pos.grid_row, pos.grid_column)
+        counters[key][pos.name] += 1
+
+    # Check for duplicates within each group
+    for key, counts in counters.items():
+        duplicates = [name for name, count in counts.items() if count > 1]
+
+        if duplicates:
+            # All values None means no hierarchical structure
+            if all(v is None for v in key):
+                raise ValueError(
+                    "All positions without row/column must have unique names."
+                )
+            else:
+                # Format error based on coordinate type
+                plate_row, plate_column, grid_row, grid_column = key
+                parts = []
+                if plate_row is not None and plate_column is not None:
+                    parts.append(f'well ("{plate_row}", "{plate_column}")')
+                if grid_row is not None and grid_column is not None:
+                    parts.append(f"grid position ({grid_row}, {grid_column})")
+
+                group_desc = ", ".join(parts) if parts else f"group {key}"
+                raise ValueError(
+                    f"Position names must be unique within each group. "
+                    f"Duplicate names in {group_desc}: {duplicates}"
+                )
+    return positions
+
+
+PositionList: TypeAlias = Annotated[
+    list[Position], AfterValidator(_validate_unique_names_per_group)
+]
 
 
 class PositionDimension(_BaseModel):
@@ -234,7 +306,7 @@ class PositionDimension(_BaseModel):
     positions are visited during acquisition.
     """
 
-    positions: list[Position] = Field(
+    positions: PositionList = Field(
         description="List of positions in acquisition order.  String literals "
         "are also accepted and will be converted to Position objects with the "
         "given name.",
@@ -286,7 +358,6 @@ def _validate_dims_list(
         if isinstance(dim, PositionDimension):
             if has_pos:
                 raise ValueError("Only one PositionDimension is allowed.")
-            _validate_unique_names_per_well(dim.positions)
             has_pos = True
         else:
             n_dims += 1
@@ -326,35 +397,6 @@ def _validate_dims_list(
             dim.type = "space"
 
     return tuple(dims)
-
-
-def _validate_unique_names_per_well(positions: list[Position]) -> None:
-    """Validate position names are unique within each well.
-
-    For positions with row/column defined, names must be unique within each
-    (row, column) group. This allows the same name across different wells,
-    but not multiple positions with the same name in the same well.
-    """
-    # Group positions by (row, column) - only for positions with both defined
-    wells = {}
-    for pos in positions:
-        key = (pos.plate_row, pos.plate_column)
-        wells.setdefault(key, []).append(pos.name)
-
-    # Check for duplicates within each well
-    for (row, col), names in wells.items():
-        if len(names) != len(set(names)):
-            seen: set[str] = set()
-            duplicates = [n for n in names if n in seen or seen.add(n)]
-            if row is None and col is None:
-                raise ValueError(
-                    "All positions without row/column must have unique names."
-                )
-            else:
-                raise ValueError(
-                    f"Position names must be unique within each well. "
-                    f"Well ({row}, {col}) has duplicate names: {duplicates}"
-                )
 
 
 DimensionsList: TypeAlias = Annotated[
