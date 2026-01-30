@@ -127,7 +127,15 @@ def dims_from_useq(
             positions = _build_positions_from_events(seq, events)
             position_dim = StandardAxis.POSITION.to_dimension(positions=positions)
             dims.append(position_dim)
-        elif ax_name != Axis.GRID and seq.sizes.get(ax_name, 0):
+        elif ax_name == Axis.GRID:
+            # Grid without explicit position: create position dimension from grid
+            # This handles "grid around current position" case
+            if Axis.POSITION not in seq.axis_order:
+                positions = _build_positions_from_events(seq, events)
+                position_dim = StandardAxis.POSITION.to_dimension(positions=positions)
+                dims.append(position_dim)
+            # If position IS in axis_order, it's already handled above, skip grid
+        elif seq.sizes.get(ax_name, 0):
             size = seq.sizes.get(ax_name, 0)
             std_axis = StandardAxis(str(ax_name))
             dim = std_axis.to_dimension(count=size, scale=1)
@@ -165,10 +173,25 @@ def _validate_events_not_ragged(seq: useq.MDASequence) -> list[useq.MDAEvent]:
     Raises
     ------
     NotImplementedError
-        If the sequence would produce ragged dimensions.
+        If the sequence would produce ragged dimensions or if dimension order
+        cannot be guaranteed to match frame arrival order.
     """
+    from useq import Axis
 
-    # Check 1: Channel.do_stack=False with z_plan creates ragged z dimension
+    # If both position and grid are in axis_order, they must be adjacent
+    # We flatten (p,g) into a single position dimension, which requires them to be
+    # next to each other in iteration order to maintain frame order correctness
+    if Axis.POSITION in seq.axis_order and Axis.GRID in seq.axis_order:
+        p_idx = seq.axis_order.index(Axis.POSITION)
+        g_idx = seq.axis_order.index(Axis.GRID)
+        if abs(p_idx - g_idx) != 1:
+            raise NotImplementedError(
+                f"Cannot handle axis_order={seq.axis_order} with non-adjacent position "
+                "and grid axes. We flatten (p,g) into a single position dimension, "
+                "which requires them to be adjacent in iteration order."
+            )
+
+    # # Channel.do_stack=False with z_plan creates ragged z dimension
     if seq.z_plan and seq.channels:
         do_stack_values = {c.do_stack for c in seq.channels}
         if len(do_stack_values) > 1:
@@ -178,7 +201,7 @@ def _validate_events_not_ragged(seq: useq.MDASequence) -> list[useq.MDAEvent]:
                 "different z-stack sizes."
             )
 
-    # Check 2: Validate by actually iterating through events
+    # Validate by actually iterating through events
     # This catches all forms of raggedness including position subsequences
     dims_per_position = defaultdict(lambda: {"t": set(), "c": set(), "z": set()})
     events = list(seq)
@@ -208,7 +231,7 @@ def _build_positions_from_events(
     seq: useq.MDASequence, events: list[useq.MDAEvent]
 ) -> list[Position]:
     """Build Position list by observing useq iteration."""
-    from useq import WellPlatePlan
+    from useq import Axis, WellPlatePlan
 
     is_well_plate = isinstance(seq.stage_positions, WellPlatePlan)
     seq_grid_list = list(seq.grid_plan) if seq.grid_plan else None
@@ -221,11 +244,24 @@ def _build_positions_from_events(
             if pos.sequence and pos.sequence.grid_plan:
                 pos_grids[i] = list(pos.sequence.grid_plan)
 
+    # Determine sort order: if grid comes before position, sort by (g,p), else (p,g)
+    grid_first = False
+    if Axis.GRID in seq.axis_order:
+        g_idx = seq.axis_order.index(Axis.GRID)
+        p_idx = (
+            seq.axis_order.index(Axis.POSITION)
+            if Axis.POSITION in seq.axis_order
+            else float("inf")
+        )
+        grid_first = g_idx < p_idx
+
     seen = {}
     for event in events:
-        key = (event.index.get("p", 0), event.index.get("g"))
+        p = event.index.get("p", 0)
+        g = event.index.get("g")
+        key = (g, p) if grid_first else (p, g)
         if key not in seen:
-            p_idx, g_idx = key
+            p_idx, g_idx = p, g
             plate_row, plate_col = None, None
             if event.pos_name not in (None, "None"):
                 name = event.pos_name

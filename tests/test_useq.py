@@ -50,42 +50,6 @@ SEQ_CASES = [
     ),
     Case(
         seq=useq.MDASequence(
-            axis_order="ptgcz",
-            stage_positions=[(0.0, 0.0), (10.0, 10.0)],
-            time_plan={"interval": 0.1, "loops": 3},
-            channels=["DAPI", "Cy5"],
-            z_plan={"range": 2, "step": 1.0},
-            grid_plan=useq.GridRowsColumns(rows=1, columns=2),
-        ),
-        expected_dim_names=["p", "t", "c", "z", "y", "x"],
-        expected_positions=[
-            ExpectedPosition(name="0000", grid_row=0, grid_col=0),
-            ExpectedPosition(name="0000", grid_row=0, grid_col=1),
-            ExpectedPosition(name="0001", grid_row=0, grid_col=0),
-            ExpectedPosition(name="0001", grid_row=0, grid_col=1),
-        ],
-        id="grid_and_positions_ptgcz",
-    ),
-    Case(
-        seq=useq.MDASequence(
-            axis_order="ptgzc",
-            stage_positions=[(0.0, 0.0), (10.0, 10.0)],
-            time_plan={"interval": 0.1, "loops": 3},
-            channels=["DAPI", "Cy5"],
-            z_plan={"range": 2, "step": 1.0},
-            grid_plan=useq.GridRowsColumns(rows=1, columns=2),
-        ),
-        expected_dim_names=["p", "t", "z", "c", "y", "x"],
-        expected_positions=[
-            ExpectedPosition(name="0000", grid_row=0, grid_col=0),
-            ExpectedPosition(name="0000", grid_row=0, grid_col=1),
-            ExpectedPosition(name="0001", grid_row=0, grid_col=0),
-            ExpectedPosition(name="0001", grid_row=0, grid_col=1),
-        ],
-        id="grid_and_positions_ptgzc",
-    ),
-    Case(
-        seq=useq.MDASequence(
             axis_order="pgtcz",
             stage_positions=[
                 useq.Position(x=0.0, y=0.0, name="single_pos"),
@@ -132,6 +96,37 @@ SEQ_CASES = [
         expected_dim_names=["t", "c", "z", "y", "x"],
         expected_positions=None,
         id="no_position_dimension",
+    ),
+    Case(
+        seq=useq.MDASequence(
+            axis_order="gtc",  # Grid with no explicit position
+            grid_plan=useq.GridRowsColumns(rows=1, columns=2),
+            time_plan={"interval": 0.1, "loops": 2},
+            channels=["DAPI"],
+        ),
+        expected_dim_names=["p", "t", "c", "y", "x"],  # Position dim should be created
+        expected_positions=[
+            ExpectedPosition(name="0000", grid_row=0, grid_col=0),
+            ExpectedPosition(name="0000", grid_row=0, grid_col=1),
+        ],
+        id="grid_only_no_position",
+    ),
+    Case(
+        seq=useq.MDASequence(
+            axis_order="gptc",  # Grid before position (adjacent)
+            stage_positions=[(0.0, 0.0), (10.0, 10.0)],
+            grid_plan=useq.GridRowsColumns(rows=1, columns=2),
+            time_plan={"interval": 0.1, "loops": 2},
+            channels=["DAPI"],
+        ),
+        expected_dim_names=["p", "t", "c", "y", "x"],
+        expected_positions=[
+            ExpectedPosition(name="0000", grid_row=0, grid_col=0),
+            ExpectedPosition(name="0001", grid_row=0, grid_col=0),
+            ExpectedPosition(name="0000", grid_row=0, grid_col=1),
+            ExpectedPosition(name="0001", grid_row=0, grid_col=1),
+        ],
+        id="grid_before_position_adjacent",
     ),
     Case(
         seq=useq.MDASequence(
@@ -294,6 +289,41 @@ RAGGED_CASES = [
         ),
         "Ragged dimensions detected",
         id="position_subsequences",
+    ),
+    pytest.param(
+        useq.MDASequence(
+            axis_order="gtpc",  # Grid and position NOT adjacent!
+            stage_positions=[(0.0, 0.0), (10.0, 10.0)],
+            grid_plan=useq.GridRowsColumns(rows=1, columns=2),
+            time_plan={"interval": 0.1, "loops": 2},
+            channels=["DAPI"],
+        ),
+        "non-adjacent position and grid axes",
+        id="grid_position_not_adjacent",
+    ),
+    pytest.param(
+        useq.MDASequence(
+            axis_order="ptgcz",
+            stage_positions=[(0.0, 0.0), (10.0, 10.0)],
+            time_plan={"interval": 0.1, "loops": 3},
+            channels=["DAPI", "Cy5"],
+            z_plan={"range": 2, "step": 1.0},
+            grid_plan=useq.GridRowsColumns(rows=1, columns=2),
+        ),
+        "non-adjacent position and grid axes",
+        id="position_grid_not_adjacent_ptgcz",
+    ),
+    pytest.param(
+        useq.MDASequence(
+            axis_order="ptgzc",
+            stage_positions=[(0.0, 0.0), (10.0, 10.0)],
+            time_plan={"interval": 0.1, "loops": 3},
+            channels=["DAPI", "Cy5"],
+            z_plan={"range": 2, "step": 1.0},
+            grid_plan=useq.GridRowsColumns(rows=1, columns=2),
+        ),
+        "non-adjacent position and grid axes",
+        id="position_grid_not_adjacent_ptgzc",
     ),
 ]
 
