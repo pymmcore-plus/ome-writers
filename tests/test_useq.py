@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import pytest
 
 from ome_writers._schema import AcquisitionSettings
-from ome_writers._util import dims_from_useq
+from ome_writers._useq import dims_from_useq
 
 try:
     import useq
