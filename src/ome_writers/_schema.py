@@ -197,7 +197,14 @@ class Dimension(_BaseModel):
 
 
 class Position(_BaseModel):
-    """A single acquisition position."""
+    """A single acquisition position.
+
+    This represents a physical position in space associated with a single camera frame
+    or field of view.  Optional fields such as `grid/plate_row/column` indicate that the
+    position is a member of a larger coordinate system (e.g. well plate or grid).  The
+    `x_coord`, `y_coord`, and `z_coord` fields represent physical coordinates.  Units
+    should match those used in the spatial Dimensions of the acquisition.
+    """
 
     name: Annotated[str, Len(min_length=1)] = Field(
         description="Unique name for this position. Within a list of positions, "
@@ -220,11 +227,18 @@ class Position(_BaseModel):
         default=None,
         description="Column index for this position in a grid layout (if any).",
     )
-    # TODO
-    # These could be used to specify the coordinateTransform.translate for
-    # different positions
-    # x_translation: float | None = None
-    # y_translation: float | None = None
+    x_coord: float | None = Field(
+        default=None,
+        description="Physical X coordinate of this position (e.g., stage coordinate).",
+    )
+    y_coord: float | None = Field(
+        default=None,
+        description="Physical Y coordinate of this position (e.g., stage coordinate).",
+    )
+    z_coord: float | None = Field(
+        default=None,
+        description="Physical Z coordinate of this position (e.g., stage coordinate).",
+    )
 
     @model_validator(mode="before")
     @classmethod

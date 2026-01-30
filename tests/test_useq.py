@@ -113,23 +113,6 @@ SEQ_CASES = [
     ),
     Case(
         seq=useq.MDASequence(
-            axis_order="gptc",  # Grid before position (adjacent)
-            stage_positions=[(0.0, 0.0), (10.0, 10.0)],
-            grid_plan=useq.GridRowsColumns(rows=1, columns=2),
-            time_plan={"interval": 0.1, "loops": 2},
-            channels=["DAPI"],
-        ),
-        expected_dim_names=["p", "t", "c", "y", "x"],
-        expected_positions=[
-            ExpectedPosition(name="0000", grid_row=0, grid_col=0),
-            ExpectedPosition(name="0001", grid_row=0, grid_col=0),
-            ExpectedPosition(name="0000", grid_row=0, grid_col=1),
-            ExpectedPosition(name="0001", grid_row=0, grid_col=1),
-        ],
-        id="grid_before_position_adjacent",
-    ),
-    Case(
-        seq=useq.MDASequence(
             axis_order="ptcz",
             stage_positions=useq.WellPlatePlan(
                 plate=useq.WellPlate.from_str("96-well"),
@@ -148,45 +131,6 @@ SEQ_CASES = [
             ExpectedPosition("B2_0001", "B", "2", grid_row=0, grid_col=1),
         ],
         id="well_plate_with_points",
-    ),
-    Case(
-        seq=useq.MDASequence(
-            axis_order="ptcz",
-            stage_positions=useq.WellPlatePlan(
-                plate=useq.WellPlate.from_str("96-well"),
-                a1_center_xy=(0.0, 0.0),
-                selected_wells=((0, 1), (0, 1)),
-            ),
-            time_plan={"interval": 0.1, "loops": 2},
-            channels=["DAPI"],
-            grid_plan=useq.GridRowsColumns(rows=1, columns=2),
-        ),
-        expected_dim_names=["p", "t", "c", "y", "x"],
-        expected_positions=[
-            ExpectedPosition(name="A1", plate_row="A", plate_col="1"),
-            ExpectedPosition(name="B2", plate_row="B", plate_col="2"),
-        ],
-        id="well_plate_with_seq_grid",
-    ),
-    Case(
-        seq=useq.MDASequence(
-            axis_order="ptcz",
-            stage_positions=useq.WellPlatePlan(
-                plate=useq.WellPlate.from_str("96-well"),
-                a1_center_xy=(0.0, 0.0),
-                selected_wells=((0,), (0,)),
-                well_points_plan=useq.GridRowsColumns(rows=1, columns=2),
-            ),
-            time_plan={"interval": 0.1, "loops": 2},
-            channels=["DAPI"],
-            grid_plan=useq.GridRowsColumns(rows=2, columns=1),
-        ),
-        expected_dim_names=["p", "t", "c", "y", "x"],
-        expected_positions=[
-            ExpectedPosition("A1_0000", "A", "1", grid_row=0, grid_col=0),
-            ExpectedPosition("A1_0001", "A", "1", grid_row=0, grid_col=1),
-        ],
-        id="well_plate_both_grids",
     ),
     # MultiPhaseTimePlan - no single .interval attribute
     Case(
@@ -279,7 +223,7 @@ def test_useq_to_dims(case: Case) -> None:
             # MultiPhaseTimePlan doesn't have .interval attribute
             if hasattr(seq.time_plan, "interval"):
                 assert dim.unit == "second"
-                assert dim.scale == seq.time_plan.interval.total_seconds()
+                assert dim.scale == seq.time_plan.interval.total_seconds()  # ty: ignore
         elif dim.name == "z" and seq.z_plan:
             # ZAbsolutePositions/ZRelativePositions don't have .step attribute
             assert dim.unit == "micrometer"
@@ -442,11 +386,35 @@ RAGGED_CASES = [
         "Unbounded useq sequences are not yet supported",
         id="t_duration_no_interval",
     ),
+    pytest.param(
+        useq.MDASequence(
+            stage_positions=useq.WellPlatePlan(
+                plate=useq.WellPlate.from_str("96-well"),
+                a1_center_xy=(0.0, 0.0),
+                selected_wells=((0,), (0,)),
+            ),
+            grid_plan=useq.GridRowsColumns(rows=1, columns=2),
+            channels=["DAPI"],
+        ),
+        "WellPlatePlan with grid_plan is not supported",
+        id="well_plate_with_grid_plan",
+    ),
+    # Grid-first ordering with both positions and grid_plan
+    pytest.param(
+        useq.MDASequence(
+            axis_order="gptcz",
+            stage_positions=[(0.0, 0.0), (10.0, 10.0)],
+            grid_plan=useq.GridRowsColumns(rows=1, columns=2),
+            channels=["DAPI"],
+        ),
+        "Grid-first ordering.*is not supported",
+        id="grid_first_with_positions",
+    ),
 ]
 
 
 @pytest.mark.parametrize(("seq", "error_pattern"), RAGGED_CASES)
-def test_ragged_dimensions(seq: useq.MDASequence, error_pattern: str) -> None:
+def test_unsupported_sequences_raise(seq: useq.MDASequence, error_pattern: str) -> None:
     """Test that ragged dimension cases raise NotImplementedError."""
     with pytest.raises(NotImplementedError, match=error_pattern):
         dims_from_useq(seq, image_width=64, image_height=64)
