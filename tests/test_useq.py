@@ -107,7 +107,7 @@ SEQ_CASES = [
         expected_dim_names=["p", "t", "c", "y", "x"],  # Position dim should be created
         expected_positions=[
             ExpectedPosition(name="0000", grid_row=0, grid_col=0),
-            ExpectedPosition(name="0000", grid_row=0, grid_col=1),
+            ExpectedPosition(name="0001", grid_row=0, grid_col=1),
         ],
         id="grid_only_no_position",
     ),
@@ -188,6 +188,72 @@ SEQ_CASES = [
         ],
         id="well_plate_both_grids",
     ),
+    # MultiPhaseTimePlan - no single .interval attribute
+    Case(
+        seq=useq.MDASequence(
+            axis_order="tc",
+            time_plan=[
+                {"interval": 0.1, "loops": 3},
+                {"interval": 0.5, "loops": 2},
+            ],
+            channels=["DAPI"],
+        ),
+        expected_dim_names=["t", "c", "y", "x"],
+        expected_positions=None,
+        id="multi_phase_time_plan",
+    ),
+    # ZAbsolutePositions - no .step attribute
+    Case(
+        seq=useq.MDASequence(
+            axis_order="cz",
+            channels=["DAPI"],
+            z_plan=useq.ZAbsolutePositions(absolute=[0, 1, 2, 3]),
+        ),
+        expected_dim_names=["c", "z", "y", "x"],
+        expected_positions=None,
+        id="z_absolute_positions",
+    ),
+    Case(
+        seq=useq.MDASequence(
+            channels=["DAPI"],
+            z_plan=useq.ZAbsolutePositions(absolute=[0, 1, 2, 3]),
+        ),
+        expected_dim_names=["c", "z", "y", "x"],
+        expected_positions=None,
+        id="axis_order_not_specified",
+    ),
+    # ZRelativePositions - no .step attribute
+    Case(
+        seq=useq.MDASequence(
+            axis_order="cz",
+            channels=["DAPI"],
+            z_plan=useq.ZRelativePositions(relative=[-1, 0, 1]),
+        ),
+        expected_dim_names=["c", "z", "y", "x"],
+        expected_positions=None,
+        id="z_relative_positions",
+    ),
+    # RandomPoints grid - row/col are None
+    Case(
+        seq=useq.MDASequence(
+            axis_order="gc",
+            grid_plan=useq.RandomPoints(
+                num_points=3,
+                max_width=100,
+                max_height=100,
+                shape="ellipse",
+                random_seed=42,
+            ),
+            channels=["DAPI"],
+        ),
+        expected_dim_names=["p", "c", "y", "x"],
+        expected_positions=[
+            ExpectedPosition(name="0000", grid_row=None, grid_col=None),
+            ExpectedPosition(name="0001", grid_row=None, grid_col=None),
+            ExpectedPosition(name="0002", grid_row=None, grid_col=None),
+        ],
+        id="random_points_grid",
+    ),
 ]
 
 
@@ -209,12 +275,16 @@ def test_useq_to_dims(case: Case) -> None:
     # Check units and scales for non-position dimensions
     for dim in dims:
         if dim.name == "t" and seq.time_plan:
-            assert dim.unit == "second"
-            assert dim.scale == seq.time_plan.interval.total_seconds()
             assert dim.count == seq.time_plan.num_timepoints()
+            # MultiPhaseTimePlan doesn't have .interval attribute
+            if hasattr(seq.time_plan, "interval"):
+                assert dim.unit == "second"
+                assert dim.scale == seq.time_plan.interval.total_seconds()
         elif dim.name == "z" and seq.z_plan:
+            # ZAbsolutePositions/ZRelativePositions don't have .step attribute
             assert dim.unit == "micrometer"
-            assert dim.scale == seq.z_plan.step
+            if hasattr(seq.z_plan, "step"):
+                assert dim.scale == seq.z_plan.step
             assert dim.count == seq.z_plan.num_positions()
         elif dim.name in ("y", "x"):
             assert dim.unit == "micrometer"
@@ -265,6 +335,45 @@ RAGGED_CASES = [
         ),
         r"mixed Channel\.do_stack values are not supported",
         id="mixed_do_stack",
+    ),
+    # All do_stack=False with z_plan - only middle z acquired, mismatches z_plan
+    pytest.param(
+        useq.MDASequence(
+            axis_order="cz",
+            channels=[
+                useq.Channel(config="DAPI", do_stack=False),
+                useq.Channel(config="Cy5", do_stack=False),
+            ],
+            z_plan={"range": 4, "step": 1.0},
+        ),
+        r"all channels have do_stack=False",
+        id="all_do_stack_false",
+    ),
+    # acquire_every > 1 - creates ragged time dimension per channel
+    pytest.param(
+        useq.MDASequence(
+            axis_order="tc",
+            time_plan={"interval": 0.1, "loops": 4},
+            channels=[
+                useq.Channel(config="DAPI", acquire_every=1),
+                useq.Channel(config="Cy5", acquire_every=2),
+            ],
+        ),
+        r"acquire_every",
+        id="acquire_every_mixed",
+    ),
+    # All acquire_every > 1 (uniform) - still skips frames
+    pytest.param(
+        useq.MDASequence(
+            axis_order="tc",
+            time_plan={"interval": 0.1, "loops": 4},
+            channels=[
+                useq.Channel(config="DAPI", acquire_every=2),
+                useq.Channel(config="Cy5", acquire_every=2),
+            ],
+        ),
+        r"acquire_every",
+        id="acquire_every_uniform",
     ),
     pytest.param(
         useq.MDASequence(
@@ -324,6 +433,14 @@ RAGGED_CASES = [
         ),
         "non-adjacent position and grid axes",
         id="position_grid_not_adjacent_ptgzc",
+    ),
+    pytest.param(
+        useq.MDASequence(
+            z_plan={"range": 2, "step": 1.0},
+            time_plan={"interval": 0, "duration": 3},
+        ),
+        "Unbounded useq sequences are not yet supported",
+        id="t_duration_no_interval",
     ),
 ]
 

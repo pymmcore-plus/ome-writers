@@ -117,39 +117,58 @@ def dims_from_useq(
     if not isinstance(seq, MDASequence):  # pragma: no cover
         raise ValueError("seq must be a useq.MDASequence")
 
-    events = _validate_events_not_ragged(seq)
+    # FIXME:
+    # We are doing a little magic interpretation here ... mostly due to useq v1
+    # limitations handling unbounded dimensions:
+    # if you try to call seq.sizes on an unbounded sequence (e.g. time_plan with
+    # duration=3 and interval=0), it raises ZeroDivisionError.
+    # We might be able to add more magic to cast that to an unbounded acquisition as
+    # long as time is the first dimension... but that's too fragile.
+    # we need a better way and it probably means using useq.v2. only
+    try:
+        _ = seq.sizes
+        used_axes = seq.used_axes
+        events = _validate_events_not_ragged(seq)
+    except ZeroDivisionError:
+        raise NotImplementedError(
+            "Failed to determine dimension sizes from sequence. "
+            "This usually happens when the sequence has unbounded dimensions "
+            "(e.g. time_plan with duration and interval=0). "
+            "Unbounded useq sequences are not yet supported."
+        ) from None
 
     units = units or {}
     dims: list[Dimension | PositionDimension] = []
-
     for ax_name in seq.axis_order:
+        if ax_name not in used_axes:
+            continue
         if ax_name == Axis.POSITION:
             positions = _build_positions_from_events(seq, events)
-            position_dim = StandardAxis.POSITION.to_dimension(positions=positions)
-            dims.append(position_dim)
+            dims.append(StandardAxis.POSITION.to_dimension(positions=positions))
         elif ax_name == Axis.GRID:
-            # Grid without explicit position: create position dimension from grid
-            # This handles "grid around current position" case
-            if Axis.POSITION not in seq.axis_order:
+            # Grid-only: create position dimension from grid points
+            if Axis.POSITION not in used_axes:
                 positions = _build_positions_from_events(seq, events)
-                position_dim = StandardAxis.POSITION.to_dimension(positions=positions)
-                dims.append(position_dim)
-            # If position IS in axis_order, it's already handled above, skip grid
-        elif seq.sizes.get(ax_name, 0):
-            size = seq.sizes.get(ax_name, 0)
+                dims.append(StandardAxis.POSITION.to_dimension(positions=positions))
+            # If position is used, it's already handled above
+        else:
             std_axis = StandardAxis(str(ax_name))
-            dim = std_axis.to_dimension(count=size, scale=1)
+            dim = std_axis.to_dimension(count=seq.sizes[ax_name], scale=1)
             if isinstance(dim, Dimension):
                 if unit := units.get(str(ax_name)):
                     dim.scale, dim.unit = unit
                 else:
                     # Default units for known axes
                     if std_axis == StandardAxis.TIME and seq.time_plan:
-                        dim.scale = seq.time_plan.interval.total_seconds()
-                        dim.unit = "second"
+                        # MultiPhaseTimePlan doesn't have interval attribute
+                        if hasattr(seq.time_plan, "interval"):
+                            dim.scale = seq.time_plan.interval.total_seconds()
+                            dim.unit = "second"
                     elif std_axis == StandardAxis.Z and seq.z_plan:
-                        dim.scale = seq.z_plan.step
+                        # ZAbsolutePositions/ZRelativePositions don't have step
                         dim.unit = "micrometer"
+                        if hasattr(seq.z_plan, "step"):
+                            dim.scale = seq.z_plan.step
             dims.append(dim)
 
     dims.extend(
@@ -191,7 +210,7 @@ def _validate_events_not_ragged(seq: useq.MDASequence) -> list[useq.MDAEvent]:
                 "which requires them to be adjacent in iteration order."
             )
 
-    # # Channel.do_stack=False with z_plan creates ragged z dimension
+    # Channel.do_stack=False with z_plan creates ragged z dimension
     if seq.z_plan and seq.channels:
         do_stack_values = {c.do_stack for c in seq.channels}
         if len(do_stack_values) > 1:
@@ -199,6 +218,23 @@ def _validate_events_not_ragged(seq: useq.MDASequence) -> list[useq.MDAEvent]:
                 "Sequences with mixed Channel.do_stack values are not supported. "
                 "This creates ragged dimensions where different channels have "
                 "different z-stack sizes."
+            )
+        # All do_stack=False means only middle z is acquired - mismatch with z_plan
+        if do_stack_values == {False}:
+            raise NotImplementedError(
+                "Sequences where all channels have do_stack=False are not supported "
+                "when z_plan is specified. This acquires only the middle z-plane, "
+                "which doesn't match the z_plan dimensions."
+            )
+
+    # Channel.acquire_every > 1 creates ragged time dimension per channel
+    if seq.time_plan and seq.channels:
+        acquire_every_values = {c.acquire_every for c in seq.channels}
+        if acquire_every_values != {1}:
+            raise NotImplementedError(
+                "Sequences with Channel.acquire_every > 1 are not supported. "
+                "This creates ragged dimensions where different channels have "
+                "different numbers of timepoints."
             )
 
     # Validate by actually iterating through events
@@ -255,6 +291,11 @@ def _build_positions_from_events(
         )
         grid_first = g_idx < p_idx
 
+    # Determine if this is a grid-only sequence (no position dimension)
+    has_position_dim = Axis.POSITION in seq.axis_order and seq.sizes.get(
+        Axis.POSITION, 0
+    )
+
     seen = {}
     for event in events:
         p = event.index.get("p", 0)
@@ -269,8 +310,15 @@ def _build_positions_from_events(
                     well_name = event.pos_name.split("_")[0]
                     if match := re.match(r"([A-Za-z]+)(\d+)", well_name):
                         plate_row, plate_col = match.groups()
+            elif g_idx is not None:
+                # For grid points, format name to include both p and g indices
+                # For grid-only (no position dim), use just the grid index
+                if has_position_dim:
+                    name = f"{p_idx:04d}"
+                else:
+                    name = f"{g_idx:04d}"
             else:
-                name = f"{p_idx:04d}" if g_idx is not None else str(p_idx)
+                name = str(p_idx)
 
             grid_row, grid_col = _extract_grid_coords(
                 p_idx, g_idx, is_well_plate, seq_grid_list, well_points_list, pos_grids
