@@ -22,29 +22,36 @@ def dims_from_useq(
     units: Mapping[str, UnitTuple | None] | None = None,
     pixel_size_um: float | None = None,
 ) -> list[Dimension | PositionDimension]:
-    """Convert a useq.MDASequence to a list of Dimensions for ome-writers.
+    """Convert a [`useq.MDASequence`][] to a list of [`Dimension`][ome_writers.Dimension] `|` [`PositionDimension`][ome_writers.PositionDimension] for ome-writers.
 
-    Sequences that result in ragged dimensions are not supported.
+    !!! tip "Important"
+        `useq-schema` has a very expressive API that can generate complex,
+        irregular multi-dimensional acquisition sequences. However, not all of these
+        patterns can be represented in a regular N-dimensional image data structure as
+        used by OME-TIFF/OME-NGFF. Sequences that result in ragged dimensions will
+        raise `NotImplementedError` when passed to this function.
 
     The following restrictions apply:
 
-    Grid and Position handling:
+    **Grid and Position handling:**
 
-    - Position and grid axes must be adjacent in axis_order (e.g., "pgcz" or "gptc",
-      not "ptgc"). They are flattened into a single position dimension.
-    - When both stage_positions and grid_plan are specified, position must come before
-      grid in axis_order (e.g., "pgtcz" not "gptcz"). Grid-first is only supported
-      when using grid_plan alone without stage_positions.
-    - Position subsequences may only contain a grid_plan, not time/channel/z plans.
-      Different positions may have different grid sizes.
+    - Position and grid axes must be adjacent in axis_order (e.g., `"pgcz"`, not
+      `"pcgz"`).
+    - When both `stage_positions` and `grid_plan` are specified, position must come
+      before grid in axis_order (e.g., "pgtcz" not "gptcz"). Grid-first order is only
+      supported when using `grid_plan` alone without `stage_positions`.
+    - Position subsequences may only contain a `grid_plan`, not time/channel/z-plans.
+      Different positions *may* have different grid shapes.
+    - If `stage_positions` is a `WellPlatePlan`, it cannot be
+      combined with an outer `grid_plan`. Use `well_points_plan` on the `WellPlatePlan`
+      instead.
+
+    **Channel, Z, and Time handling:**
 
     - All channels must have the same `do_stack` value when a z_plan is present.
-      Mixed do_stack or all do_stack=False with z_plan is not supported.
-    - All channels must have `acquire_every=1`. Skipping timepoints creates ragged
-      dimensions.
+    - All channels must have `acquire_every=1`. Skipping timepoints on some channels
+      creates ragged dimensions.
     - Unbounded time plans (duration-based plans with interval=0) are not supported.
-    - WellPlatePlan cannot be combined with an outer grid_plan. Use
-      `well_points_plan` on the WellPlatePlan instead.
 
     Parameters
     ----------
@@ -64,7 +71,7 @@ def dims_from_useq(
     ------
     NotImplementedError
         If the sequence contains any of the unsupported patterns listed above.
-    """
+    """  # noqa: E501
     try:
         from useq import Axis, MDASequence
     except ImportError:
@@ -172,12 +179,6 @@ def _validate_sequence(seq: useq.MDASequence) -> None:
                 "Sequences with mixed Channel.do_stack values are not supported. "
                 "This creates ragged dimensions where different channels have "
                 "different z-stack sizes."
-            )
-        if do_stack_values == {False}:
-            raise NotImplementedError(
-                "Sequences where all channels have do_stack=False are not supported "
-                "when z_plan is specified. This acquires only the middle z-plane, "
-                "which doesn't match the z_plan dimensions."
             )
 
     # Check acquire_every == 1 for all channels
