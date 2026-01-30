@@ -445,22 +445,29 @@ class OmeZarr(_BaseModel):
 
 
 def _cast_format(value: Any) -> Any:
+    # _backend_str possibly passed from _pick_auto_format
+    suffix = ""
+    if isinstance(value, dict) and (backend_str := value.pop("_backend_str", None)):
+        suffix = value.get("suffix", "")
+        value = backend_str  # Fall through to string handling below
+
     if isinstance(value, str):
+        kwargs = {"suffix": suffix} if suffix else {}
         match value.lower():
             case "ome-tiff" | "tiff":
-                return OmeTiff()
+                return OmeTiff(**kwargs)
             case "ome-zarr" | "zarr":
-                return OmeZarr()
+                return OmeZarr(**kwargs)
             case "tensorstore":
-                return OmeZarr(backend="tensorstore")
+                return OmeZarr(backend="tensorstore", **kwargs)
             case "acquire-zarr":
-                return OmeZarr(backend="acquire-zarr")
+                return OmeZarr(backend="acquire-zarr", **kwargs)
             case "zarrs-python":
-                return OmeZarr(backend="zarrs-python")
+                return OmeZarr(backend="zarrs-python", **kwargs)
             case "zarr-python":
-                return OmeZarr(backend="zarr-python")
+                return OmeZarr(backend="zarr-python", **kwargs)
             case "tifffile":
-                return OmeTiff(backend="tifffile")
+                return OmeTiff(backend="tifffile", **kwargs)
 
     return value
 
@@ -745,6 +752,10 @@ class AcquisitionSettings(_BaseModel):
                         stacklevel=3,
                     )
                     data["format"] = backend.name
+            elif isinstance(fmt, str):
+                # Format is a string like "zarr-python", "tifffile", etc.
+                # Pass the suffix from root_path so _cast_format can use it
+                data["format"] = {"_backend_str": fmt, "suffix": suffix}
         return data
 
 
