@@ -238,11 +238,11 @@ def _build_positions(seq: useq.MDASequence) -> list[Position]:
     if isinstance(seq.stage_positions, WellPlatePlan):
         return _build_well_plate_positions(seq.stage_positions)
 
-    # Case 3: Stage positions (with optional global grid_plan)
+    # Case 2: Stage positions (with optional global grid_plan)
     if seq.stage_positions:
         return _build_stage_positions_plan(seq)
 
-    # Case 2: Grid plan only (no stage_positions)
+    # Case 3: Grid plan only (no stage_positions)
     elif seq.grid_plan is not None:
         return [
             Position(
