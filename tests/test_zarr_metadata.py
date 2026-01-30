@@ -241,3 +241,114 @@ def test_channel_names_in_zarr(tmp_path: Path, zarr_backend: str) -> None:
     ome = data["attributes"]["ome"]
     channel_names = [ch["label"] for ch in ome["omero"]["channels"]]
     assert channel_names == CHANNELS
+
+
+def test_frame_metadata_single_position(tmp_path: Path) -> None:
+    """Test frame_metadata appears in group-level zarr.json for single position."""
+    root = tmp_path / "single.zarr"
+    settings = AcquisitionSettings(
+        root_path=root,
+        dimensions=[
+            Dimension(name="t", count=3, type="time"),
+            Dimension(name="y", count=16, chunk_size=16, type="space"),
+            Dimension(name="x", count=16, chunk_size=16, type="space"),
+        ],
+        dtype="uint16",
+        overwrite=True,
+        backend="zarr-python",
+    )
+
+    # Write frames with metadata
+    with create_stream(settings) as stream:
+        for t in range(3):
+            frame = np.random.randint(0, 1000, (16, 16), dtype=np.uint16)
+            metadata = {
+                "delta_t": t * 1.5,
+                "exposure_time": 0.01,
+                "position_x": 100.0,
+                "position_y": 200.0,
+                "position_z": 50.0,
+                "temperature": 37.0 + t * 0.1,
+            }
+            stream.append(frame, frame_metadata=metadata)
+
+    # Verify frame_metadata appears in group-level zarr.json
+    zarr_json_path = root / "zarr.json"
+    assert zarr_json_path.exists()
+
+    data = json.loads(zarr_json_path.read_text())
+    attrs = data["attributes"]
+
+    # Check structure
+    assert "ome_writers" in attrs
+    assert "version" in attrs["ome_writers"]
+    assert "frame_metadata" in attrs["ome_writers"]
+
+    # Check frame_metadata content
+    frame_meta = attrs["ome_writers"]["frame_metadata"]
+    assert len(frame_meta) == 3
+
+    # Verify first frame
+    assert frame_meta[0]["delta_t"] == 0.0
+    assert frame_meta[0]["exposure_time"] == 0.01
+    assert frame_meta[0]["position_x"] == 100.0
+    assert frame_meta[0]["temperature"] == 37.0
+    assert "storage_index" in frame_meta[0]
+    assert frame_meta[0]["storage_index"] == [0]
+
+    # Verify second frame
+    assert frame_meta[1]["delta_t"] == 1.5
+    assert frame_meta[1]["storage_index"] == [1]
+
+    # Verify third frame
+    assert frame_meta[2]["delta_t"] == 3.0
+    assert frame_meta[2]["storage_index"] == [2]
+
+
+def test_frame_metadata_multiposition(tmp_path: Path) -> None:
+    """Test frame_metadata is position-specific for multi-position."""
+
+    root = tmp_path / "multipos.zarr"
+    settings = AcquisitionSettings(
+        root_path=root,
+        dimensions=[
+            PositionDimension(positions=["Pos0", "Pos1"]),
+            Dimension(name="t", count=2, type="time"),
+            Dimension(name="y", count=16, chunk_size=16, type="space"),
+            Dimension(name="x", count=16, chunk_size=16, type="space"),
+        ],
+        dtype="uint16",
+        overwrite=True,
+        backend="zarr-python",
+    )
+
+    # Write frames with position-specific metadata
+    with create_stream(settings) as stream:
+        for p_name in ["Pos0", "Pos1"]:
+            for t in range(2):
+                frame = np.random.randint(0, 1000, (16, 16), dtype=np.uint16)
+                metadata = {
+                    "delta_t": t * 1.0,
+                    "position_name": p_name,
+                    "frame_number": t,
+                }
+                stream.append(frame, frame_metadata=metadata)
+
+    # Verify each position has its own frame_metadata
+    for pos_name in ["Pos0", "Pos1"]:
+        zarr_json_path = root / pos_name / "zarr.json"
+        assert zarr_json_path.exists()
+
+        data = json.loads(zarr_json_path.read_text())
+        attrs = data["attributes"]
+
+        assert "ome_writers" in attrs
+        frame_meta = attrs["ome_writers"]["frame_metadata"]
+
+        # Each position should have 2 frames
+        assert len(frame_meta) == 2
+
+        # Verify metadata is position-specific
+        assert all(meta["position_name"] == pos_name for meta in frame_meta)
+        assert [meta["frame_number"] for meta in frame_meta] == [0, 1]
+        assert [meta["storage_index"] for meta in frame_meta] == [[0], [1]]

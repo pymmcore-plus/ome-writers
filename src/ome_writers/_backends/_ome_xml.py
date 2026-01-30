@@ -325,6 +325,9 @@ def _build_full_model(
 
 VALID_ORDERS = [x.value for x in ome.Pixels_DimensionOrder]
 
+# Missing file /output_p000.ome.tiff
+# associated with UUID urn:uuid:1690ae46-d559-40cc-9166-ab806db80098.
+
 
 def _get_dimension_order(dims: list[Dimension]) -> str:
     # suffix is some combination of ZCT in order of appearance

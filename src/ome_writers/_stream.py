@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import sys
+import warnings
+import weakref
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -41,6 +43,14 @@ class OMEStream:
         for frame in frames:
             stream.append(frame)
     ```
+
+    !!! warning
+
+        If not used as a context manager, you must call
+        [`close()`][ome_writers.OMEStream.close] to ensure all data is flushed
+        and resources are released.  A warning will be emitted if the object is
+        garbage collected without being closed.
+
     """
 
     def __init__(self, backend: ArrayBackend, router: FrameRouter) -> None:
@@ -48,13 +58,49 @@ class OMEStream:
         self._router = router
         self._iterator = iter(router)
 
-    def append(self, frame: np.ndarray) -> None:
+        # Mutable state container shared with finalizer
+        self._state = {"has_appended": False}
+
+        # Register cleanup that runs on garbage collection if not explicitly closed
+        self._finalizer = weakref.finalize(
+            self, self._warn_and_finalize, backend, self._state
+        )
+
+    @staticmethod
+    def _warn_and_finalize(backend: ArrayBackend, state: dict) -> None:
+        """Cleanup function called on garbage collection if not explicitly closed."""
+        if state["has_appended"]:
+            warnings.warn(
+                "OMEStream was not closed before garbage collection. Please "
+                "use `with create_stream(...):` in a context manager or call "
+                "`stream.close()` before deletion.",
+                stacklevel=2,
+            )
+        backend.finalize()
+
+    def append(self, frame: np.ndarray, *, frame_metadata: dict | None = None) -> None:
         """Write the next frame in acquisition order.
 
         Parameters
         ----------
         frame : np.ndarray
             2D array containing the frame data (Y, X).
+        frame_metadata : dict, optional
+            Optional per-frame metadata.  All data *must* be JSON-serializable (or will
+            fail to be stored and a warning will be issued). The following special keys
+            are recognized and will be mapped to format-specific locations:
+
+                - `delta_t` : float
+                    Time delta in seconds since the start of the acquisition.
+                - `exposure_time` : float
+                    Exposure time in seconds for this frame.
+                - `position_x`, `position_y`, `position_z` : float
+                    Stage position in microns for this frame.
+
+            All other keys will be stored as unstructured metadata. For OME-Tiff, you
+            can find this data in the structured annotations of the OME-XML.  For
+            OME-Zarr, this data will be stored in the `"attributes.ome_writers"` key in
+            the zarr.json document in the multiscales group of each position.
 
         Raises
         ------
@@ -63,7 +109,8 @@ class OMEStream:
             For unlimited dimensions, never raises StopIteration.
         """
         pos_idx, idx = next(self._iterator)
-        self._backend.write(pos_idx, idx, frame)
+        self._backend.write(pos_idx, idx, frame, frame_metadata=frame_metadata)
+        self._state["has_appended"] = True
 
     def get_metadata(self) -> Any:
         """Retrieve metadata from the backend.  Meaning is format-dependent."""
@@ -79,7 +126,13 @@ class OMEStream:
 
     def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
         """Exit context manager, finalizing the backend."""
-        self._backend.finalize()
+        self.close()
+
+    def close(self) -> None:
+        """Finalize the backend, flush any pending writes, and release resources."""
+        # Detach returns the callback args if finalizer was still alive, None otherwise
+        if self._finalizer.detach():
+            self._backend.finalize()
 
 
 def get_format_for_backend(backend: str) -> FileFormat:
@@ -178,6 +231,13 @@ AVAILABLE_BACKENDS: dict[str, BackendMetadata] = {
 
 def create_stream(settings: AcquisitionSettings) -> OMEStream:
     """Create a stream for writing OME-TIFF or OME-ZARR data.
+
+    !!! warning
+
+        If not used as a context manager, you must call
+        [`stream.close()`][ome_writers.OMEStream.close] to ensure all data is flushed
+        and resources are released.  A warning will be emitted if the object is
+        garbage collected without being closed.
 
     Parameters
     ----------
