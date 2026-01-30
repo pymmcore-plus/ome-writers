@@ -351,7 +351,14 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
                 )
         else:
             positions.append(
-                Position(name=name, x_coord=pos.x, y_coord=pos.y, z_coord=pos.z)
+                Position(
+                    name=name,
+                    x_coord=pos.x,
+                    y_coord=pos.y,
+                    z_coord=pos.z,
+                    grid_column=pos.col,
+                    grid_row=pos.row,
+                )
             )
 
     return positions
