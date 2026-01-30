@@ -80,20 +80,14 @@ SEQ_CASES = [
             stage_positions=[
                 useq.Position(x=0.0, y=0.0, name="single_pos"),
                 useq.Position(
-                    x=10.0,
-                    y=10.0,
                     name="grid",
-                    sequence=useq.MDASequence(
-                        grid_plan=useq.GridRowsColumns(rows=1, columns=2)
-                    ),
+                    sequence=useq.MDASequence(grid_plan={"rows": 1, "columns": 2}),
                 ),
             ],
             grid_plan=useq.GridRowsColumns(rows=2, columns=1),
-            time_plan={"interval": 0.1, "loops": 3},
-            channels=["DAPI", "Cy5"],
             z_plan={"range": 2, "step": 1.0},
         ),
-        expected_dim_names=["p", "t", "c", "z", "y", "x"],
+        expected_dim_names=["p", "z", "y", "x"],
         expected_positions=[
             ExpectedPosition(name="single_pos", grid_row=0, grid_col=0),
             ExpectedPosition(name="single_pos", grid_row=1, grid_col=0),
