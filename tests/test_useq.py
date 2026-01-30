@@ -147,18 +147,10 @@ SEQ_CASES = [
         ),
         expected_dim_names=["p", "t", "c", "y", "x"],
         expected_positions=[
-            ExpectedPosition(
-                name="A1_0000", plate_row="A", plate_col="1", grid_row=0, grid_col=0
-            ),
-            ExpectedPosition(
-                name="A1_0001", plate_row="A", plate_col="1", grid_row=0, grid_col=1
-            ),
-            ExpectedPosition(
-                name="B2_0000", plate_row="B", plate_col="2", grid_row=0, grid_col=0
-            ),
-            ExpectedPosition(
-                name="B2_0001", plate_row="B", plate_col="2", grid_row=0, grid_col=1
-            ),
+            ExpectedPosition("A1_0000", "A", "1", grid_row=0, grid_col=0),
+            ExpectedPosition("A1_0001", "A", "1", grid_row=0, grid_col=1),
+            ExpectedPosition("B2_0000", "B", "2", grid_row=0, grid_col=0),
+            ExpectedPosition("B2_0001", "B", "2", grid_row=0, grid_col=1),
         ],
         id="well_plate_with_points",
     ),
@@ -196,12 +188,8 @@ SEQ_CASES = [
         ),
         expected_dim_names=["p", "t", "c", "y", "x"],
         expected_positions=[
-            ExpectedPosition(
-                name="A1_0000", plate_row="A", plate_col="1", grid_row=0, grid_col=0
-            ),
-            ExpectedPosition(
-                name="A1_0001", plate_row="A", plate_col="1", grid_row=0, grid_col=1
-            ),
+            ExpectedPosition("A1_0000", "A", "1", grid_row=0, grid_col=0),
+            ExpectedPosition("A1_0001", "A", "1", grid_row=0, grid_col=1),
         ],
         id="well_plate_both_grids",
     ),
