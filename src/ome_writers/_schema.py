@@ -260,16 +260,13 @@ def _validate_unique_names_per_group(positions: list[Position]) -> list[Position
     globally unique names.
     """
     # Group positions by their hierarchical coordinates
-    groups: dict[tuple, list[str]] = defaultdict(list)
+    counters: dict[tuple, Counter] = defaultdict(Counter)
     for pos in positions:
-        # Use plate and grid coordinates to form the key
         key = (pos.plate_row, pos.plate_column, pos.grid_row, pos.grid_column)
-        groups[key].append(pos.name)
+        counters[key][pos.name] += 1
 
     # Check for duplicates within each group
-    for key, names in groups.items():
-        # Use Counter to find duplicates in a single pass
-        counts = Counter(names)
+    for key, counts in counters.items():
         duplicates = [name for name, count in counts.items() if count > 1]
 
         if duplicates:
