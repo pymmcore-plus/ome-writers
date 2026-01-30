@@ -235,7 +235,7 @@ def test_frame_metadata_single_position(tmp_path: Path) -> None:
         ],
         dtype="uint16",
         overwrite=True,
-        backend="zarr-python",
+        format="zarr-python",
     )
 
     # Write frames with metadata
@@ -299,7 +299,7 @@ def test_frame_metadata_multiposition(tmp_path: Path) -> None:
         ],
         dtype="uint16",
         overwrite=True,
-        backend="zarr-python",
+        format="zarr-python",
     )
 
     # Write frames with position-specific metadata

@@ -318,7 +318,7 @@ def test_frame_metadata_single_position(tmp_path: Path, tiff_backend: str) -> No
         ],
         dtype="uint16",
         overwrite=True,
-        backend=tiff_backend,
+        format=tiff_backend,
     )
 
     # Write frames with metadata
@@ -381,7 +381,7 @@ def test_frame_metadata_multiposition(tmp_path: Path, tiff_backend: str) -> None
         ],
         dtype="uint16",
         overwrite=True,
-        backend=tiff_backend,
+        format=tiff_backend,
     )
 
     # Write frames with position-specific metadata
