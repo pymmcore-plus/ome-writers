@@ -249,6 +249,57 @@ class Position(_BaseModel):
         return value
 
 
+def _validate_unique_names_per_group(positions: list[Position]) -> list[Position]:
+    """Validate position names are unique within each hierarchical group.
+
+    For positions with plate coordinates or grid coordinates, names must be unique
+    within each group. This allows the same name across different wells/cells,
+    but not multiple positions with the same name in the same group.
+
+    Positions without any hierarchical coordinates (plate or grid) must have
+    globally unique names.
+    """
+    # Group positions by their hierarchical coordinates
+    groups: dict[tuple, list[str]] = defaultdict(list)
+    for pos in positions:
+        # Use plate and grid coordinates to form the key
+        key = (pos.plate_row, pos.plate_column, pos.grid_row, pos.grid_column)
+        groups[key].append(pos.name)
+
+    # Check for duplicates within each group
+    for key, names in groups.items():
+        # Use Counter to find duplicates in a single pass
+        counts = Counter(names)
+        duplicates = [name for name, count in counts.items() if count > 1]
+
+        if duplicates:
+            # All values None means no hierarchical structure
+            if all(v is None for v in key):
+                raise ValueError(
+                    "All positions without row/column must have unique names."
+                )
+            else:
+                # Format error based on coordinate type
+                plate_row, plate_column, grid_row, grid_column = key
+                parts = []
+                if plate_row is not None and plate_column is not None:
+                    parts.append(f'well ("{plate_row}", "{plate_column}")')
+                if grid_row is not None and grid_column is not None:
+                    parts.append(f"grid position ({grid_row}, {grid_column})")
+
+                group_desc = ", ".join(parts) if parts else f"group {key}"
+                raise ValueError(
+                    f"Position names must be unique within each group. "
+                    f"Duplicate names in {group_desc}: {duplicates}"
+                )
+    return positions
+
+
+PositionList: TypeAlias = Annotated[
+    list[Position], AfterValidator(_validate_unique_names_per_group)
+]
+
+
 class PositionDimension(_BaseModel):
     """Positions (meta-dimension) in acquisition order.
 
@@ -258,7 +309,7 @@ class PositionDimension(_BaseModel):
     positions are visited during acquisition.
     """
 
-    positions: list[Position] = Field(
+    positions: PositionList = Field(
         description="List of positions in acquisition order.  String literals "
         "are also accepted and will be converted to Position objects with the "
         "given name.",
@@ -310,7 +361,6 @@ def _validate_dims_list(
         if isinstance(dim, PositionDimension):
             if has_pos:
                 raise ValueError("Only one PositionDimension is allowed.")
-            _validate_unique_names_per_group(dim.positions)
             has_pos = True
         else:
             n_dims += 1
@@ -350,51 +400,6 @@ def _validate_dims_list(
             dim.type = "space"
 
     return tuple(dims)
-
-
-def _validate_unique_names_per_group(positions: list[Position]) -> None:
-    """Validate position names are unique within each hierarchical group.
-
-    For positions with plate coordinates or grid coordinates, names must be unique
-    within each group. This allows the same name across different wells/cells,
-    but not multiple positions with the same name in the same group.
-
-    Positions without any hierarchical coordinates (plate or grid) must have
-    globally unique names.
-    """
-    # Group positions by their hierarchical coordinates
-    groups: dict[tuple, list[str]] = defaultdict(list)
-    for pos in positions:
-        # Use plate and grid coordinates to form the key
-        key = (pos.plate_row, pos.plate_column, pos.grid_row, pos.grid_column)
-        groups[key].append(pos.name)
-
-    # Check for duplicates within each group
-    for key, names in groups.items():
-        # Use Counter to find duplicates in a single pass
-        counts = Counter(names)
-        duplicates = [name for name, count in counts.items() if count > 1]
-
-        if duplicates:
-            # All values None means no hierarchical structure
-            if all(v is None for v in key):
-                raise ValueError(
-                    "All positions without row/column must have unique names."
-                )
-            else:
-                # Format error based on coordinate type
-                plate_row, plate_column, grid_row, grid_column = key
-                parts = []
-                if plate_row is not None and plate_column is not None:
-                    parts.append(f'well ("{plate_row}", "{plate_column}")')
-                if grid_row is not None and grid_column is not None:
-                    parts.append(f"grid position ({grid_row}, {grid_column})")
-
-                group_desc = ", ".join(parts) if parts else f"group {key}"
-                raise ValueError(
-                    f"Position names must be unique within each group. "
-                    f"Duplicate names in {group_desc}: {duplicates}"
-                )
 
 
 DimensionsList: TypeAlias = Annotated[

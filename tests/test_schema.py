@@ -195,93 +195,53 @@ def test_same_name_allowed_in_different_groups() -> None:
     """
     # Same name, same grid coords, but different plate coords
     # (e.g., "fov0" at grid position (0,0) in wells A/1 and B/2)
-    settings = AcquisitionSettings(
-        root_path="test.zarr",
-        dimensions=[
-            PositionDimension(
-                positions=[
-                    Position(
-                        name="fov0",
-                        plate_row="A",
-                        plate_column="1",
-                        grid_row=0,
-                        grid_column=0,
-                    ),
-                    Position(
-                        name="fov0",
-                        plate_row="B",
-                        plate_column="2",
-                        grid_row=0,
-                        grid_column=0,
-                    ),
-                ]
+    pd = PositionDimension(
+        positions=[
+            Position(
+                name="fov0", plate_row="A", plate_column="1", grid_row=0, grid_column=0
             ),
-            Dimension(name="y", count=16, type="space"),
-            Dimension(name="x", count=16, type="space"),
-        ],
-        dtype="uint16",
+            Position(
+                name="fov0", plate_row="B", plate_column="2", grid_row=0, grid_column=0
+            ),
+        ]
     )
-    assert len(settings.positions) == 2
+    assert len(pd.positions) == 2
 
     # Same name, same plate coords, but different grid coords
     # (e.g., "fov0" at different grid positions within the same well)
-    settings = AcquisitionSettings(
-        root_path="test.zarr",
-        dimensions=[
-            PositionDimension(
-                positions=[
-                    Position(
-                        name="fov0",
-                        plate_row="A",
-                        plate_column="1",
-                        grid_row=0,
-                        grid_column=0,
-                    ),
-                    Position(
-                        name="fov0",
-                        plate_row="A",
-                        plate_column="1",
-                        grid_row=1,
-                        grid_column=1,
-                    ),
-                ]
+    pd = PositionDimension(
+        positions=[
+            Position(
+                name="fov0", plate_row="A", plate_column="1", grid_row=0, grid_column=0
             ),
-            Dimension(name="y", count=16, type="space"),
-            Dimension(name="x", count=16, type="space"),
-        ],
-        dtype="uint16",
+            Position(
+                name="fov0", plate_row="A", plate_column="1", grid_row=1, grid_column=1
+            ),
+        ]
     )
-    assert len(settings.positions) == 2
+    assert len(pd.positions) == 2
 
     # Same name, same plate AND same grid coords
     with pytest.raises(
         ValueError, match="Position names must be unique within each group"
     ):
-        AcquisitionSettings(
-            root_path="test.zarr",
-            dimensions=[
-                PositionDimension(
-                    positions=[
-                        Position(
-                            name="fov0",
-                            plate_row="A",
-                            plate_column="1",
-                            grid_row=0,
-                            grid_column=0,
-                        ),
-                        Position(
-                            name="fov0",
-                            plate_row="A",
-                            plate_column="1",
-                            grid_row=0,
-                            grid_column=0,
-                        ),
-                    ]
+        PositionDimension(
+            positions=[
+                Position(
+                    name="fov0",
+                    plate_row="A",
+                    plate_column="1",
+                    grid_row=0,
+                    grid_column=0,
                 ),
-                Dimension(name="y", count=16, type="space"),
-                Dimension(name="x", count=16, type="space"),
-            ],
-            dtype="uint16",
+                Position(
+                    name="fov0",
+                    plate_row="A",
+                    plate_column="1",
+                    grid_row=0,
+                    grid_column=0,
+                ),
+            ]
         )
 
 
