@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import threading
+import warnings
 from dataclasses import dataclass
 from itertools import count
 from queue import Queue
@@ -14,6 +15,7 @@ from ome_writers._backends._ome_xml import prepare_metadata
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from typing import Any
 
     import numpy as np
 
@@ -29,6 +31,14 @@ except ImportError as e:
         f"{__name__} requires tifffile and ome-types: "
         "`pip install ome-writers[tifffile]`."
     ) from e
+
+PLANE_KEYS = {
+    "delta_t",
+    "exposure_time",
+    "position_x",
+    "position_y",
+    "position_z",
+}
 
 
 @dataclass
@@ -53,6 +63,49 @@ class PositionManager:
         # careful... our lock is not re-entrant, so avoid deadlock
         self.metadata_mirror.flush(force=flush)
 
+    def signal_stop(self) -> None:
+        """Signal the writer thread to stop by sending None sentinel."""
+        if self.queue is not None:
+            self.queue.put(None)
+
+    def finalize(self, index_dims: tuple[Dimension, ...] | None) -> None:
+        """Wait for thread completion and update metadata with actual frames written.
+
+        Parameters
+        ----------
+        index_dims : tuple[Dimension, ...] | None
+            Dimensions used for storage indexing, or None if unavailable.
+            (usually just T, C, Z)
+        """
+        # Wait for thread to finish
+        if self.thread:
+            self.thread.join(timeout=5)
+
+        # Update metadata based on actual frames written
+        if self.thread is None:
+            # No thread means no TIFF file (e.g., companion OME-XML only)
+            self.metadata_mirror.flush(force=True)
+            return
+
+        # Update dimension sizes and plane count based on actual frames written
+        images = self.metadata_mirror.model.images
+        if self.thread.frames_written and index_dims and images:
+            pixels = images[0].pixels
+
+            # Update the outermost dimension's size based on frames written
+            # This handles both unbounded dims and incomplete bounded dims
+            if index_dims:
+                first, *inner = index_dims
+                # Calculate actual size of outermost dimension
+                inner_prod = math.prod([d.count or 1 for d in inner])
+                actual_outer_size = self.thread.frames_written // inner_prod
+                setattr(pixels, f"size_{first.name.lower()}", actual_outer_size)
+
+            # Update plane count
+            if data_blocks := pixels.tiff_data_blocks:
+                data_blocks[0].plane_count = self.thread.frames_written
+            self.metadata_mirror.flush(force=True)
+
 
 class TiffBackend(ArrayBackend):
     """OME-TIFF backend using tifffile for sequential writes.
@@ -67,6 +120,7 @@ class TiffBackend(ArrayBackend):
         self._position_managers: dict[int, PositionManager] = {}
         self._storage_dims: tuple[Dimension, ...] | None = None
         self._dtype: str = ""
+        self._frame_metadata: dict[int, list[dict[str, Any]]] = {}
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         """Check if settings are compatible with TIFF backend."""
@@ -97,6 +151,8 @@ class TiffBackend(ArrayBackend):
         """Initialize OME-TIFF files and writer threads."""
         self._finalized = False
         self._storage_dims = storage_dims = settings.array_storage_dimensions
+        # Extract index keys, excluding Y and X, example: ['t', 'c', 'z']
+        self._index_keys = [d.name for d in storage_dims[:-2]]
         self._dtype = settings.dtype
 
         # Extract and validate compression
@@ -141,6 +197,8 @@ class TiffBackend(ArrayBackend):
         position_index: int,
         index: tuple[int, ...],
         frame: np.ndarray,
+        *,
+        frame_metadata: dict[str, Any] | None = None,
     ) -> None:
         """Write frame sequentially to the appropriate position's TIFF file.
 
@@ -151,23 +209,65 @@ class TiffBackend(ArrayBackend):
         if not self._position_managers:  # pragma: no cover
             raise RuntimeError("Backend not prepared. Call prepare() first.")
 
-        self._position_managers[position_index].queue.put(frame)
+        manager = self._position_managers[position_index]
+        manager.queue.put(frame)
+
+        # Accumulate frame metadata with storage index
+        if frame_metadata is not None:
+            self._append_frame_metadata(position_index, index, frame_metadata)
+
+    def _append_frame_metadata(
+        self,
+        position_index: int,
+        index: tuple[int, ...],
+        frame_metadata: dict[str, Any],
+    ) -> None:
+        if position_index not in self._frame_metadata:
+            self._frame_metadata[position_index] = []
+        # self._frame_metadata[position_index].append(meta_with_idx)
+
+        mirror = self._position_managers[position_index].metadata_mirror
+        model = mirror.model
+        map_annotations = model.structured_annotations.map_annotations  # type: ignore
+        if images := model.images:
+            # {"the_z": 0, "the_c": 1, ...}
+            plane_kwargs = {
+                f"the_{k}": v for k, v in zip(self._index_keys, index, strict=False)
+            }
+            plane_kwargs.update(
+                {f"the_{k}": 0 for k in "tcz" if k not in self._index_keys}
+            )
+
+            extra_kwargs = {}
+            for key, value in frame_metadata.items():
+                if key in PLANE_KEYS:
+                    plane_kwargs[key] = value
+                else:
+                    extra_kwargs[key] = value
+
+            # meta_with_idx = {**frame_metadata, "storage_index": index}
+            annotation = ome.MapAnnotation(value=ome.Map.model_validate(extra_kwargs))
+            map_annotations.append(annotation)
+            planes = images[position_index].pixels.planes
+            planes.append(
+                ome.Plane(
+                    **plane_kwargs,
+                    annotation_refs=[ome.AnnotationRef(id=annotation.id)],
+                )
+            )
+            mirror.mark_dirty()
 
     def finalize(self) -> None:
         """Flush and close all TIFF writers."""
         if not self._finalized:
-            # Signal threads to stop
+            # Signal all threads to stop (parallel shutdown begins)
             for manager in self._position_managers.values():
-                manager.queue.put(None)
+                manager.signal_stop()
 
-            # Wait for threads to finish
+            # Finalize each position (wait for thread and update metadata)
             for manager in self._position_managers.values():
-                if manager.thread:
-                    manager.thread.join(timeout=5)
-
-            # Update OME metadata if unbounded dimensions were written
-            if self._storage_dims and any(d.count is None for d in self._storage_dims):
-                self._update_unbounded_metadata()
+                index_dims = self._storage_dims[:-2] if self._storage_dims else None
+                manager.finalize(index_dims)
 
             self._finalized = True
 
@@ -254,40 +354,6 @@ class TiffBackend(ArrayBackend):
             except KeyError as e:  # pragma: no cover
                 raise KeyError(f"Unknown position index: {pos_idx}") from e
 
-    # -------------------
-
-    def _update_unbounded_metadata(self) -> None:
-        """Update OME metadata after writing unbounded dimensions.
-
-        For unbounded dimensions, we write frames without knowing the final count.
-        After writing completes, update the OME-XML with the actual frame counts.
-        """
-        # Get actual frames_written from first position's thread
-        # (all positions should have written the same number of frames)
-        if (
-            not self._storage_dims
-            or not (manager := self._position_managers.get(0))
-            or not manager.thread
-            or not (frames_written := manager.thread.frames_written)
-        ):
-            return  # pragma: no cover
-
-        sizes = {d.name.lower(): d.count or 1 for d in self._storage_dims[:-2]}
-        # Infer real dimension count from total frames written
-        actual_count = frames_written // math.prod(sizes.values())
-        unbounded_dim_name = next(d.name for d in self._storage_dims if d.count is None)
-
-        for manager in self._position_managers.values():
-            mirror = manager.metadata_mirror
-            if images := mirror.model.images:
-                pixels = images[0].pixels
-                # fix size of unbounded dimension
-                setattr(pixels, f"size_{unbounded_dim_name.lower()}", actual_count)
-                # fix plane count in the tiff data
-                if tiff_data_blocks := pixels.tiff_data_blocks:
-                    tiff_data_blocks[0].plane_count = frames_written
-                mirror.flush(force=True)
-
 
 class WriterThread(threading.Thread):
     """Background thread for sequential TIFF writing."""
@@ -322,9 +388,16 @@ class WriterThread(threading.Thread):
 
     def run(self) -> None:
         """Write frames from queue to TIFF file sequentially."""
+        # Wait for first frame before opening file - if close is called before
+        # any frames are written, we get None and can return early
+        first_frame = self._image_queue.get()
+        if first_frame is None:
+            return
 
         def _queue_iterator() -> Iterator[np.ndarray]:
-            """Yield frames from the queue until None is received."""
+            """Yield first frame, then frames from queue until None."""
+            self.frames_written += 1
+            yield first_frame
             while True:
                 frame = self._image_queue.get()
                 if frame is None:
@@ -336,37 +409,32 @@ class WriterThread(threading.Thread):
             with tifffile.TiffWriter(
                 self._path, bigtiff=True, ome=False, shaped=False
             ) as writer:
-                if self._has_unbounded:
-                    # For unbounded dimensions, write frames individually
-                    # to avoid shape mismatch errors
-                    for i, frame in enumerate(_queue_iterator()):
-                        writer.write(
-                            frame,
-                            contiguous=True,
-                            dtype=self._dtype,
-                            resolution=(self._res, self._res),
-                            resolutionunit=tifffile.RESUNIT.MICROMETER,
-                            photometric=tifffile.PHOTOMETRIC.MINISBLACK,
-                            description=self._ome_xml_bytes if i == 0 else None,
-                            compression=self._compression,
-                        )
-                else:
-                    # For bounded dimensions, use iterator with shape
+                # Write frames individually for both bounded and unbounded dimensions.
+                # This approach:
+                # - Doesn't promise a frame count upfront (no shape parameter)
+                # - Handles incomplete writes gracefully (iterator can end early)
+                # - Lets tifffile discover the actual count as frames arrive
+                # Note: contiguous=True is incompatible with compression, so we only
+                # use it when compression is disabled
+                use_contiguous = self._compression is None
+                for i, frame in enumerate(_queue_iterator()):
                     writer.write(
-                        _queue_iterator(),
-                        shape=self._shape,
+                        frame,
+                        contiguous=use_contiguous,
                         dtype=self._dtype,
                         resolution=(self._res, self._res),
                         resolutionunit=tifffile.RESUNIT.MICROMETER,
                         photometric=tifffile.PHOTOMETRIC.MINISBLACK,
-                        description=self._ome_xml_bytes,
+                        description=self._ome_xml_bytes if i == 0 else None,
                         compression=self._compression,
                     )
         except Exception as e:  # pragma: no cover
-            # Suppress over-eager tifffile exception for incomplete writes
-            if "wrong number of bytes" in str(e):
-                return
-            raise
+            # Unexpected errors - log and continue
+            warnings.warn(
+                f"Unexpected error during TIFF write: {e}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
 
 _thread_counter = count()

@@ -152,6 +152,6 @@ def test_bench_append(
         """Only the append loop is timed."""
         for frame in frames:
             stream.append(frame)
-        stream._backend.finalize()
+        stream.close()  # flush async writes
 
     benchmark.pedantic(append_all_frames, setup=setup, rounds=15)

@@ -670,16 +670,33 @@ class AcquisitionSettings(_BaseModel):
             # and that all positions have row/column assigned
             for dim in self.dimensions:
                 if isinstance(dim, PositionDimension):
-                    missing = [
+                    names_without_row_col = [
                         pos.name
                         for pos in dim.positions
                         if pos.plate_row is None or pos.plate_column is None
                     ]
-                    if missing:
+                    if names_without_row_col:
                         raise ValueError(
                             f"All positions must have row and column for plate mode. "
-                            f"Missing row/column for positions: {missing}"
+                            f"Missing row/column for positions: {names_without_row_col}"
                         )
+
+                    names_with_bad_coords = [
+                        pos.name
+                        for pos in dim.positions
+                        if ((r := pos.plate_row) and r not in self.plate.row_names)
+                        or (
+                            (c := pos.plate_column) and c not in self.plate.column_names
+                        )
+                    ]
+                    if names_with_bad_coords:
+                        warnings.warn(
+                            f"Some positions have row/column values not in the plate "
+                            f"definition: {names_with_bad_coords}. "
+                            "These may be omitted from the plate metadata on disk.",
+                            stacklevel=3,
+                        )
+
                     break
             else:
                 raise ValueError(

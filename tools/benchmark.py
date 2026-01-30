@@ -118,7 +118,7 @@ def run_benchmark_iteration(
         t2 = time.perf_counter()
 
         # Time finalize
-        stream._backend.finalize()
+        stream.close()  # flush and finalize
         t3 = time.perf_counter()
 
         # print warning if tmp_path is empty (no data written)

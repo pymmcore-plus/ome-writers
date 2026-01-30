@@ -111,6 +111,8 @@ class AcquireZarrBackend(YaozarrsBackend):
         position_index: int,
         index: tuple[int, ...],
         frame: np.ndarray,
+        *,
+        frame_metadata: dict[str, Any] | None = None,
     ) -> None:
         """Write frame sequentially via acquire-zarr stream."""
         if self._stream is None:  # pragma: no cover
@@ -118,6 +120,7 @@ class AcquireZarrBackend(YaozarrsBackend):
 
         output_key = self._az_pos_keys[position_index]
         self._stream.append(frame, key=output_key)
+        self._store_frame_metadata(position_index, index, frame_metadata)
 
     def finalize(self) -> None:
         """Close stream and release resources."""

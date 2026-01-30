@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import uuid
 import warnings
 from datetime import datetime, timezone
@@ -308,10 +309,14 @@ def _build_full_model(
         )
         images.append(image)
 
-    return ome_types.OME(uuid=_make_uuid(), images=images)
+    plates = _build_plates(settings)
+    return ome_types.OME(uuid=_make_uuid(), images=images, plates=plates)
 
 
 VALID_ORDERS = [x.value for x in ome.Pixels_DimensionOrder]
+
+# Missing file /output_p000.ome.tiff
+# associated with UUID urn:uuid:1690ae46-d559-40cc-9166-ab806db80098.
 
 
 def _get_dimension_order(dims: list[Dimension]) -> str:
@@ -338,3 +343,75 @@ def _get_physical_sizes(dims: list[Dimension]) -> dict:
             ):
                 output[f"physical_size_{axis}_unit"] = ome_unit
     return output
+
+
+def _build_plates(settings: AcquisitionSettings) -> list[ome.Plate]:
+    """Build OME Plate with Wells and WellSamples linking to Images.
+
+    Each position maps to a WellSample, which links to an Image via ImageRef.
+    Wells are determined by unique (plate_row, plate_column) combinations.
+    """
+    if not (positions := settings.positions) or not (plate := settings.plate):
+        return []
+
+    # all known (row, column) keys based on plate definition
+    valid_keys = set(itertools.product(plate.row_names, plate.column_names))
+
+    # Group positions by well (row, column), filtering out invalid coordinates
+    wells_map: dict[tuple[str, str], list[tuple[int, Position]]] = {}
+    for idx, pos in enumerate(positions):
+        # in AcquisitionSettings._validate_plate_positions, we already warned the user
+        # that positions with with plate_row/plate_column that aren't represented
+        # in the plate definition will be skipped from the metadata.
+        # So here we just skip them here silently.
+        key = (pos.plate_row, pos.plate_column)
+        if key in valid_keys:
+            wells_map.setdefault(key, []).append((idx, pos))
+
+    # Build Well objects with WellSamples
+    wells: list[ome.Well] = []
+    for (row_name, col_name), positions in wells_map.items():
+        row_idx = plate.row_names.index(row_name)
+        col_idx = plate.column_names.index(col_name)
+
+        well_samples = [
+            ome.WellSample(
+                id=f"WellSample:{idx}",
+                index=idx,
+                image_ref=ome.ImageRef(id=f"Image:{idx}"),
+            )
+            for idx, _pos in positions
+        ]
+
+        wells.append(
+            ome.Well(
+                id=f"Well:{row_idx}_{col_idx}",
+                row=row_idx,
+                column=col_idx,
+                well_samples=well_samples,
+            )
+        )
+
+    row_conv = _infer_naming_convention(plate.row_names)
+    col_conv = _infer_naming_convention(plate.column_names)
+
+    return [
+        ome.Plate(
+            id="Plate:0",
+            name=plate.name,
+            rows=len(plate.row_names),
+            columns=len(plate.column_names),
+            row_naming_convention=row_conv,
+            column_naming_convention=col_conv,
+            wells=wells,
+        )
+    ]
+
+
+def _infer_naming_convention(names: list[str]) -> ome.NamingConvention | None:
+    """Infer naming convention from a list of names."""
+    if all(n.isalpha() for n in names):
+        return ome.NamingConvention.LETTER
+    if all(n.isdigit() for n in names):
+        return ome.NamingConvention.NUMBER
+    return None  # pragma: no cover
