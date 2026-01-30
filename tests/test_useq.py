@@ -76,6 +76,34 @@ SEQ_CASES = [
     ),
     Case(
         seq=useq.MDASequence(
+            axis_order="pgtcz",
+            stage_positions=[
+                useq.Position(x=0.0, y=0.0, name="single_pos"),
+                useq.Position(
+                    x=10.0,
+                    y=10.0,
+                    name="grid",
+                    sequence=useq.MDASequence(
+                        grid_plan=useq.GridRowsColumns(rows=1, columns=2)
+                    ),
+                ),
+            ],
+            grid_plan=useq.GridRowsColumns(rows=2, columns=1),
+            time_plan={"interval": 0.1, "loops": 3},
+            channels=["DAPI", "Cy5"],
+            z_plan={"range": 2, "step": 1.0},
+        ),
+        expected_dim_names=["p", "t", "c", "z", "y", "x"],
+        expected_positions=[
+            ExpectedPosition(name="single_pos", grid_row=0, grid_col=0),
+            ExpectedPosition(name="single_pos", grid_row=1, grid_col=0),
+            ExpectedPosition(name="grid", grid_row=0, grid_col=0),
+            ExpectedPosition(name="grid", grid_row=0, grid_col=1),
+        ],
+        id="subsequence_mixed_with_global_grid",
+    ),
+    Case(
+        seq=useq.MDASequence(
             axis_order="tcpz",
             stage_positions=[(0.0, 0.0), (10.0, 10.0)],
             time_plan={"interval": 0.1, "loops": 2},
@@ -277,21 +305,8 @@ RAGGED_CASES = [
             ],
             z_plan={"range": 4, "step": 1.0},
         ),
-        r"mixed Channel\.do_stack values are not supported",
+        "Sequences with Channel.do_stack=False values are not supported",
         id="mixed_do_stack",
-    ),
-    # All do_stack=False with z_plan - only middle z acquired, mismatches z_plan
-    pytest.param(
-        useq.MDASequence(
-            axis_order="cz",
-            channels=[
-                useq.Channel(config="DAPI", do_stack=False),
-                useq.Channel(config="Cy5", do_stack=False),
-            ],
-            z_plan={"range": 4, "step": 1.0},
-        ),
-        r"all channels have do_stack=False",
-        id="all_do_stack_false",
     ),
     # acquire_every > 1 - creates ragged time dimension per channel
     pytest.param(
@@ -418,3 +433,29 @@ def test_unsupported_sequences_raise(seq: useq.MDASequence, error_pattern: str) 
     """Test that ragged dimension cases raise NotImplementedError."""
     with pytest.raises(NotImplementedError, match=error_pattern):
         dims_from_useq(seq, image_width=64, image_height=64)
+
+
+def test_useq_manual_units() -> None:
+    """Test that manual units in useq sequence are respected."""
+    seq = useq.MDASequence(
+        axis_order="tzc",
+        time_plan={"interval": 1, "loops": 3},
+        channels=["DAPI"],
+    )
+
+    dims = dims_from_useq(
+        seq,
+        image_width=64,
+        image_height=64,
+        units={
+            "t": (
+                1.0,
+                "minute",
+            )
+        },
+    )
+
+    time_dim = next(dim for dim in dims if dim.type == "time")
+    assert time_dim.unit == "minute"
+    assert time_dim.scale == 1.0
+    assert time_dim.count == 3

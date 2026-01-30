@@ -173,10 +173,9 @@ def _validate_sequence(seq: useq.MDASequence) -> None:
 
     # Check do_stack uniformity when z_plan exists
     if seq.z_plan and seq.channels:
-        do_stack_values = {c.do_stack for c in seq.channels}
-        if len(do_stack_values) > 1:
+        if any(c.do_stack is False for c in seq.channels):
             raise NotImplementedError(
-                "Sequences with mixed Channel.do_stack values are not supported. "
+                "Sequences with Channel.do_stack=False values are not supported. "
                 "This creates ragged dimensions where different channels have "
                 "different z-stack sizes."
             )
@@ -254,7 +253,7 @@ def _build_positions(seq: useq.MDASequence) -> list[Position]:
             for i, gp in enumerate(seq.grid_plan)
         ]
 
-    return []
+    return []  # pragma: no cover
 
 
 def _build_well_plate_positions(plate_plan: useq.WellPlatePlan) -> list[Position]:
