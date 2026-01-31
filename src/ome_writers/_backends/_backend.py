@@ -53,6 +53,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from typing import Any, Literal
 
     import numpy as np
@@ -208,7 +209,7 @@ class ArrayBackend(ABC):
         """
         return None  # pragma: no cover
 
-    def update_metadata(self, metadata: Any) -> None:  # noqa: B027
+    def update_metadata(self, metadata: Any) -> None:
         """Update metadata after writing is complete.
 
         This optional hook allows updating file metadata after `finalize()`.
@@ -230,4 +231,23 @@ class ArrayBackend(ABC):
         For convenience, use get_metadata() to retrieve the base structure,
         modify it, and pass it back to this method. This avoids duplicating
         dimension and dtype information.
+        """
+        return None
+
+    @abstractmethod
+    def advance(self, indices: Sequence[tuple[int, tuple[int, ...]]]) -> None:
+        """Advance through multiple frame positions without writing data.
+
+        Backends should handle skipping frames as needed to maintain storage
+        structure.  The simplest case is a no-op for random-access backends that support
+        sparse writes (Zarr).  Though all backends need to handle resizing (for
+        unbounded dimensions) if the skipped frames extend the array size, just as they
+        would for write().
+
+        Parameters
+        ----------
+        indices
+            List of (position_index, storage_index) tuples to skip.
+            These are the same things normally passed to `write()`, but grouped into
+            n frames to support optimized handling.
         """

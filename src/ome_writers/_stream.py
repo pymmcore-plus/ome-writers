@@ -112,6 +112,52 @@ class OMEStream:
         self._backend.write(pos_idx, idx, frame, frame_metadata=frame_metadata)
         self._state["has_appended"] = True
 
+    def skip(self, *, frames: int = 1) -> None:
+        """Skip N frames in acquisition order without writing data.
+
+        This method advances the stream's position by the specified number of frames
+        without writing any actual data. The behavior depends on the backend:
+
+        - **Zarr backends**: Skipped regions use the array's fill_value (default 0).
+          For unlimited dimensions, the array is resized to accommodate the skip.
+        - **TIFF backend**: Writes zero-filled placeholder frames to maintain the
+          sequential IFD structure required by the format.
+
+        Parameters
+        ----------
+        frames : int, optional
+            (Keyword only). Number of frames to skip, by default 1. Must be positive.
+
+        Raises
+        ------
+        ValueError
+            If frames <= 0.
+        StopIteration
+            If skipping would exceed the total number of frames for finite dimensions.
+
+        Examples
+        --------
+        >>> with create_stream(settings) as stream:
+        ...     stream.append(frame1)  # Write frame at index 0
+        ...     stream.skip(frames=1)  # Skip frame at index 1
+        ...     # try something that may fail
+        ...     try:
+        ...         frame_generator = setup_next_10_frames()
+        ...     except SomeError:
+        ...         stream.skip(frames=10)  # Skip next 10 frames
+        ...     else:
+        ...         for frameN in frame_generator:
+        ...             stream.append(frameN)
+        ...     stream.append(frame_last)  # Continue writing at next index
+        """
+        if frames <= 0:
+            raise ValueError(f"frames must be positive, got {frames}")
+
+        # Collect all indices to skip (may raise StopIteration)
+        # and pass whole batch to backend for handling
+        indices = [next(self._iterator) for _ in range(frames)]
+        self._backend.advance(indices)
+
     def get_metadata(self) -> Any:
         """Retrieve metadata from the backend.  Meaning is format-dependent."""
         return self._backend.get_metadata()

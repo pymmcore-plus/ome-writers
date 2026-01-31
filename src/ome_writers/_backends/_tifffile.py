@@ -10,14 +10,14 @@ from itertools import count
 from queue import Queue
 from typing import TYPE_CHECKING, Literal
 
+import numpy as np
+
 from ome_writers._backends._backend import ArrayBackend
 from ome_writers._backends._ome_xml import prepare_metadata
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Sequence
     from typing import Any
-
-    import numpy as np
 
     from ome_writers._backends._ome_xml import OmeXMLMirror
     from ome_writers._router import FrameRouter
@@ -154,6 +154,7 @@ class TiffBackend(ArrayBackend):
         # Extract index keys, excluding Y and X, example: ['t', 'c', 'z']
         self._index_keys = [d.name for d in storage_dims[:-2]]
         self._dtype = settings.dtype
+        self._frame_shape = tuple(d.count or 1 for d in self._storage_dims[-2:])
 
         # Extract and validate compression
         compression = None
@@ -215,6 +216,28 @@ class TiffBackend(ArrayBackend):
         # Accumulate frame metadata with storage index
         if frame_metadata is not None:
             self._append_frame_metadata(position_index, index, frame_metadata)
+
+    def advance(self, indices: Sequence[tuple[int, tuple[int, ...]]]) -> None:
+        """Write zero-filled placeholder frames to maintain sequential TIFF structure.
+
+        TIFF files must be written sequentially. When frames are skipped during
+        acquisition (e.g., autofocus failure), we write zero-filled placeholder
+        frames to preserve the IFD order and structure.
+        """
+        if self._finalized:  # pragma: no cover
+            raise RuntimeError("Cannot advance after finalize().")
+        if not self._position_managers:  # pragma: no cover
+            raise RuntimeError("Backend not prepared. Call prepare() first.")
+
+        if not indices:
+            return
+
+        placeholder = np.zeros(self._frame_shape, dtype=self._dtype)
+        # Write placeholder for each skipped frame
+        for pos_idx, _storage_idx in indices:
+            manager = self._position_managers[pos_idx]
+            # Send to WriterThread queue (same path as regular writes)
+            manager.queue.put(placeholder)
 
     def _append_frame_metadata(
         self,
