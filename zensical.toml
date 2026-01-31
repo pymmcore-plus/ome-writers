@@ -10,6 +10,7 @@ copyright = ""
 nav = [
   "index.md",
   "install.md",
+  "usage.md",
   "performance.md",
   { "Formats" = [
     "formats/index.md",

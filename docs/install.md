@@ -4,7 +4,7 @@ icon: lucide/download-cloud
 
 # Installation
 
-You can install `ome-writers` via `pip` (or `uv pip`).  
+You can install `ome-writers` via `pip` (or `uv pip`).
 
 You *must* also select select at least one backend extra:
 
@@ -30,3 +30,8 @@ pip install ome-writers[<backend>]
 !!! Note
     All zarr-backends use [yaozarrs](https://github.com/tlambert03/yaozarrs) to generate
     OME-Zarr metadata and create zarr hierarchies (only array-writing is handled by the selected backend).
+
+!!! question "need conda?"
+    If you need `ome-writers` on conda-forge, please open an issue on the
+    [GitHub issue tracker](https://github.com/pymmcore-plus/ome-writers/issues/new),
+    and we will get it up there.

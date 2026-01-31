@@ -105,6 +105,7 @@ dev = [
     "useq-schema>=0.8.2",
     "pytest-xdist>=3.8.0",
     "typer>=0.15.0",
+    "pdbpp>=0.12.0; sys_platform != 'win32'",
 ]
 docs = [
     "griffe-fieldz>=0.4.0",
