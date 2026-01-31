@@ -56,11 +56,7 @@ the `Dimension` class well.
     )
     ```
 
-## Recipes
-
-Here are some patterns for achieving common tasks with `ome-writers`.
-
-### Modifying Output Format
+## Modifying Output Format
 
 Both the suffix of the `root_path` and the `format` key in the
 `AcquisitionSettings` may be used to specify the output format:
@@ -119,7 +115,7 @@ settings = AcquisitionSettings(
     It is however, a flexible, acceptable practice to omit the extension
     from `root_path` **provided** the `format` key is explicitly set.
 
-### Specifying Array Backend
+## Specifying Array Backend
 
 The actual writing of arrays is done by a backend.  Backends are detailed
 on each format's documentation page: [OME-TIFF backends](./formats/tiff.md#backends) and
@@ -149,9 +145,9 @@ settings = AcquisitionSettings(
 )
 ```
 
-### Common Dimension Setups
+## Common Dimension Setups
 
-#### Single 5D Image
+### Single 5D Image
 
 ```python
 # at each time point, for each channel, acquire a 3D stack:
@@ -182,7 +178,7 @@ dimensions=[
 
 See the [single 5D image example](../examples/single_5d_image.md).
 
-#### Multiple Positions
+### Multiple Positions
 
 ```python
 # for each time point, visit each position, and for each channel, acquire a 3D stack:
@@ -202,7 +198,7 @@ of multiple 5D images, one per position.
 
 See the [multi-position example](../examples/multiposition.md).
 
-#### Multi-well plates (HCS)
+### Multi-well plates (HCS)
 
 Multi-well plates are declared by the addition of the `plate` key
 to the `AcquisitionSettings`, along with `plate_row/plate_column`
@@ -242,7 +238,7 @@ settings = AcquisitionSettings(
 
 See the [multi-well plate example](../examples/plate.md).
 
-#### Unbounded Dimensions
+### Unbounded Dimensions
 
 If you don't know ahead of time how many frames you will acquire
 along a particular dimension (e.g. time), you may declare that
@@ -260,7 +256,7 @@ dimensions=[
 
 See the [unbounded dimensions example](../examples/unbounded.md).
 
-#### Everything Else
+### Everything Else
 
 If your dataset is fundamentally incompatible with the limitations of either
 OME-TIFF or OME-Zarr (e.g. ragged dimensions, more than 5 dimensions per image,
@@ -313,3 +309,104 @@ In short:
     even your frame shape changes over time, you will unfortunately
     need to come up with a custom solution.  Please open an issue
     if this use case is particularly important to you.
+
+## Understanding Storage Order
+
+Microscopy acquisitions can happen in many different orders:  You might acquire
+all channels at each Z-plane before moving to the next Z-plane (order `zcyx`),
+or acquire all Z-planes for each channel before switching channels (order
+`czxy`), etc.  Different file formats have different support for this.
+
+While OME-TIFF is relatively flexible, supporting any permutation of `TCZ`...  
+**OME-Zarr is currently *strictly* limited to TCZYX storage order.**
+
+> [axes] MUST be ordered by "type" where the "time" axis must come first (if
+> present), followed by the "channel" or custom axis (if present) and the axes
+> of type "space". If there are three spatial axes where two correspond to the
+> image plane ("yx") and images are stacked along the other (anisotropic) axis
+> ("z"), the spatial axes SHOULD be ordered as "zyx".
+
+!!! note "Discussions ongoing"
+    [RFC-3](https://ngff.openmicroscopy.org/rfc/3/index.html) is an active
+    discussion about relaxing this restriction in future versions of the
+    OME-NGFF specification.
+
+This restriction makes it extremely hard to directly write some acquisitions to
+OME-Zarr without re-ordering frames in memory or on-disk after acquisition.
+This can be controlled using the `storage_order` key in the `AcquisitionSettings`.
+
+```python
+settings = AcquisitionSettings(
+    root_path="example.ome.zarr",
+    dimensions=[
+        Dimension(name="t", ...),
+        Dimension(name="z", ...),
+        Dimension(name="c", ...),
+        Dimension(name="y", ...),
+        Dimension(name="x", ...),
+    ],
+    dtype="uint16",
+    storage_order="ome",  # the default
+)
+```
+
+By default (`storage_order="ome"`), `ome-writers` always attempts to write
+*spec-compliant* datasets, for both OME-TIFF and OME-Zarr, it *will* permute
+frames when necessary to ensure that the output dataset is valid. So, in the
+example above, frames will be re-ordered from `tzcyx` to `tczyx` when writing
+OME-Zarr (since that's the only valid order for that format), but will be written
+as `tzcyx` for OME-TIFF (which supports that order).
+
+Other options for `storage_order`, both of which may produce non-compliant
+datasets, are:
+
+- `"acquisition"`:  Frames are written in the order defined by the
+  `dimensions` list, *without* any re-ordering.
+- `list[str]`: A list of dimension names defining the desired storage order.
+  Frames will be re-ordered as necessary to match this order.
+
+Backends may also impose additional restrictions on storage order.  If you run
+into difficulties with `storage_order`, please
+[open an issue](https://github.com/pymmcore-plus/ome-writers/issues/new) to
+discuss your use case.
+
+## Compressing Data
+
+Both OME-TIFF and OME-Zarr support compression of image data (though
+supported compression types vary by format and backend).  Compression
+is specified via the `compression` key in the `AcquisitionSettings`.
+
+```python
+settings = AcquisitionSettings(
+    root_path="example.ome.zarr",
+    dimensions=[...],
+    dtype="uint16",
+    compression="blosc-zstd",
+)
+```
+
+Using a compression type that is not supported by the selected format/backend
+will raise an error when creating the `AcquisitionSettings` object.
+
+## Where did the data go?
+
+Different formats have different conventions for how data is stored on-disk.
+It's easy with OME-Zarr to guarantee that all data is inside of a zarr group
+at your `AcquisitionSettings.root_path`, but OME-TIFF has many different
+valid conventions (everything in a single file, one file per position, etc...).
+
+Similarly, various formats may add suffixes or sub-directories to the specified
+`AcquisitionSettings.root_path`.
+
+For these reasons, the
+[`AcquisitionSettings.output_path`][ome_writers.AcquisitionSettings.output_path]
+property exists. It resolves to **the root *container* of the actual data
+written**.  That container may be a single file (e.g. `some_data.ome.tiff`), a
+directory that contains multiple files (e.g. `some_data/pos0.ome.tiff`,
+`some_data/pos1.ome.tiff`, ...), or a zarr group with or without suffix (e.g.
+`some_data.ome.zarr/`).
+
+`AcquisitionSettings.output_path` will *always* exist, but you cannot assume
+that `AcquisitionSettings.root_path` does, and you cannot assume that
+`output_path` will always be a file or a directory (though these things *can* be
+determined by and gleaned from your `format` settings).

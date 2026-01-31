@@ -41,7 +41,6 @@ features = [
   "navigation.footer",
   "navigation.indexes",
   "navigation.path",
-  "navigation.expand",
   "toc.follow",
   "search.highlight",
 ]
