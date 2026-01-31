@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 from ome_writers._schema import (
     AcquisitionSettings,
+    Channel,
     Dimension,
     Plate,
     Position,
@@ -28,6 +29,7 @@ from ome_writers._useq import dims_from_useq
 
 __all__ = [
     "AcquisitionSettings",
+    "Channel",
     "Dimension",
     "OMEStream",
     "Plate",

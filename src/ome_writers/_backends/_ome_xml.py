@@ -12,7 +12,7 @@ import ome_types
 import ome_types.model as ome
 import tifffile
 
-from ome_writers._schema import Dimension, Position, PositionDimension
+from ome_writers._schema import Channel, Dimension, Position, PositionDimension
 from ome_writers._units import ngff_to_ome_unit
 
 if TYPE_CHECKING:
@@ -258,17 +258,22 @@ def _build_full_model(
     """Build complete OME model with all series/images."""
     dims = [d for d in settings.dimensions if not isinstance(d, PositionDimension)]
     dimension_order = _get_dimension_order(dims)
-    channel_dimension = next((d for d in dims if d.name.lower() == "c"), None)
+    channel_dim = next(
+        (d for d in dims if d.type == "channel" or d.name.lower() == "c"), None
+    )
     pixel_sizes = {"z": 1, "c": 1, "t": 1}
     pixel_sizes.update({d.name.lower(): d.count or 1 for d in dims})
+    size_t = pixel_sizes["t"]
+    size_c = pixel_sizes["c"]
+    size_z = pixel_sizes["z"]
 
-    images: list[ome.Image] = []
     single_file = mode == MetadataMode.SINGLE_FILE
 
     # Track cumulative IFD offset for single-file mode
     ifd_offset = 0
-    planes_per_series = pixel_sizes["z"] * pixel_sizes["c"] * pixel_sizes["t"]
+    planes_per_series = size_t * size_c * size_z
 
+    images: list[ome.Image] = []
     for i, pos in enumerate(settings.positions):
         # For single file, all series reference the same file (no UUID children)
         # For multi-file, each series references all files via UUID children
@@ -285,26 +290,24 @@ def _build_full_model(
                 uuid=ome.TiffData.UUID(file_name=relative_path, value=file_info.uuid),
             )
 
-        if channel_dimension and channel_dimension.coords:
-            # Use channel names from channel dimension if available
+        if channel_dim and channel_dim.coords:
+            # Use full channel information if
             channels = [
-                ome.Channel(id=f"Channel:{i}:{cidx}", name=name)
-                for cidx, name in enumerate(channel_dimension.coords)
+                _cast_channel(omw_channel=c, id=f"Channel:{i}:{cidx}")
+                for cidx, c in enumerate(channel_dim.coords)
             ]
         else:
-            # should we just omit this?
-            channels = [
-                ome.Channel(id=f"Channel:{i}:{c}") for c in range(pixel_sizes["c"])
-            ]
+            channels = [ome.Channel(id=f"Channel:{i}:{c}") for c in range(size_c)]
+
         physical_sizes = _get_physical_sizes(dims)
         pixels = ome.Pixels(
             id=f"Pixels:{i}",
             dimension_order=dimension_order,
             size_x=pixel_sizes["x"],
             size_y=pixel_sizes["y"],
-            size_z=pixel_sizes["z"],
-            size_c=pixel_sizes["c"],
-            size_t=pixel_sizes["t"],
+            size_z=size_z,
+            size_c=size_c,
+            size_t=size_t,
             **physical_sizes,
             type=settings.dtype,
             # big_endian=False,
@@ -324,9 +327,6 @@ def _build_full_model(
 
 
 VALID_ORDERS = [x.value for x in ome.Pixels_DimensionOrder]
-
-# Missing file /output_p000.ome.tiff
-# associated with UUID urn:uuid:1690ae46-d559-40cc-9166-ab806db80098.
 
 
 def _get_dimension_order(dims: list[Dimension]) -> str:
@@ -425,3 +425,18 @@ def _infer_naming_convention(names: list[str]) -> ome.NamingConvention | None:
     if all(n.isdigit() for n in names):
         return ome.NamingConvention.NUMBER
     return None  # pragma: no cover
+
+
+def _cast_channel(omw_channel: Channel, id: str) -> ome.Channel:
+    """Cast an ome_writers Channel to an ome_types.model Channel."""
+    color = {"color": omw_channel.color.as_rgb_tuple()} if omw_channel.color else {}
+    return ome.Channel(
+        id=id,
+        name=omw_channel.name,
+        **color,
+        emission_wavelength=omw_channel.emission_wavelength_nm,
+        emission_wavelength_unit=ome.UnitsLength.NANOMETER,
+        excitation_wavelength=omw_channel.excitation_wavelength_nm,
+        excitation_wavelength_unit=ome.UnitsLength.NANOMETER,
+        fluor=omw_channel.fluorophore,
+    )

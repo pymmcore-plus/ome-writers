@@ -10,6 +10,7 @@ import pytest
 
 from ome_writers import (
     AcquisitionSettings,
+    Channel,
     Dimension,
     PositionDimension,
     create_stream,
@@ -219,13 +220,16 @@ def test_zarr_metadata_workflow_example(tmp_path: Path) -> None:
     assert attrs["omero"]["channels"][1]["label"] == "GFP"
 
 
-def test_channel_names_in_zarr(tmp_path: Path, zarr_backend: str) -> None:
+def test_channel_metadata_in_zarr(tmp_path: Path, zarr_backend: str) -> None:
     """Test that channel names are correctly written and read in Zarr."""
-    CHANNELS = ["DAPI", "FITC"]
     settings = AcquisitionSettings(
         root_path=str(tmp_path / "channel_names.ome.zarr"),
         dimensions=[
-            Dimension(name="c", type="channel", coords=CHANNELS),
+            Dimension(
+                name="c",
+                type="channel",
+                coords=["DAPI", Channel(name="FITC", color="lime")],  # 00FF00 is "lime"
+            ),
             Dimension(name="y", count=16, type="space"),
             Dimension(name="x", count=16, type="space"),
         ],
@@ -239,8 +243,10 @@ def test_channel_names_in_zarr(tmp_path: Path, zarr_backend: str) -> None:
 
     data = json.loads(Path(f"{settings.root_path}/zarr.json").read_text())
     ome = data["attributes"]["ome"]
-    channel_names = [ch["label"] for ch in ome["omero"]["channels"]]
-    assert channel_names == CHANNELS
+    channels = ome["omero"]["channels"]
+    channel_names = [ch["label"] for ch in channels]
+    assert channel_names == ["DAPI", "FITC"]
+    assert [ch.get("color") for ch in channels] == [None, "00FF00"]
 
 
 def test_frame_metadata_single_position(tmp_path: Path) -> None:

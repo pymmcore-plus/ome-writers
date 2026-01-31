@@ -12,6 +12,7 @@ import pytest
 
 from ome_writers import (
     AcquisitionSettings,
+    Channel,
     Dimension,
     Plate,
     Position,
@@ -312,13 +313,16 @@ def test_prepare_meta(tmp_path: Path) -> None:
         assert sum(key.endswith("companion.ome") for key in meta) == companion
 
 
-def test_channel_names_in_tiff(tmp_path: Path, tiff_backend: str) -> None:
+def test_channel_metadata_in_tiff(tmp_path: Path, tiff_backend: str) -> None:
     """Test that channel names are correctly written and read in TIFF files."""
-    CHANNELS = ["DAPI", "FITC"]
     settings = AcquisitionSettings(
         root_path=str(tmp_path / "channel_names.ome.tiff"),
         dimensions=[
-            Dimension(name="c", type="channel", coords=CHANNELS),
+            Dimension(
+                name="c",
+                type="channel",
+                coords=["DAPI", Channel(name="FITC", color="green")],
+            ),
             Dimension(name="y", count=16, type="space"),
             Dimension(name="x", count=16, type="space"),
         ],
@@ -331,8 +335,12 @@ def test_channel_names_in_tiff(tmp_path: Path, tiff_backend: str) -> None:
             stream.append(np.random.randint(0, 1000, (16, 16), dtype=np.uint16))
 
     ome_obj = from_tiff(str(tmp_path / "channel_names.ome.tiff"))
-    channel_names = [ch.name for ch in ome_obj.images[0].pixels.channels]
-    assert channel_names == CHANNELS
+    pixels = ome_obj.images[0].pixels
+    channel_names = [ch.name for ch in pixels.channels]
+    assert channel_names == ["DAPI", "FITC"]
+    channel_colors = [ch and ch.color.as_named() for ch in pixels.channels]
+    # white is the default OMX-XML color, and all channels have a default color object.
+    assert channel_colors == ["white", "green"]
 
 
 def test_frame_metadata_single_position(tmp_path: Path, tiff_backend: str) -> None:
