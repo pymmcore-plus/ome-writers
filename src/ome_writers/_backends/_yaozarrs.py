@@ -33,7 +33,13 @@ if TYPE_CHECKING:
     from yaozarrs.write.v05._write import CompressionName
 
     from ome_writers._router import FrameRouter
-    from ome_writers._schema import AcquisitionSettings, Dimension, Plate, Position
+    from ome_writers._schema import (
+        AcquisitionSettings,
+        Channel,
+        Dimension,
+        Plate,
+        Position,
+    )
 
     class ArrayLike(Protocol):
         """Protocol for array-like objects that support shape attribute."""
@@ -473,7 +479,20 @@ def _build_yaozarrs_image_model(dims: list[Dimension]) -> v05.Image:
         )
         for dim in dims
     ]
-    return v05.Image(multiscales=[v05.Multiscale.from_dims(dim_specs)])
+    channel_dim = next((d for d in dims if d.type == "channel"), None)
+    if channel_dim is not None and channel_dim.coords:
+        channels = cast("list[Channel]", channel_dim.coords)
+        omero_channels = []
+        for c in channels:
+            color = (
+                c.color.as_hex(format="long").lstrip("#").upper() if c.color else None
+            )
+            omero_channels.append(v05.OmeroChannel(label=c.name, color=color))
+
+        omero = v05.Omero(channels=omero_channels)
+    else:
+        omero = None
+    return v05.Image(multiscales=[v05.Multiscale.from_dims(dim_specs)], omero=omero)
 
 
 def _get_series_name(pos: Position) -> str:
