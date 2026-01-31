@@ -17,25 +17,15 @@ See dedicated [installation instructions](install.md).
 
 ## Usage
 
-The core API involves creating an
-[`AcquisitionSettings`][ome_writers.AcquisitionSettings] object that fully
-defines the data (dimensions, data type, etc.) as it will arrive from the
-microscope, and then using the
-[`create_stream()`][ome_writers.create_stream] factory function to create an
-[`OMEStream`][ome_writers.OMEStream] object that can accept frames via its
-[`append()`][ome_writers.OMEStream.append] method.
+See [Using `ome-writers`](usage.md) for a quick overview of how to use the library.
 
 ```python
 from ome_writers import AcquisitionSettings, create_stream
 
-# define the dimensions of your experiment
-# and storage settings such as chunk sizes, data type, etc.
 settings = AcquisitionSettings( ... )
 
-# create a stream writer based on those settings
 with create_stream(settings) as stream:
-    # append camera frames as they arrive
-    for frame in acquisition:
+    for frame in frame_generator():
         stream.append(frame)
 ```
 

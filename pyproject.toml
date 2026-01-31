@@ -15,9 +15,8 @@ description = "OME-TIFF and OME-ZARR writer APIs designed for microscopy acquisi
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "BSD-3-Clause" }
-authors = [{ name = "Talley Lambert", email = "talley.lambert@gmail.com" }]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "License :: OSI Approved :: BSD License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
@@ -105,6 +104,7 @@ dev = [
     "useq-schema>=0.8.2",
     "pytest-xdist>=3.8.0",
     "typer>=0.15.0",
+    "pdbpp>=0.12.0; sys_platform != 'win32'",
 ]
 docs = [
     "griffe-fieldz>=0.4.0",

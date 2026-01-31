@@ -10,6 +10,7 @@ copyright = ""
 nav = [
   "index.md",
   "install.md",
+  "usage.md",
   "performance.md",
   { "Formats" = [
     "formats/index.md",
@@ -40,7 +41,6 @@ features = [
   "navigation.footer",
   "navigation.indexes",
   "navigation.path",
-  "navigation.expand",
   "toc.follow",
   "search.highlight",
 ]
