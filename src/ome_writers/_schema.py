@@ -856,8 +856,10 @@ class AcquisitionSettings(_BaseModel):
             if "backend" in data:  # pragma: no cover
                 raise ValueError(
                     "`backend` is no longer a top-level field in AcquisitionSettings. "
-                    "Please specify backend within the `format` field."
+                    "Please specify backend within the `format` field, or pass the "
+                    "backend name directly as the `format` value."
                 )
+
             root = data.get("root_path", "")
             _stem, suffix = _ome_stem_suffix(root)
             fmt = data.get("format", "auto")
