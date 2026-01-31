@@ -72,13 +72,13 @@ with create_stream(settings) as stream:
     core.mda.run(seq)
 
 
-if settings.format.name == "zarr":
+if settings.format.name == "ome-zarr":
     import yaozarrs
 
     yaozarrs.validate_zarr_store(settings.output_path)
     print("✓ Zarr store is valid")
 
-if settings.format.name == "tiff":
+if settings.format.name == "ome-tiff":
     from ome_types import from_tiff
 
     if len(seq.stage_positions) == 0:

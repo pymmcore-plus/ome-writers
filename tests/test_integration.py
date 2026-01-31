@@ -31,7 +31,7 @@ from ome_writers._frame_encoder import validate_encoded_frame_values, write_enco
 if TYPE_CHECKING:
     from ome_writers._schema import BackendName
 
-BACKEND_TO_EXT = {b.name: f".ome.{b.format}" for b in _stream.BACKENDS}
+BACKEND_TO_EXT = {b.name: f".{b.format.replace('-', '.')}" for b in _stream.BACKENDS}
 # NOTES:
 # - All root_paths will be replaced with temporary directories during testing.
 D = Dimension  # alias, for brevity
@@ -268,7 +268,7 @@ def test_cases(
             return
         raise
 
-    if settings.format.name == "tiff":
+    if settings.format.name == "ome-tiff":
         _assert_valid_ome_tiff(settings)
     else:
         _assert_valid_ome_zarr(settings)
@@ -379,7 +379,7 @@ def test_chunk_memory_warning(
                 D(name="x", count=2048, chunk_size=64, type="space"),
             ],
             dtype="uint16",
-            format={"name": "zarr", "backend": "zarr-python"},
+            format={"name": "ome-zarr", "backend": "zarr-python"},
         )
 
 

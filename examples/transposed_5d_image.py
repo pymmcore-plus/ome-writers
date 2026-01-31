@@ -39,7 +39,7 @@ with create_stream(settings) as stream:
         stream.append(frame)
 
 
-if settings.format.name == "zarr":
+if settings.format.name == "ome-zarr":
     import yaozarrs
 
     yaozarrs.validate_zarr_store(settings.output_path)

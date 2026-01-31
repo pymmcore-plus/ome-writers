@@ -35,7 +35,7 @@ from ome_writers._units import cast_unit_to_ngff
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-FileFormat: TypeAlias = Literal["tiff", "zarr"]
+FileFormat: TypeAlias = Literal["ome-tiff", "ome-zarr"]
 TiffBackendName: TypeAlias = Literal["tifffile"]
 ZarrBackendName: TypeAlias = Literal[
     "acquire-zarr", "tensorstore", "zarrs-python", "zarr-python"
@@ -530,11 +530,11 @@ ZarrCompression: TypeAlias = Literal["blosc-zstd", "blosc-lz4", "zstd", "none"]
 Compression: TypeAlias = Literal["blosc-zstd", "blosc-lz4", "zstd", "lzw", "none"]
 
 
-class OmeTiff(_BaseModel):
+class OmeTiffFormat(_BaseModel):
     """Settings specific to OME-TIFF format."""
 
-    name: Literal["tiff"] = Field(
-        default="tiff",
+    name: Literal["ome-tiff"] = Field(
+        default="ome-tiff",
         description="File format identifier for OME-TIFF.",
     )
     backend: TiffBackendName | Literal["auto"] = Field(
@@ -550,11 +550,11 @@ class OmeTiff(_BaseModel):
     )
 
 
-class OmeZarr(_BaseModel):
+class OmeZarrFormat(_BaseModel):
     """Settings specific to OME-Zarr format."""
 
-    name: Literal["zarr"] = Field(
-        default="zarr",
+    name: Literal["ome-zarr"] = Field(
+        default="ome-zarr",
         description="File format identifier for OME-Zarr.",
     )
     backend: ZarrBackendName | Literal["auto"] = Field(
@@ -583,24 +583,26 @@ def _cast_format(value: Any) -> Any:
         kwargs = {"suffix": suffix} if suffix else {}
         match value.lower():
             case "ome-tiff" | "tiff":
-                return OmeTiff(**kwargs)
+                return OmeTiffFormat(**kwargs)
             case "ome-zarr" | "zarr":
-                return OmeZarr(**kwargs)
+                return OmeZarrFormat(**kwargs)
             case "tensorstore":
-                return OmeZarr(backend="tensorstore", **kwargs)
+                return OmeZarrFormat(backend="tensorstore", **kwargs)
             case "acquire-zarr":
-                return OmeZarr(backend="acquire-zarr", **kwargs)
+                return OmeZarrFormat(backend="acquire-zarr", **kwargs)
             case "zarrs-python":
-                return OmeZarr(backend="zarrs-python", **kwargs)
+                return OmeZarrFormat(backend="zarrs-python", **kwargs)
             case "zarr-python":
-                return OmeZarr(backend="zarr-python", **kwargs)
+                return OmeZarrFormat(backend="zarr-python", **kwargs)
             case "tifffile":
-                return OmeTiff(backend="tifffile", **kwargs)
+                return OmeTiffFormat(backend="tifffile", **kwargs)
 
     return value
 
 
-Format: TypeAlias = Annotated[OmeTiff | OmeZarr, BeforeValidator(_cast_format)]
+Format: TypeAlias = Annotated[
+    OmeTiffFormat | OmeZarrFormat, BeforeValidator(_cast_format)
+]
 
 
 class AcquisitionSettings(_BaseModel):
@@ -759,14 +761,14 @@ class AcquisitionSettings(_BaseModel):
         if self.compression is None:
             return self
         # TODO: move this to Format classes?
-        if self.format.name == "tiff":
+        if self.format.name == "ome-tiff":
             tiff_args = get_args(TiffCompression)
             if self.compression not in tiff_args:  # pragma: no cover
                 raise ValueError(
                     f"Compression '{self.compression}' is not supported for OME-TIFF. "
                     f"Supported: {tiff_args}."
                 )
-        else:
+        elif self.format.name == "ome-zarr":
             zarr_args = get_args(ZarrCompression)
             if self.compression not in zarr_args:  # pragma: no cover
                 raise ValueError(
@@ -864,9 +866,9 @@ class AcquisitionSettings(_BaseModel):
             elif fmt == "auto":
                 # suffix-based inference
                 if suffix.endswith((".tiff", ".tif")):
-                    data["format"] = {"name": "tiff", "suffix": suffix}
+                    data["format"] = {"name": "ome-tiff", "suffix": suffix}
                 elif suffix.endswith(".zarr"):
-                    data["format"] = {"name": "zarr", "suffix": suffix}
+                    data["format"] = {"name": "ome-zarr", "suffix": suffix}
                 else:  # pick first available backend
                     backend = next(iter(AVAILABLE_BACKENDS.values()))
                     warnings.warn(
@@ -875,8 +877,8 @@ class AcquisitionSettings(_BaseModel):
                         f"{backend.format!r}/{backend.name!r}. "
                         "\nThis may not be what you want, and may be an error in "
                         "future versions.\n"
-                        "Please specify the desired format explicitly "
-                        "(e.g. format='zarr') or via the extension of `root_path`.\n",
+                        "Please specify the desired format explicitly (e.g. "
+                        "format='ome-zarr') or via the extension of `root_path`.\n",
                         stacklevel=3,
                     )
                     data["format"] = backend.name
@@ -1003,7 +1005,7 @@ def _sort_dims_to_storage_order(
     if storage_order == "acquisition":
         return tuple(index_dims)
     elif storage_order == "ome":
-        if format == "zarr":
+        if format == "ome-zarr":
             return tuple(sorted(index_dims, key=_ngff_sort_key))
         else:
             return tuple(sorted(index_dims, key=_ome_tiff_sort_key))
