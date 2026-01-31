@@ -19,8 +19,11 @@ def dims_from_useq(
     seq: useq.MDASequence,
     image_width: int,
     image_height: int,
+    *,
     units: Mapping[str, UnitTuple | None] | None = None,
     pixel_size_um: float | None = None,
+    chunk_shapes: Mapping[str, int] | None = None,
+    shard_shapes: Mapping[str, int] | None = None,
 ) -> list[Dimension | PositionDimension]:
     """Convert a [`useq.MDASequence`][] to a list of [`Dimension`][ome_writers.Dimension] `|` [`PositionDimension`][ome_writers.PositionDimension] for ome-writers.
 
@@ -66,6 +69,12 @@ def dims_from_useq(
     pixel_size_um : float | None, optional
         The size of a pixel in micrometers. If provided, it will be used to set the
         scale for the spatial dimensions.
+    chunk_shapes : Mapping[str, int] | None, optional
+        An optional mapping of dimension names ("tczyx") to their chunk sizes.
+        (In number of pixels per chunk)
+    shard_shapes : Mapping[str, int] | None, optional
+        An optional mapping of dimension names ("tczyx") to their shard sizes
+        (in number of chunks per shard)
 
     Raises
     ------
@@ -85,6 +94,8 @@ def dims_from_useq(
     _validate_sequence(seq)
 
     units = units or {}
+    chunk_shapes = chunk_shapes or {}
+    shard_shapes = shard_shapes or {}
     dims: list[Dimension | PositionDimension] = []
     position_dim_added = False
     used_axes = seq.used_axes
@@ -111,7 +122,12 @@ def dims_from_useq(
 
         # Build dimension for t, c, z
         std_axis = StandardAxis(str(ax_name))
-        dim = std_axis.to_dimension(count=seq.sizes[ax_name], scale=1)
+        dim = std_axis.to_dimension(
+            count=seq.sizes[ax_name],
+            scale=1,
+            chunk_size=chunk_shapes.get(ax_name),
+            shard_size_chunks=shard_shapes.get(ax_name),
+        )
         if isinstance(dim, Dimension):
             if unit := units.get(str(ax_name)):
                 dim.scale, dim.unit = unit
@@ -131,8 +147,18 @@ def dims_from_useq(
 
     dims.extend(
         [
-            StandardAxis.Y.to_dimension(count=image_height, scale=pixel_size_um),
-            StandardAxis.X.to_dimension(count=image_width, scale=pixel_size_um),
+            StandardAxis.Y.to_dimension(
+                count=image_height,
+                scale=pixel_size_um,
+                chunk_size=chunk_shapes.get("y"),
+                shard_size_chunks=shard_shapes.get("y"),
+            ),
+            StandardAxis.X.to_dimension(
+                count=image_width,
+                scale=pixel_size_um,
+                chunk_size=chunk_shapes.get("x"),
+                shard_size_chunks=shard_shapes.get("x"),
+            ),
         ]
     )
 
