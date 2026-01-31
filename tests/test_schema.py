@@ -151,7 +151,7 @@ def test_plate_position_warnings(caplog: pytest.LogCaptureFixture) -> None:
 def test_duplicate_names_rejected() -> None:
     """Test that duplicate position names within the same well are rejected."""
     with pytest.raises(
-        ValueError, match="Position names must be unique within each well"
+        ValueError, match="Position names must be unique within each group"
     ):
         AcquisitionSettings(
             root_path="test.zarr",
@@ -184,6 +184,64 @@ def test_duplicate_names_rejected() -> None:
                 Dimension(name="x", count=16, type="space"),
             ],
             dtype="uint16",
+        )
+
+
+def test_same_name_allowed_in_different_groups() -> None:
+    """Test that same position name is allowed across different plate/grid groups.
+
+    This is a real-world scenario: grid scans within multiple wells where each
+    well has the same grid layout with the same site names.
+    """
+    # Same name, same grid coords, but different plate coords
+    # (e.g., "fov0" at grid position (0,0) in wells A/1 and B/2)
+    pd = PositionDimension(
+        positions=[
+            Position(
+                name="fov0", plate_row="A", plate_column="1", grid_row=0, grid_column=0
+            ),
+            Position(
+                name="fov0", plate_row="B", plate_column="2", grid_row=0, grid_column=0
+            ),
+        ]
+    )
+    assert len(pd.positions) == 2
+
+    # Same name, same plate coords, but different grid coords
+    # (e.g., "fov0" at different grid positions within the same well)
+    pd = PositionDimension(
+        positions=[
+            Position(
+                name="fov0", plate_row="A", plate_column="1", grid_row=0, grid_column=0
+            ),
+            Position(
+                name="fov0", plate_row="A", plate_column="1", grid_row=1, grid_column=1
+            ),
+        ]
+    )
+    assert len(pd.positions) == 2
+
+    # Same name, same plate AND same grid coords
+    with pytest.raises(
+        ValueError, match="Position names must be unique within each group"
+    ):
+        PositionDimension(
+            positions=[
+                Position(
+                    name="fov0",
+                    plate_row="A",
+                    plate_column="1",
+                    grid_row=0,
+                    grid_column=0,
+                ),
+                Position(
+                    name="fov0",
+                    plate_row="A",
+                    plate_column="1",
+                    grid_row=0,
+                    grid_column=0,
+                ),
+            ]
         )
 
 

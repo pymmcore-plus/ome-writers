@@ -202,6 +202,25 @@ CASES = [
         ],
         dtype="uint16",
     ),
+    # Grid positions (tests duplicate names with grid coordinates)
+    AcquisitionSettings(
+        root_path="tmp",
+        dimensions=[
+            D(name="t", count=2, type="time"),
+            PositionDimension(
+                positions=[
+                    Position(name="Pos0", grid_row=0, grid_column=0),
+                    Position(name="Pos0", grid_row=0, grid_column=1),
+                    Position(name="Pos1", grid_row=0, grid_column=0),
+                    Position(name="Pos1", grid_row=0, grid_column=1),
+                ]
+            ),
+            D(name="c", count=2, type="channel"),
+            D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
+            D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
+        ],
+        dtype="uint16",
+    ),
     # Sharding test: shard_size_chunks parameter
     AcquisitionSettings(
         root_path="tmp",
@@ -538,7 +557,14 @@ def _assert_valid_ome_zarr(case: AcquisitionSettings) -> None:
         assert isinstance(ome_meta, v05.Bf2Raw)
         ome_group = yaozarrs.validate_ome_uri(root / "OME")
         assert isinstance(ome_group.attributes.ome, v05.Series)
-        paths = [root / pos.name for pos in case.positions]
+        # Construct series names (handles grid coordinates)
+        series_names = []
+        for pos in case.positions:
+            if pos.grid_row is not None and pos.grid_column is not None:
+                series_names.append(f"{pos.name}_{pos.grid_row}_{pos.grid_column}")
+            else:
+                series_names.append(pos.name)
+        paths = [root / name for name in series_names]
 
     dims = case.array_storage_dimensions
     for i, path in enumerate(paths):

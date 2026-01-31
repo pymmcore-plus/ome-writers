@@ -31,6 +31,10 @@ Zarr specification, with a single file per shard).
     - [Zarr Documentation "Concepts and terminology"](https://zarr-specs.readthedocs.io/en/latest/v3/core/index.html#concepts-and-terminology)
     - [Xarray's Intro to Zarr](https://tutorial.xarray.dev/intermediate/intro-to-zarr.html)
 
+    For a friendly guide to OME-Zarr, see:
+
+    - [Yaozzars Guide to OME-Zarr](https://tlambert03.github.io/yaozarrs/ome_zarr_guide/)
+
 ## Expected Output Structure
 
 When writing an acquisition to OME-Zarr, the expected output structure depends

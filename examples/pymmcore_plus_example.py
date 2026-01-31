@@ -24,25 +24,37 @@ core.loadSystemConfiguration()
 
 # Create a MDASequence, which will be used to run the MDA with pymmcore-plus
 seq = useq.MDASequence(
-    axis_order="ptcz",
-    # stage_positions=[(0.0, 0.0), (10.0, 10.0)],
-    time_plan={"interval": 0.1, "loops": 3},
-    channels=["DAPI", "Cy5"],
-    z_plan={"range": 2, "step": 1.0},
+    stage_positions=(
+        {"x": 0, "y": 0, "name": "Pos0"},
+        {"x": 1, "y": 1, "name": "Pos1"},
+        {"x": 0, "y": 1, "name": "Pos2"},
+    ),
+    channels=(
+        {"config": "DAPI", "exposure": 2},
+        {"config": "FITC", "exposure": 10},
+    ),
+    time_plan={"interval": 0.5, "loops": 2},
+    z_plan={"range": 3.5, "step": 0.5},
+    axis_order="tpcz",
 )
 
 # Setup the AcquisitionSettings, converting the MDASequence to ome-writers Dimensions
 # Derive format/backend from command line argument (default: auto)
 FORMAT = "auto" if len(sys.argv) < 2 else sys.argv[1]
 
+image_width = core.getImageWidth()
+image_height = core.getImageHeight()
+pixel_size_um = core.getPixelSizeUm()
+
 settings = AcquisitionSettings(
     root_path="example_pymmcore_plus",
     # use dims_from_useq to convert MDASequence to ome_writers.Dimensions
     dimensions=dims_from_useq(
         seq,
-        image_width=core.getImageWidth(),
-        image_height=core.getImageHeight(),
-        pixel_size_um=core.getPixelSizeUm(),
+        image_width=image_width,
+        image_height=image_height,
+        pixel_size_um=pixel_size_um,
+        chunk_shapes={"z": 4, "y": image_width, "x": image_height},
     ),
     dtype=f"uint{core.getImageBitDepth()}",
     overwrite=True,
