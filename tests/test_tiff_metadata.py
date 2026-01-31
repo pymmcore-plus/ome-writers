@@ -43,7 +43,7 @@ def test_update_metadata_single_file(tmp_path: Path, tiff_backend: str) -> None:
             Dimension(name="x", count=32, type="space"),
         ],
         dtype="uint16",
-        backend=tiff_backend,
+        format={"name": "ome-tiff", "backend": tiff_backend},
     )
 
     with create_stream(settings) as stream:
@@ -74,7 +74,7 @@ def test_update_metadata_multiposition(tmp_path: Path, tiff_backend: str) -> Non
             Dimension(name="x", count=32, type="space"),
         ],
         dtype="uint16",
-        backend=tiff_backend,
+        format={"name": "ome-tiff", "backend": tiff_backend},
     )
 
     with create_stream(settings) as stream:
@@ -117,7 +117,7 @@ def test_update_metadata_error_conditions(tmp_path: Path, tiff_backend: str) -> 
             Dimension(name="x", count=32, type="space"),
         ],
         dtype="uint16",
-        backend=tiff_backend,
+        format={"name": "ome-tiff", "backend": tiff_backend},
     )
 
     with create_stream(settings) as stream:
@@ -155,7 +155,7 @@ def test_update_metadata_with_plates(tmp_path: Path, tiff_backend: str) -> None:
             Dimension(name="x", count=32, type="space"),
         ],
         dtype="uint16",
-        backend=tiff_backend,
+        format={"name": "ome-tiff", "backend": tiff_backend},
         plate=Plate(name="Test Plate", row_names=["A"], column_names=["1", "2"]),
     )
 
@@ -224,7 +224,7 @@ def test_tiff_metadata_physical_sizes_and_names(
             Dimension(name="x", count=64, type="space", scale=0.5, unit="micrometer"),
         ],
         dtype="uint16",
-        backend=tiff_backend,
+        format={"name": "ome-tiff", "backend": tiff_backend},
     )
 
     with create_stream(settings) as stream:
@@ -265,7 +265,7 @@ def test_tiff_multiposition_detailed_metadata(
             Dimension(name="x", count=32, type="space"),
         ],
         dtype="uint16",
-        backend=tiff_backend,
+        format={"name": "ome-tiff", "backend": tiff_backend},
     )
 
     with create_stream(settings) as stream:
@@ -303,7 +303,7 @@ def test_prepare_meta(tmp_path: Path) -> None:
             Dimension(name="x", count=32, type="space"),
         ],
         dtype="uint16",
-        backend="tifffile",
+        format="tifffile",
     )
     for mode in MetadataMode:
         meta = prepare_metadata(settings, mode)
@@ -327,7 +327,7 @@ def test_channel_metadata_in_tiff(tmp_path: Path, tiff_backend: str) -> None:
             Dimension(name="x", count=16, type="space"),
         ],
         dtype="uint16",
-        backend=tiff_backend,
+        format=tiff_backend,
     )
 
     with create_stream(settings) as stream:
@@ -355,7 +355,7 @@ def test_frame_metadata_single_position(tmp_path: Path, tiff_backend: str) -> No
         ],
         dtype="uint16",
         overwrite=True,
-        backend=tiff_backend,
+        format=tiff_backend,
     )
 
     # Write frames with metadata
@@ -418,7 +418,7 @@ def test_frame_metadata_multiposition(tmp_path: Path, tiff_backend: str) -> None
         ],
         dtype="uint16",
         overwrite=True,
-        backend=tiff_backend,
+        format=tiff_backend,
     )
 
     # Write frames with position-specific metadata
@@ -501,7 +501,7 @@ def _write_with_mode(
         dimensions=dimensions,
         dtype="uint16",
         overwrite=True,
-        backend="tifffile",
+        format="tifffile",
         plate=plate,
     )
 

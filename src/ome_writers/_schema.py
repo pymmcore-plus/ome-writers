@@ -29,16 +29,18 @@ from pydantic import (
 from pydantic_extra_types.color import Color  # noqa: TC002  (used by pydantic)
 
 from ome_writers._memory import warn_if_high_memory_usage
-from ome_writers._stream import BACKENDS
+from ome_writers._stream import AVAILABLE_BACKENDS
 from ome_writers._units import cast_unit_to_ngff
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-FileFormat: TypeAlias = Literal["tiff", "zarr"]
-BackendName: TypeAlias = Literal[
-    "acquire-zarr", "tensorstore", "zarrs-python", "zarr-python", "tifffile"
+FileFormat: TypeAlias = Literal["ome-tiff", "ome-zarr"]
+TiffBackendName: TypeAlias = Literal["tifffile"]
+ZarrBackendName: TypeAlias = Literal[
+    "acquire-zarr", "tensorstore", "zarrs-python", "zarr-python"
 ]
+BackendName: TypeAlias = TiffBackendName | ZarrBackendName
 DimensionType: TypeAlias = Literal["space", "time", "channel", "other"]
 StandardAxisKey: TypeAlias = Literal["x", "y", "z", "c", "t", "p"]
 
@@ -528,6 +530,81 @@ ZarrCompression: TypeAlias = Literal["blosc-zstd", "blosc-lz4", "zstd", "none"]
 Compression: TypeAlias = Literal["blosc-zstd", "blosc-lz4", "zstd", "lzw", "none"]
 
 
+class OmeTiffFormat(_BaseModel):
+    """Settings specific to OME-TIFF format."""
+
+    name: Literal["ome-tiff"] = Field(
+        default="ome-tiff",
+        description="File format identifier for OME-TIFF.",
+    )
+    backend: TiffBackendName | Literal["auto"] = Field(
+        default="auto",
+        description="Storage backend to use for writing data.  Must be one of 'auto', "
+        "or 'tifffile'. If 'auto' (the default), the backend will be chosen based on "
+        "available dependencies. Currently, 'tifffile' is the only supported backend.",
+    )
+    suffix: str = Field(
+        default=".ome.tiff",
+        description="File suffix/extension to use for OME-TIFF files. Default is "
+        "'.ome.tiff'.",
+    )
+
+
+class OmeZarrFormat(_BaseModel):
+    """Settings specific to OME-Zarr format."""
+
+    name: Literal["ome-zarr"] = Field(
+        default="ome-zarr",
+        description="File format identifier for OME-Zarr.",
+    )
+    backend: ZarrBackendName | Literal["auto"] = Field(
+        default="auto",
+        description="Storage backend to use for writing data.  Must be one of 'auto', "
+        "'tensorstore', 'acquire-zarr', 'zarrs-python', or 'zarr-python'. "
+        "If 'auto' (the default), the backend will be chosen based on the "
+        "available dependencies, in the order: "
+        "tensorstore, acquire-zarr, zarrs-python, zarr-python.",
+    )
+    suffix: str = Field(
+        default=".ome.zarr",
+        description="Directory suffix/extension to use for OME-Zarr directories. "
+        "Default is '.ome.zarr'.",
+    )
+
+
+def _cast_format(value: Any) -> Any:
+    # _backend_str possibly passed from _pick_auto_format
+    suffix = ""
+    if isinstance(value, dict) and (backend_str := value.pop("_backend_str", None)):
+        suffix = value.get("suffix", "")
+        value = backend_str  # Fall through to string handling below
+
+    if isinstance(value, str):
+        kwargs = {"suffix": suffix} if suffix else {}
+        match value.lower():
+            case "ome-tiff" | "tiff":
+                return OmeTiffFormat(**kwargs)
+            case "ome-zarr" | "zarr":
+                return OmeZarrFormat(**kwargs)
+            case "tensorstore":
+                return OmeZarrFormat(backend="tensorstore", **kwargs)
+            case "acquire-zarr":
+                return OmeZarrFormat(backend="acquire-zarr", **kwargs)
+            case "zarrs-python":
+                return OmeZarrFormat(backend="zarrs-python", **kwargs)
+            case "zarr-python":
+                return OmeZarrFormat(backend="zarr-python", **kwargs)
+            case "tifffile":
+                return OmeTiffFormat(backend="tifffile", **kwargs)
+
+    return value
+
+
+Format: TypeAlias = Annotated[
+    OmeTiffFormat | OmeZarrFormat, BeforeValidator(_cast_format)
+]
+
+
 class AcquisitionSettings(_BaseModel):
     """Top-level acquisition settings.
 
@@ -555,6 +632,14 @@ class AcquisitionSettings(_BaseModel):
     dtype: Annotated[str, BeforeValidator(_validate_dtype)] = Field(
         description="Data type of the pixel data to be written, e.g. 'uint8', "
         "'uint16', 'float32', etc. Must be a valid numpy DTypeLike string.",
+    )
+    format: Format = Field(  # type: ignore
+        default="auto",
+        description="Desired output format/backend. Can be a simple string: 'ome-tiff' "
+        "or 'ome-zarr', in which case the first available format-appropriate backend "
+        "will be used; Or it may be a full format specification dict/object "
+        "([`ome_writers.OmeTiff`][] or [`ome_writers.OmeZarr`][]), to configure "
+        "format-specific options such as backend selection.",
     )
     compression: Compression | None = Field(
         default=None,
@@ -584,32 +669,16 @@ class AcquisitionSettings(_BaseModel):
         "and data already exists at the path, an error will be raised when "
         "creating the stream.",
     )
-    backend: BackendName | Literal["auto"] = Field(
-        default="auto",
-        description="Storage backend to use for writing data.  Must be one of 'auto', "
-        "'tensorstore', 'acquire-zarr', 'zarrs-python', 'zarr-python', or 'tifffile'. "
-        "If 'auto' (the default), the backend will be chosen based on the `root_path` "
-        "extension and available dependencies. Zarr backends are chosen in the order: "
-        "tensorstore, acquire-zarr, zarr-python, zarr-python.",
-    )
 
     @property
-    def format(self) -> FileFormat:
-        """Inferred file format.  Either (OME) 'tiff' or 'zarr'."""
-        if self.root_path.lower().endswith((".tiff", ".tif")):
-            return "tiff"
-        if self.root_path.lower().endswith(".zarr"):
-            return "zarr"
+    def output_path(self) -> str:
+        """Output path for the acquisition data.
 
-        # this is for the ambiguous case where user has given a generic
-        # path without extension.  *and* used a specific backend.
-        if self.backend != "auto":
-            for b in BACKENDS:
-                if b.name == self.backend:
-                    return b.format
-
-        # all other no-extension cases default to zarr
-        return "zarr"  # pragma: no cover
+        This is the `root_path` provided by the user, resolved by the format, possibly
+        with appropriate suffix/extension added.
+        """
+        ome_stem, _ = _ome_stem_suffix(self.root_path)
+        return ome_stem + self.format.suffix
 
     @property
     def shape(self) -> tuple[int | None, ...]:
@@ -669,7 +738,7 @@ class AcquisitionSettings(_BaseModel):
     def storage_index_dimensions(self) -> tuple[Dimension, ...]:
         """NON-frame Dimensions in storage order."""
         return _sort_dims_to_storage_order(
-            self.index_dimensions, self.storage_order, self.format
+            self.index_dimensions, self.storage_order, self.format.name
         )
 
     @property
@@ -691,14 +760,15 @@ class AcquisitionSettings(_BaseModel):
         """Validate compression is supported for selected format."""
         if self.compression is None:
             return self
-        if self.format == "tiff":
+        # TODO: move this to Format classes?
+        if self.format.name == "ome-tiff":
             tiff_args = get_args(TiffCompression)
             if self.compression not in tiff_args:  # pragma: no cover
                 raise ValueError(
                     f"Compression '{self.compression}' is not supported for OME-TIFF. "
                     f"Supported: {tiff_args}."
                 )
-        else:
+        elif self.format.name == "ome-zarr":
             zarr_args = get_args(ZarrCompression)
             if self.compression not in zarr_args:  # pragma: no cover
                 raise ValueError(
@@ -777,6 +847,48 @@ class AcquisitionSettings(_BaseModel):
         """Warn if chunk buffering may use excessive memory (Windows only)."""
         warn_if_high_memory_usage(self)
         return self
+
+    @model_validator(mode="before")
+    @classmethod
+    def _pick_auto_format(cls, data: Any) -> Any:
+        """If format is 'auto', pick first available format/backend."""
+        if isinstance(data, dict):
+            if "backend" in data:  # pragma: no cover
+                raise ValueError(
+                    "`backend` is no longer a top-level field in AcquisitionSettings. "
+                    "Please specify backend within the `format` field, or pass the "
+                    "backend name directly as the `format` value."
+                )
+
+            root = data.get("root_path", "")
+            _stem, suffix = _ome_stem_suffix(root)
+            fmt = data.get("format", "auto")
+            if isinstance(fmt, dict):
+                fmt.setdefault("suffix", suffix)
+            elif fmt == "auto":
+                # suffix-based inference
+                if suffix.endswith((".tiff", ".tif")):
+                    data["format"] = {"name": "ome-tiff", "suffix": suffix}
+                elif suffix.endswith(".zarr"):
+                    data["format"] = {"name": "ome-zarr", "suffix": suffix}
+                else:  # pick first available backend
+                    backend = next(iter(AVAILABLE_BACKENDS.values()))
+                    warnings.warn(
+                        f"\n\nOutput format could not be inferred from root_path "
+                        f"{root!r}. \nPicking the first available format/backend: "
+                        f"{backend.format!r}/{backend.name!r}. "
+                        "\nThis may not be what you want, and may be an error in "
+                        "future versions.\n"
+                        "Please specify the desired format explicitly (e.g. "
+                        "format='ome-zarr') or via the extension of `root_path`.\n",
+                        stacklevel=3,
+                    )
+                    data["format"] = backend.name
+            elif isinstance(fmt, str):
+                # Format is a string like "zarr-python", "tifffile", etc.
+                # Pass the suffix from root_path so _cast_format can use it
+                data["format"] = {"_backend_str": fmt, "suffix": suffix}
+        return data
 
 
 # ---------------------------------------------------------------------------
@@ -895,7 +1007,7 @@ def _sort_dims_to_storage_order(
     if storage_order == "acquisition":
         return tuple(index_dims)
     elif storage_order == "ome":
-        if format == "zarr":
+        if format == "ome-zarr":
             return tuple(sorted(index_dims, key=_ngff_sort_key))
         else:
             return tuple(sorted(index_dims, key=_ome_tiff_sort_key))
@@ -915,3 +1027,34 @@ def _compute_permutation(
     """Compute permutation to convert acquisition indices to storage indices."""
     dim_names = [dim.name for dim in acq_dims]
     return tuple(dim_names.index(dim.name) for dim in storage_names)
+
+
+def _ome_stem_suffix(path: str) -> tuple[str, str]:
+    """Return the stem of an OME file, removing .ome and image container suffixes.
+
+    Examples
+    --------
+    >>> _ome_stem_suffix("data/image.tiff")
+    ('data/image', '.tiff')
+    >>> _ome_stem_suffix("data/image.ome.tiff")
+    ('data/image', '.ome.tiff')
+
+    # other periods are preserved
+    >>> _ome_stem_suffix("data/image.test.ome.tiff")
+    ('data/image.test', '.ome.tiff')
+
+    # only *trailing* [.ome].ext is removed
+    >>> _ome_stem_suffix("data/image.ome.test.zarr")
+    ('data/image.ome.test', '.zarr')
+    >>> _ome_stem_suffix("data/image.ome.test")
+    ('data/image.ome.test', '')
+    """
+    str_path = str(path)
+    lower = str_path.lower()
+    for ext in (".tiff", ".tif", ".zarr"):
+        if lower.endswith(ext):
+            result = str_path[: -len(ext)]
+            if result.lower().endswith(".ome"):
+                return result[:-4], f".ome{ext}"
+            return result, ext
+    return path, ""

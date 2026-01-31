@@ -19,9 +19,10 @@ goal is for the user to be able to switch between backends while retaining the
 same high-level API, which is roughly:
 
 ```python
-import ome_writers
+import ome_writers as omw
 
-with ome_writers.create_stream(..., backend='some-backend') as stream:
+settings = omw.AcquisitionSettings(...)
+with omw.create_stream(settings) as stream:
     for frame in acquisition:
         stream.append(frame)
 ```

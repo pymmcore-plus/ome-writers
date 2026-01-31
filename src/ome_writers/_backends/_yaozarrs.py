@@ -93,8 +93,6 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         Returns a string describing the incompatibility, or False if compatible.
         """
         cls_name = self.__class__.__name__
-        if not settings.root_path.endswith(".zarr"):  # pragma: no cover
-            return f"Root path must end with .zarr for {cls_name}."
 
         # Check for supported compression
         compression = settings.compression
@@ -110,7 +108,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         """Initialize OME-Zarr storage structure."""
 
         self._finalized = False
-        self._root = root = Path(settings.root_path).expanduser().resolve()
+        self._root = root = Path(settings.output_path).expanduser().resolve()
         positions = settings.positions
 
         # Build storage metadata

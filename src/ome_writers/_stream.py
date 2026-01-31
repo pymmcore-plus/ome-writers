@@ -187,21 +187,21 @@ BACKENDS: list[BackendMetadata] = [
         name="tensorstore",
         module_path="ome_writers._backends._tensorstore",
         class_name="TensorstoreBackend",
-        format="zarr",
+        format="ome-zarr",
         is_available=_is_tensorstore_available,
     ),
     BackendMetadata(
         name="acquire-zarr",
         module_path="ome_writers._backends._acquire_zarr",
         class_name="AcquireZarrBackend",
-        format="zarr",
+        format="ome-zarr",
         is_available=_is_acquire_zarr_available,
     ),
     BackendMetadata(
         name="zarrs-python",
         module_path="ome_writers._backends._zarr_python",
         class_name="ZarrsBackend",
-        format="zarr",
+        format="ome-zarr",
         is_available=_is_zarrs_available,
         min_python_version=(3, 11),
     ),
@@ -209,7 +209,7 @@ BACKENDS: list[BackendMetadata] = [
         name="zarr-python",
         module_path="ome_writers._backends._zarr_python",
         class_name="ZarrBackend",
-        format="zarr",
+        format="ome-zarr",
         is_available=_is_zarr_available,
         min_python_version=(3, 11),
     ),
@@ -217,7 +217,7 @@ BACKENDS: list[BackendMetadata] = [
         name="tifffile",
         module_path="ome_writers._backends._tifffile",
         class_name="TiffBackend",
-        format="tiff",
+        format="ome-tiff",
         is_available=_is_tifffile_available,
     ),
 ]
@@ -305,7 +305,7 @@ def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:
         If the backend doesn't support the given settings.
     """
     # Validate backend name
-    requested_backend = settings.backend.lower()
+    requested_backend = settings.format.backend.lower()
     if requested_backend not in VALID_BACKEND_NAMES:  # pragma: no cover
         raise ValueError(
             f"Unknown backend requested: '{requested_backend}'. "
@@ -318,7 +318,7 @@ def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:
         )
 
     # Determine candidates to try
-    target_format = settings.format
+    target_format = settings.format.name
     if requested_backend == "auto":
         candidates = [
             name

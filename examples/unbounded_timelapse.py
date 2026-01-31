@@ -10,13 +10,12 @@ import numpy as np
 
 from ome_writers import AcquisitionSettings, Dimension, PositionDimension, create_stream
 
-# Derive backend from command line argument (default: auto)
-BACKEND = "auto" if len(sys.argv) < 2 else sys.argv[1]
-suffix = ".ome.tiff" if BACKEND == "tifffile" else ".ome.zarr"
+# Derive format/backend from command line argument (default: auto)
+FORMAT = "auto" if len(sys.argv) < 2 else sys.argv[1]
 
 # create acquisition settings
 settings = AcquisitionSettings(
-    root_path=f"example_unbounded{suffix}",
+    root_path="example_unbounded",
     # declare dimensions in order of acquisition (slowest to fastest)
     dimensions=[
         # count=None makes this an unbounded dimension
@@ -28,7 +27,7 @@ settings = AcquisitionSettings(
     ],
     dtype="uint16",
     overwrite=True,
-    backend=BACKEND,
+    format=FORMAT,
 )
 
 # actual count of first dimension for the sake of this example
@@ -41,8 +40,8 @@ with create_stream(settings) as stream:
     for i in range(numframes):
         stream.append(np.full(frame_shape, fill_value=i, dtype=settings.dtype))
 
-if settings.format == "zarr":
+if settings.format.name == "ome-zarr":
     import yaozarrs
 
-    yaozarrs.validate_zarr_store(settings.root_path)
+    yaozarrs.validate_zarr_store(settings.output_path)
     print("✓ Zarr store is valid")

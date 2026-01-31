@@ -31,7 +31,7 @@ from ome_writers._frame_encoder import validate_encoded_frame_values, write_enco
 if TYPE_CHECKING:
     from ome_writers._schema import BackendName
 
-BACKEND_TO_EXT = {b.name: f".ome.{b.format}" for b in _stream.BACKENDS}
+BACKEND_TO_EXT = {b.name: f".{b.format.replace('-', '.')}" for b in _stream.BACKENDS}
 # NOTES:
 # - All root_paths will be replaced with temporary directories during testing.
 D = Dimension  # alias, for brevity
@@ -256,7 +256,7 @@ def test_cases(
     # Use model_copy to avoid cached_property contamination across tests
     settings = case.model_copy(deep=True)
     settings.root_path = str(tmp_path / f"output{BACKEND_TO_EXT[any_backend]}")
-    settings.backend = any_backend
+    settings.format = any_backend  # type: ignore
 
     # -------------- Write out all frames --------------
 
@@ -268,7 +268,7 @@ def test_cases(
             return
         raise
 
-    if settings.format == "tiff":
+    if settings.format.name == "ome-tiff":
         _assert_valid_ome_tiff(settings)
     else:
         _assert_valid_ome_zarr(settings)
@@ -286,7 +286,7 @@ def test_auto_backend(tmp_path: Path, fmt: str) -> None:
             D(name="x", count=64, chunk_size=64, unit="um", scale=0.1),
         ],
         dtype="uint8",
-        backend="auto",
+        format="auto",
     )
     frame_shape = tuple(d.count for d in settings.dimensions[-2:])
     try:
@@ -301,7 +301,7 @@ def test_auto_backend(tmp_path: Path, fmt: str) -> None:
         for _ in range(settings.num_frames or 1):
             stream.append(np.empty(frame_shape, dtype=settings.dtype))
 
-    dest = Path(settings.root_path)
+    dest = Path(settings.output_path)
     assert dest.exists()
     assert dest.suffix == suffix
     assert dest.is_dir() == (fmt == "zarr")
@@ -318,7 +318,7 @@ def test_overwrite_safety(tmp_path: Path, any_backend: str) -> None:
             D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
         ],
         dtype="uint16",
-        backend=any_backend,
+        format=any_backend,
     )
 
     # First write should succeed
@@ -379,7 +379,7 @@ def test_chunk_memory_warning(
                 D(name="x", count=2048, chunk_size=64, type="space"),
             ],
             dtype="uint16",
-            backend="zarr-python",
+            format={"name": "ome-zarr", "backend": "zarr-python"},
         )
 
 
@@ -500,10 +500,10 @@ def _assert_valid_ome_tiff(case: AcquisitionSettings) -> None:
 
     num_pos = len(case.positions)
     paths = (
-        [Path(case.root_path)]
+        [Path(case.output_path)]
         if num_pos == 1
         else [
-            Path(case.root_path.replace(".ome.tiff", f"_p{i:03d}.ome.tiff"))
+            Path(case.output_path.replace(".ome.tiff", f"_p{i:03d}.ome.tiff"))
             for i in range(num_pos)
         ]
     )
@@ -526,7 +526,7 @@ def _assert_bioformats_reads_ome_tiff(case: AcquisitionSettings) -> None:
     dims = {
         d.name: d.count or UNBOUNDED_FRAME_COUNT for d in case.array_storage_dimensions
     }
-    for array in Path(case.root_path).parent.glob("*.ome.tiff"):
+    for array in Path(case.output_path).parent.glob("*.ome.tiff"):
         meta = read_core_meta_with_bioformats(str(array))
         # if this is 'Tagged Image File Format', it means Bio-Formats failed
         # to read the OME-TIFF correctly and fell back to generic TIFF
@@ -543,7 +543,7 @@ def _assert_bioformats_reads_ome_tiff(case: AcquisitionSettings) -> None:
 
 
 def _assert_valid_ome_zarr(case: AcquisitionSettings) -> None:
-    root = Path(case.root_path)
+    root = Path(case.output_path)
     group = yaozarrs.validate_zarr_store(root)
     ome_meta = group.ome_metadata()
 

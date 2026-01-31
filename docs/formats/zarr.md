@@ -47,10 +47,10 @@ multiple arrays, each stored in a separate group within the root OME-Zarr group.
 
     Any acquisition with 5 or fewer dimensions will be stored as a single
     ["multiscales" image](https://ngff.openmicroscopy.org/0.5/index.html#multiscale-md)
-    at the `AcquisitionSettings.root_path`.
+    at the `AcquisitionSettings.output_path` with:
 
     ```
-    root_path.ome.zarr/
+    output_path.ome.zarr/
     ├── zarr.json            # {"zarr_format": 3} group, with attributes.ome.multiscales
     └── 0/                   # Full resolution array  
         ├── zarr.json        # Array metadata (standard zarr schema)
@@ -72,7 +72,7 @@ multiple arrays, each stored in a separate group within the root OME-Zarr group.
     with a sub multiscales group for each position or collection member.
 
     ```
-    root_path.ome.zarr/
+    output_path.ome.zarr/
     ├── zarr.json             # Contains "bioformats2raw.layout" metadata
     ├── OME                   # Special group for containing OME metadata
     │   ├── zarr.json         # Contains "series" metadata, listing all positions
@@ -93,7 +93,7 @@ multiple arrays, each stored in a separate group within the root OME-Zarr group.
     specification](https://ngff.openmicroscopy.org/0.5/index.html#plate-md):
 
     ```
-    root_path.ome.zarr/
+    output_path.ome.zarr/
     ├── zarr.json              # Plate metadata
     ├── A/                     # Row A
     │   ├── 1/                 # Well A1

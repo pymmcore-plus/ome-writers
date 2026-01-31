@@ -45,7 +45,7 @@ def test_stream_safety(tmp_path: Path, first_backend: str) -> None:
             Dimension(name="x", count=32, type="space"),
         ],
         dtype="uint16",
-        backend=first_backend,
+        format=first_backend,
         overwrite=True,
     )
 

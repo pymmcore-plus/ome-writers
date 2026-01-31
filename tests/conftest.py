@@ -5,9 +5,9 @@ from ome_writers import _stream
 ZARR_BACKENDS = []
 TIFF_BACKENDS = []
 for name, meta in _stream.AVAILABLE_BACKENDS.items():
-    if meta.format == "zarr":
+    if meta.format.endswith("zarr"):
         ZARR_BACKENDS.append(name)
-    elif meta.format == "tiff":
+    elif meta.format.endswith("tiff"):
         TIFF_BACKENDS.append(name)
 AVAILABLE_BACKENDS = ZARR_BACKENDS + TIFF_BACKENDS
 

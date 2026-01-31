@@ -6,13 +6,12 @@ import numpy as np
 
 from ome_writers import AcquisitionSettings, Dimension, create_stream
 
-# Derive backend from command line argument (default: auto)
-BACKEND = "auto" if len(sys.argv) < 2 else sys.argv[1]
-suffix = ".ome.tiff" if BACKEND == "tifffile" else ".ome.zarr"
+# Derive format/backend from command line argument (default: auto)
+FORMAT = "auto" if len(sys.argv) < 2 else sys.argv[1]
 
 # create acquisition settings
 settings = AcquisitionSettings(
-    root_path=f"example_transposed_5d_image{suffix}",
+    root_path="example_transposed_5d_image",
     # declare dimensions in order of acquisition, NOT storage order
     dimensions=[
         Dimension(name="t", count=2, chunk_size=1, type="time"),
@@ -27,7 +26,7 @@ settings = AcquisitionSettings(
     storage_order=["t", "c", "z", "y", "x"],  # aka, ome-zarr standard order
     dtype="uint16",
     overwrite=True,
-    backend=BACKEND,
+    format=FORMAT,
 )
 
 num_frames = np.prod(settings.shape[:-2])
@@ -40,8 +39,8 @@ with create_stream(settings) as stream:
         stream.append(frame)
 
 
-if settings.format == "zarr":
+if settings.format.name == "ome-zarr":
     import yaozarrs
 
-    yaozarrs.validate_zarr_store(settings.root_path)
+    yaozarrs.validate_zarr_store(settings.output_path)
     print("✓ Zarr store is valid")

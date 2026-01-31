@@ -29,7 +29,7 @@ settings = AcquisitionSettings(
     ],
     dtype="uint16",
     overwrite=True,
-    backend=BACKEND,
+    format=BACKEND,
 )
 
 

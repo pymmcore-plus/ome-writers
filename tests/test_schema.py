@@ -413,13 +413,13 @@ def test_tiff_backend_format(tiff_backend: str) -> None:
             Dimension(name="x", count=64, type="space"),
         ],
         dtype="uint16",
-        backend=tiff_backend,
+        format={"name": "ome-tiff", "backend": tiff_backend},
     )
-    assert settings.format == "tiff"
+    assert settings.format.name == "ome-tiff"
 
     settings2 = settings.model_copy(deep=True)
-    settings2.backend = "acquire-zarr"
-    assert settings2.format == "zarr"
+    settings2.format = "acquire-zarr"  # type: ignore
+    assert settings2.format.name == "ome-zarr"
 
 
 def test_acquisition_settings_shape() -> None:
@@ -516,10 +516,10 @@ def test_storage_order_ome_with_tiff(tiff_backend: str) -> None:
         ],
         dtype="uint16",
         storage_order="ome",
-        backend=tiff_backend,
+        format={"name": "ome-tiff", "backend": tiff_backend},
     )
     # For TIFF, the sort key should use _ome_tiff_sort_key
-    assert settings.format == "tiff"
+    assert settings.format.name == "ome-tiff"
     assert len(settings.storage_index_dimensions) == 2
     assert not settings.storage_index_permutation  # CTYX is already correct
 
