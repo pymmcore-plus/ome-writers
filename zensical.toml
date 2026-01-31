@@ -69,7 +69,10 @@ toggle.icon = "lucide/moon"
 toggle.name = "Switch to light mode"
 
 [project.plugins.mkdocstrings.handlers.python]
-inventories = ["https://docs.python.org/3/objects.inv"]
+inventories = [
+  "https://docs.python.org/3/objects.inv",
+  "https://pymmcore-plus.github.io/useq-schema/objects.inv",
+]
 paths = ["src"]
 
 [project.plugins.mkdocstrings.handlers.python.options]
@@ -82,6 +85,8 @@ show_symbol_type_heading = true
 merge_init_into_class = true
 show_root_heading = false
 show_root_toc_entry = false
+show_signature_annotations = true
+modernize_annotations = true
 
 [[project.plugins.mkdocstrings.handlers.python.options.extensions]]
 griffe_fieldz = { strip_annotated = true }

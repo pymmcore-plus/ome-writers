@@ -182,10 +182,10 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
                 compression=compression,
             )
             for pos in positions:
-                builder.add_series(pos.name, image, [(shape, dtype)])
+                builder.add_series(_get_series_name(pos), image, [(shape, dtype)])
 
             _, all_arrays = builder.prepare()
-            self._image_group_paths = [pos.name for pos in positions]
+            self._image_group_paths = [_get_series_name(pos) for pos in positions]
             self._arrays = [
                 all_arrays[f"{parent}/0"] for parent in self._image_group_paths
             ]
@@ -481,6 +481,17 @@ def _build_yaozarrs_image_model(dims: list[Dimension]) -> v05.Image:
     else:
         omero = None
     return v05.Image(multiscales=[v05.Multiscale.from_dims(dim_specs)], omero=omero)
+
+
+def _get_series_name(pos: Position) -> str:
+    """Get unique series name for a position.
+
+    For positions with grid coordinates, combines name with grid coordinates
+    to ensure uniqueness. Otherwise, returns the position name as-is.
+    """
+    if pos.grid_row is not None and pos.grid_column is not None:
+        return f"{pos.name}_{pos.grid_row}_{pos.grid_column}"
+    return pos.name
 
 
 def _build_yaozarrs_plate_model(
