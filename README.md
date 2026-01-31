@@ -10,6 +10,11 @@ Version](https://img.shields.io/pypi/pyversions/ome-writers.svg?color=green)](ht
 
 OME-TIFF and OME-ZARR writer APIs designed for microscopy acquisition.
 
+## Documentation
+
+**Detailed documentation is available at
+<https://pymmcore-plus.github.io/ome-writers/>.**
+
 ## Purpose
 
 `ome-writers` provides a unified interface for writing microscopy image data to
@@ -54,6 +59,10 @@ pip install ome-writers[<backend>]
 (Developers using `uv sync` will end up with `all` backends installed by default.)
 
 ## Basic Usage
+
+> [!Note]
+> More complete usage examples are available in the
+> [usage documentation](https://pymmcore-plus.github.io/ome-writers/usage/)
 
 ```python
 from ome_writers import AcquisitionSettings, Dimension, create_stream
