@@ -108,12 +108,12 @@ class OMEStream:
             fail to be stored and a warning will be issued). The following special keys
             are recognized and will be mapped to format-specific locations:
 
-                - `delta_t` : float
-                    Time delta in seconds since the start of the acquisition.
-                - `exposure_time` : float
-                    Exposure time in seconds for this frame.
-                - `position_x`, `position_y`, `position_z` : float
-                    Stage position in microns for this frame.
+            - `delta_t` : float
+                Time delta in seconds since the start of the acquisition.
+            - `exposure_time` : float
+                Exposure time in seconds for this frame.
+            - `position_x`, `position_y`, `position_z` : float
+                Stage position in microns for this frame.
 
             All other keys will be stored as unstructured metadata. For OME-Tiff, you
             can find this data in the structured annotations of the OME-XML.  For
