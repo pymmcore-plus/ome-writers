@@ -147,10 +147,10 @@ SEQ_CASES = [
         ),
         expected_dim_names=["p", "t", "c", "y", "x"],
         expected_positions=[
-            ExpectedPosition("A1_0000", "A", "1", grid_row=0, grid_col=0),
-            ExpectedPosition("A1_0001", "A", "1", grid_row=0, grid_col=1),
-            ExpectedPosition("B2_0000", "B", "2", grid_row=0, grid_col=0),
-            ExpectedPosition("B2_0001", "B", "2", grid_row=0, grid_col=1),
+            ExpectedPosition("fov0", "A", "1", grid_row=0, grid_col=0),
+            ExpectedPosition("fov1", "A", "1", grid_row=0, grid_col=1),
+            ExpectedPosition("fov0", "B", "2", grid_row=0, grid_col=0),
+            ExpectedPosition("fov1", "B", "2", grid_row=0, grid_col=1),
         ],
         id="well_plate_with_points",
     ),
@@ -453,3 +453,117 @@ def test_useq_manual_units() -> None:
     assert time_dim.unit == "minute"
     assert time_dim.scale == 1.0
     assert time_dim.count == 3
+
+
+def test_create_position_name() -> None:
+    """Test position name creation for OME-Zarr compliance."""
+    from ome_writers._useq import _create_position_name
+
+    # Test with name containing underscore (multi-FOV case) - uses well-relative index
+    pos_with_suffix = useq.Position(x=0, y=0, name="A1_0000")
+    assert (
+        _create_position_name(
+            plate_row="A",
+            plate_column="1",
+            fov_idx=0,
+            pos=pos_with_suffix,
+        )
+        == "fov0"
+    )
+
+    # Test fallback when name has non-alphanumeric characters
+    pos_special_chars = useq.Position(x=0, y=0, name="Custom-Name!")
+    assert (
+        _create_position_name(
+            plate_row="C",
+            plate_column="3",
+            fov_idx=5,
+            pos=pos_special_chars,
+        )
+        == "fov5"
+    )
+
+    # Test with None name - uses plate coords
+    pos_none = useq.Position(x=0, y=0, name=None)
+    assert (
+        _create_position_name(
+            plate_row="D",
+            plate_column="4",
+            fov_idx=3,
+            pos=pos_none,
+        )
+        == "D4"
+    )
+
+    # Test with alphanumeric name (single FOV, no underscore) - keeps original
+    pos_alphanumeric = useq.Position(x=0, y=0, name="A1")
+    assert (
+        _create_position_name(
+            plate_row="A",
+            plate_column="1",
+            fov_idx=0,
+            pos=pos_alphanumeric,
+        )
+        == "A1"
+    )
+
+    # Test with custom alphanumeric name - keeps original
+    pos_custom = useq.Position(x=0, y=0, name="MyPosition")
+    assert (
+        _create_position_name(
+            plate_row="E",
+            plate_column="5",
+            fov_idx=0,
+            pos=pos_custom,
+        )
+        == "MyPosition"
+    )
+
+
+def test_plate_from_useq() -> None:
+    """Test conversion from useq.WellPlatePlan to ome_writers.Plate."""
+    from ome_writers._useq import plate_from_useq
+
+    # Test with 96-well plate, selecting subset of wells
+    well_plan = useq.WellPlatePlan(
+        plate=useq.WellPlate.from_str("96-well"),
+        a1_center_xy=(0.0, 0.0),
+        selected_wells=((0, 2), (0, 3)),
+    )
+    plate = plate_from_useq(well_plan)
+
+    # 96-well plate has 8 rows (A-H) and 12 columns (1-12)
+    assert plate.row_names == ["A", "B", "C", "D", "E", "F", "G", "H"]
+    assert plate.column_names == [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9",
+        "10",
+        "11",
+        "12",
+    ]
+    assert plate.name == "96-well"
+
+    # Test with 24-well plate and name
+    well_plan_24 = useq.WellPlatePlan(
+        plate=useq.WellPlate(
+            rows=4,
+            columns=6,
+            well_spacing=(19.3, 19.3),
+            well_size=(16.0, 16.0),
+            name="MyPlate",
+        ),
+        a1_center_xy=(0.0, 0.0),
+        selected_wells=((0, 1), (0, 1)),
+    )
+    plate_24 = plate_from_useq(well_plan_24)
+
+    assert plate_24.row_names == ["A", "B", "C", "D"]
+    assert plate_24.column_names == ["1", "2", "3", "4", "5", "6"]
+    assert plate_24.name == "MyPlate"

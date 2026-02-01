@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
-from ome_writers._schema import Dimension, Position, PositionDimension, StandardAxis
+from ome_writers._schema import (
+    Dimension,
+    Plate,
+    Position,
+    PositionDimension,
+    StandardAxis,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -165,6 +172,44 @@ def dims_from_useq(
     return dims
 
 
+def plate_from_useq(useq_plate: useq.WellPlatePlan) -> Plate:
+    """Convert a useq WellPlatePlan to an ome-writers Plate.
+
+    Parameters
+    ----------
+    omew_module : module
+        The ome_writers module.
+    useq_plate : useq.WellPlatePlan
+        The useq WellPlatePlan to convert.
+
+    Returns
+    -------
+    omew_module.Plate
+        The converted ome-writers Plate.
+    """
+
+    plate = useq_plate.plate
+    well_names = plate.all_well_names
+
+    # Extract row names from first column (e.g., A1, B1, C1... -> A, B, C...)
+    row_names = []
+    for name in well_names[:, 0]:
+        match = re.match(r"^([A-Za-z]+)", str(name))
+        if match:
+            row_names.append(match.group(1))
+
+    # Extract column names from first row (e.g., A1, A2, A3... -> 1, 2, 3...)
+    column_names = []
+    for name in well_names[0, :]:
+        match = re.search(r"(\d+)$", str(name))
+        if match:
+            column_names.append(match.group(1))
+
+    return Plate(
+        row_names=row_names, column_names=column_names, name=plate.name or None
+    )
+
+
 def _validate_sequence(seq: useq.MDASequence) -> None:
     """Validate sequence for supported patterns (without iterating events).
 
@@ -308,11 +353,12 @@ def _build_well_plate_positions(plate_plan: useq.WellPlatePlan) -> list[Position
     for row_idx, col_idx in plate_plan.selected_well_indices:
         plate_row = _row_idx_to_letter(row_idx)
         plate_column = str(col_idx + 1)
-        for well_pos in well_positions:
+        for fov_idx, well_pos in enumerate(well_positions):
             pos = next(plate_iter)  # grab the next AbsolutePosition in the outer loop
+            pos_name = _create_position_name(plate_row, plate_column, fov_idx, pos)
             positions.append(
                 Position(
-                    name=pos.name,
+                    name=pos_name,
                     plate_row=plate_row,
                     plate_column=plate_column,
                     grid_row=getattr(well_pos, "row", None),
@@ -323,6 +369,24 @@ def _build_well_plate_positions(plate_plan: useq.WellPlatePlan) -> list[Position
             )
 
     return positions
+
+
+def _create_position_name(
+    plate_row: str,
+    plate_column: str,
+    fov_idx: int,
+    pos: useq.Position,
+) -> str:
+    # When well_points_plan creates multiple FOVs, useq names positions like "A1_0000"
+    # For OME-Zarr (and yaozarrs) compliance (field names must match ^[A-Za-z0-9]+$),
+    # sanitize names with non-alphanumeric characters
+    if pos.name and not re.match(r"^[A-Za-z0-9]+$", pos.name):
+        # Name contains non-alphanumeric chars - use well-relative index
+        pos_name = f"fov{fov_idx}"
+    else:
+        # Name is already alphanumeric-compliant or None
+        pos_name = pos.name or f"{plate_row}{plate_column}"
+    return pos_name
 
 
 def _row_idx_to_letter(index: int) -> str:
