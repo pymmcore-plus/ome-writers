@@ -455,69 +455,41 @@ def test_useq_manual_units() -> None:
     assert time_dim.count == 3
 
 
-def test_create_position_name() -> None:
+@pytest.mark.parametrize(
+    ("name", "plate_row", "plate_column", "fov_idx", "expected"),
+    [
+        # Multi-FOV case with underscore - uses well-relative index
+        ("A1_0000", "A", "1", 0, "fov0"),
+        # Non-alphanumeric characters - uses well-relative index
+        ("Custom-Name!", "C", "3", 5, "fov5"),
+        # None name - uses plate coords
+        (None, "D", "4", 3, "D4"),
+        # Alphanumeric name (single FOV) - keeps original
+        ("A1", "A", "1", 0, "A1"),
+        # Custom alphanumeric name - keeps original
+        ("MyPosition", "E", "5", 0, "MyPosition"),
+    ],
+    ids=[
+        "multi_fov_with_underscore",
+        "non_alphanumeric_chars",
+        "none_name",
+        "alphanumeric_single_fov",
+        "custom_alphanumeric",
+    ],
+)
+def test_create_position_name(
+    name: str | None,
+    plate_row: str,
+    plate_column: str,
+    fov_idx: int,
+    expected: str,
+) -> None:
     """Test position name creation for OME-Zarr compliance."""
     from ome_writers._useq import _create_position_name
 
-    # Test with name containing underscore (multi-FOV case) - uses well-relative index
-    pos_with_suffix = useq.Position(x=0, y=0, name="A1_0000")
-    assert (
-        _create_position_name(
-            plate_row="A",
-            plate_column="1",
-            fov_idx=0,
-            pos=pos_with_suffix,
-        )
-        == "fov0"
-    )
-
-    # Test fallback when name has non-alphanumeric characters
-    pos_special_chars = useq.Position(x=0, y=0, name="Custom-Name!")
-    assert (
-        _create_position_name(
-            plate_row="C",
-            plate_column="3",
-            fov_idx=5,
-            pos=pos_special_chars,
-        )
-        == "fov5"
-    )
-
-    # Test with None name - uses plate coords
-    pos_none = useq.Position(x=0, y=0, name=None)
-    assert (
-        _create_position_name(
-            plate_row="D",
-            plate_column="4",
-            fov_idx=3,
-            pos=pos_none,
-        )
-        == "D4"
-    )
-
-    # Test with alphanumeric name (single FOV, no underscore) - keeps original
-    pos_alphanumeric = useq.Position(x=0, y=0, name="A1")
-    assert (
-        _create_position_name(
-            plate_row="A",
-            plate_column="1",
-            fov_idx=0,
-            pos=pos_alphanumeric,
-        )
-        == "A1"
-    )
-
-    # Test with custom alphanumeric name - keeps original
-    pos_custom = useq.Position(x=0, y=0, name="MyPosition")
-    assert (
-        _create_position_name(
-            plate_row="E",
-            plate_column="5",
-            fov_idx=0,
-            pos=pos_custom,
-        )
-        == "MyPosition"
-    )
+    pos = useq.Position(x=0, y=0, name=name)
+    result = _create_position_name(plate_row, plate_column, fov_idx, pos)
+    assert result == expected
 
 
 def test_plate_from_useq() -> None:
@@ -534,20 +506,7 @@ def test_plate_from_useq() -> None:
 
     # 96-well plate has 8 rows (A-H) and 12 columns (1-12)
     assert plate.row_names == ["A", "B", "C", "D", "E", "F", "G", "H"]
-    assert plate.column_names == [
-        "1",
-        "2",
-        "3",
-        "4",
-        "5",
-        "6",
-        "7",
-        "8",
-        "9",
-        "10",
-        "11",
-        "12",
-    ]
+    assert plate.column_names == [str(i) for i in range(1, 13)]
     assert plate.name == "96-well"
 
     # Test with 24-well plate and name
