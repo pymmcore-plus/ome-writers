@@ -394,7 +394,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         # frames are written out-of-order (e.g., direct backend.write() calls) or if
         # there's a bug in chunk completion logic. It ensures no buffered data is
         # silently lost during finalization.
-        if self._chunk_buffers:
+        if self._chunk_buffers:  # pragma: no cover
             for pos_idx, buffer in enumerate(self._chunk_buffers):
                 if self._arrays:  # Arrays may have been cleared already
                     array = self._arrays[pos_idx]

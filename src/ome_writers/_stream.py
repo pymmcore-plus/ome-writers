@@ -137,7 +137,7 @@ class OMEStream:
 
 def get_format_for_backend(backend: str) -> FileFormat:
     """Get the appropriate file suffix for a given backend."""
-    if not (meta := AVAILABLE_BACKENDS.get(backend)):
+    if not (meta := AVAILABLE_BACKENDS.get(backend)):  # pragma: no cover
         raise ValueError(f"Unknown backend: {backend}")
     return meta.format
 

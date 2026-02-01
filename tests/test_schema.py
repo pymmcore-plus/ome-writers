@@ -113,6 +113,27 @@ def test_plate_requires_row_column() -> None:
         )
 
 
+def test_row_column_both_or_neither() -> None:
+    with pytest.raises(
+        ValueError, match="plate_row and plate_column must both be set or"
+    ):
+        Dimension(
+            name="p",
+            type="position",
+            # Missing column
+            coords=[Position(name="A1", plate_row="A")],
+        )
+    with pytest.raises(
+        ValueError, match="grid_row and grid_column must both be set or"
+    ):
+        Dimension(
+            name="p",
+            type="position",
+            # Missing row
+            coords=[Position(name="A1", grid_column=0)],
+        )
+
+
 def test_plate_requires_position_dimension() -> None:
     with pytest.raises(
         ValueError, match="Plate mode requires a position dimension in dimensions"
@@ -155,46 +176,27 @@ def test_plate_position_warnings(caplog: pytest.LogCaptureFixture) -> None:
         )
 
 
-def test_duplicate_names_rejected() -> None:
+def test_position_names_unique() -> None:
     """Test that duplicate position names within the same well are rejected."""
     with pytest.raises(
         ValueError, match="Position names must be unique within each group"
     ):
-        AcquisitionSettings(
-            root_path="test.zarr",
-            dimensions=[
-                Dimension(
-                    name="p",
-                    type="position",
-                    coords=[
-                        Position(name="fov0", plate_row="C", plate_column="4"),
-                        Position(name="fov0", plate_row="C", plate_column="4"),
-                    ],
-                ),
-                Dimension(name="y", count=16, type="space"),
-                Dimension(name="x", count=16, type="space"),
+        Dimension(
+            name="p",
+            type="position",
+            coords=[
+                Position(name="fov0", plate_row="C", plate_column="4"),
+                Position(name="fov0", plate_row="C", plate_column="4"),
             ],
-            dtype="uint16",
         )
 
     with pytest.raises(
         ValueError, match="positions without row/column must have unique names"
     ):
-        AcquisitionSettings(
-            root_path="test.zarr",
-            dimensions=[
-                Dimension(
-                    name="p",
-                    type="position",
-                    coords=[
-                        Position(name="fov0"),
-                        Position(name="fov0"),
-                    ],
-                ),
-                Dimension(name="y", count=16, type="space"),
-                Dimension(name="x", count=16, type="space"),
-            ],
-            dtype="uint16",
+        Dimension(
+            name="p",
+            type="position",
+            coords=[Position(name="fov0"), "fov0"],
         )
 
 
@@ -259,6 +261,16 @@ def test_same_name_allowed_in_different_groups() -> None:
                     grid_column=0,
                 ),
             ],
+        )
+
+
+def test_channel_names_unique() -> None:
+    """Test that duplicate channel names are rejected."""
+    with pytest.raises(ValueError, match="Channel names must be unique"):
+        Dimension(
+            name="c",
+            type="channel",
+            coords=[Channel(name="DAPI"), Channel(name="DAPI")],
         )
 
 

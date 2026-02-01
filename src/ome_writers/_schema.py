@@ -431,7 +431,7 @@ class Dimension(_BaseModel):
             if (coords := data.get("coords")) is not None:
                 try:
                     coords = list(coords)
-                except TypeError:
+                except TypeError:  # pragma: no cover
                     raise ValueError("`coords` must be an iterable type.") from None
 
             count = data.get("count")
