@@ -35,17 +35,17 @@ class AutofocusError(Exception):
     """Simulated autofocus failure."""
 
 
-def attempt_autofocus(pos: int) -> None:
+def attempt_autofocus(pos: int, t: int) -> None:
     """Simulate frame acquisition with occasional autofocus failures."""
-    if pos == 1:
-        raise AutofocusError(f"Autofocus failed at position {pos}")
+    if pos == 1 and t in (1, 2, 4):
+        raise AutofocusError(f"Autofocus failed at position {pos} at timepoint {t}")
 
 
 with create_stream(settings) as stream:
-    for _t in range(nt):
+    for t in range(nt):
         for p in range(npos):
             try:
-                attempt_autofocus(p)
+                attempt_autofocus(p, t)
             except AutofocusError as e:
                 n = nc * nz
                 print(f"Warning: {e}, skipping {n} frames")
