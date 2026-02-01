@@ -28,6 +28,16 @@ The core problem ome-writers solves:
 > locations** in multi-dimensional arrays, while generating **OME-compliant
 > metadata** for both TIFF and Zarr formats.
 
+*We prioritize:*
+
+- ✅ **Correctness**: Strict adherence to both OME-TIFF and OME-Zarr specifications.
+- 💯 **Completeness**: We want all the metadata to go to its proper place.
+- 🚀 **Performance**: Very minimal, native-backed hot-path logic when appending frames.
+- 🤸‍♂️ **Flexibility**: Pick from 5+ array backends, suiting your dependency preferences.
+- 📖 **Usability**: Relatively small, well organized API, with extensive documentation.
+- 💪 **Stability**: Minimal dependencies, exhaustive testing and validation.
+
+
 ## Installation
 
 You can install `ome-writers` via pip. You *must* also select select at least
