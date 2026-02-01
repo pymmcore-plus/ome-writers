@@ -122,7 +122,7 @@ class OMEStream:
 
         Raises
         ------
-        ValueError
+        IndexError
             If attempting to append more frames than expected based on dimensions
             (for finite dimensions only). Unlimited dimensions never raise this error.
         """
@@ -152,8 +152,11 @@ class OMEStream:
         Raises
         ------
         ValueError
-            If frames <= 0, or if skipping would exceed the total number of frames
-            for finite dimensions.
+            If frames <= 0
+        IndexError
+            If skipping would exceed the total number of frames expected based on
+            dimensions (for finite dimensions only). Unlimited dimensions never raise
+            this error.
 
         Examples
         --------
