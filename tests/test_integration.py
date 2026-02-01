@@ -27,6 +27,7 @@ from ome_writers import (
     create_stream,
 )
 from ome_writers._frame_encoder import validate_encoded_frame_values, write_encoded_data
+from tests._utils import read_array_data
 
 if TYPE_CHECKING:
     from ome_writers._schema import BackendName
@@ -572,3 +573,73 @@ def _assert_valid_ome_zarr(case: AcquisitionSettings) -> None:
         assert isinstance(group.ome_metadata(), v05.Image)
         data = _extract_zarr(group, path / "0")
         _assert_array_valid(data, dims, case.dtype, i)
+
+
+def test_skip_frames(tmp_path: Path, any_backend: str) -> None:
+    """Test frame skipping with OMEStream.skip()."""
+    root_path = tmp_path / f"skip_test{BACKEND_TO_EXT[any_backend]}"
+    settings = AcquisitionSettings(
+        root_path=str(root_path),
+        dimensions=[
+            D(name="t", count=10, type="time"),
+            D(name="c", count=2, type="channel"),
+            D(name="y", count=32, chunk_size=32, type="space"),
+            D(name="x", count=32, chunk_size=32, type="space"),
+        ],
+        dtype="uint16",
+        format=any_backend,
+    )
+
+    frame_shape = (32, 32)
+    frame_value = np.arange(32 * 32, dtype="uint16").reshape(frame_shape)
+
+    with create_stream(settings) as stream:
+        # Write frames with some skips interspersed
+        stream.append(frame_value * 1)  # t=0, c=0
+        stream.append(frame_value * 2)  # t=0, c=1
+        stream.skip(frames=2)  # Skip t=1 (both channels = 2 frames)
+        stream.append(frame_value * 3)  # t=2, c=0
+        stream.skip(frames=1)  # t=2, c=1 - skip
+        # Continue with remaining frames (t=3-9, c=0-1 = 14 frames)
+        for _ in range(14):
+            stream.append(frame_value)
+
+    # Verify skipped frames are zeros
+    is_zarr = settings.format.name == "ome-zarr"
+    array_path = root_path / "0" if is_zarr else root_path
+    data = read_array_data(array_path)
+    empty_frame = np.zeros(frame_shape, dtype="uint16")
+
+    # Check written frames
+    np.testing.assert_array_equal(data[0, 0], frame_value * 1)
+    np.testing.assert_array_equal(data[0, 1], frame_value * 2)
+    np.testing.assert_array_equal(data[1, 0], empty_frame)
+    np.testing.assert_array_equal(data[1, 1], empty_frame)
+    np.testing.assert_array_equal(data[2, 0], frame_value * 3)
+    np.testing.assert_array_equal(data[2, 1], empty_frame)
+    for t in range(3, 10):
+        for c in range(2):
+            np.testing.assert_array_equal(data[t, c], frame_value)
+
+
+def test_append_too_many_frames(tmp_path: Path, any_backend: str) -> None:
+    """Test that appending more frames than declared raises an error."""
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "too_many_frames"),
+        dimensions=[
+            D(name="t", count=3, type="time"),
+            D(name="y", count=32, chunk_size=32, type="space"),
+            D(name="x", count=32, chunk_size=32, type="space"),
+        ],
+        dtype="uint16",
+        format=any_backend,
+    )
+
+    frame_shape = (32, 32)
+    empty_frame = np.zeros(frame_shape, dtype="uint16")
+    with create_stream(settings) as stream:
+        for _i in range(3):
+            stream.append(empty_frame)
+
+        with pytest.raises(IndexError, match="Cannot append frame: would exceed total"):
+            stream.append(empty_frame)

@@ -6,6 +6,7 @@ import pytest
 
 from ome_writers._schema import AcquisitionSettings, Dimension
 from ome_writers._stream import create_stream
+from tests._utils import read_array_data
 
 pytest.importorskip("acquire_zarr", reason="acquire-zarr not installed")
 
@@ -42,22 +43,7 @@ def test_acquire_zarr_full_streaming_support(tmp_path: Path) -> None:
         for bit in append_bits:
             stream.append(bit)
 
-    output_data = _zarr_array_to_numpy(f"{settings.output_path}/0")
+    output_data = read_array_data(f"{settings.output_path}/0")
     assert output_data.shape == (18, 128, 128)
     assert output_data.dtype == np.dtype(settings.dtype)
     assert np.array_equal(output_data.flatten(), flat_data)
-
-
-def _zarr_array_to_numpy(path: str) -> np.ndarray:
-    try:
-        import tensorstore as ts
-
-        ts_array = ts.open(
-            {"driver": "zarr3", "kvstore": {"driver": "file", "path": path}},
-            open=True,
-        ).result()
-        return np.asarray(ts_array.read().result())
-    except ImportError:
-        import zarr
-
-        return np.asarray(zarr.open_array(path))

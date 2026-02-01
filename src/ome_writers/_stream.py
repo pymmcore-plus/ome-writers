@@ -6,7 +6,7 @@ import sys
 import warnings
 import weakref
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from ome_writers._router import FrameRouter
 
@@ -53,10 +53,13 @@ class OMEStream:
 
     """
 
-    def __init__(self, backend: ArrayBackend, router: FrameRouter) -> None:
+    def __init__(
+        self, backend: ArrayBackend, router: FrameRouter, expected_frames: int | None
+    ) -> None:
         self._backend = backend
         self._router = router
         self._iterator = iter(router)
+        self._expected_frames = expected_frames
 
         # Mutable state container shared with finalizer
         self._state = {"has_appended": False}
@@ -78,6 +81,21 @@ class OMEStream:
             )
         backend.finalize()
 
+    def _handle_stop_iteration(self, operation: str, frame_count: int = 1) -> NoReturn:
+        """Convert StopIteration to ValueError with helpful message."""
+        if self._expected_frames is not None:
+            suffix = f" (tried to skip {frame_count})" if frame_count > 1 else ""
+            msg = (
+                f"Cannot {operation}: would exceed total of {self._expected_frames} "
+                f"frames{suffix}. Check your AcquisitionSettings.dimensions. "
+                "If you need to write an unbounded number of frames, set the "
+                "count of your first dimension to None."
+            )
+        else:  # pragma: no cover
+            msg = f"Cannot {operation}: iteration finished unexpectedly. This is a bug "
+            "- please report it at https://github.com/pymmcore-plus/ome-writers/issues"
+        raise IndexError(msg)
+
     def append(self, frame: np.ndarray, *, frame_metadata: dict | None = None) -> None:
         """Write the next frame in acquisition order.
 
@@ -90,12 +108,12 @@ class OMEStream:
             fail to be stored and a warning will be issued). The following special keys
             are recognized and will be mapped to format-specific locations:
 
-                - `delta_t` : float
-                    Time delta in seconds since the start of the acquisition.
-                - `exposure_time` : float
-                    Exposure time in seconds for this frame.
-                - `position_x`, `position_y`, `position_z` : float
-                    Stage position in microns for this frame.
+            - `delta_t` : float
+                Time delta in seconds since the start of the acquisition.
+            - `exposure_time` : float
+                Exposure time in seconds for this frame.
+            - `position_x`, `position_y`, `position_z` : float
+                Stage position in microns for this frame.
 
             All other keys will be stored as unstructured metadata. For OME-Tiff, you
             can find this data in the structured annotations of the OME-XML.  For
@@ -104,13 +122,66 @@ class OMEStream:
 
         Raises
         ------
-        StopIteration
-            If all frames have been written (for finite dimensions only).
-            For unlimited dimensions, never raises StopIteration.
+        IndexError
+            If attempting to append more frames than expected based on dimensions
+            (for finite dimensions only). Unlimited dimensions never raise this error.
         """
-        pos_idx, idx = next(self._iterator)
+        try:
+            pos_idx, idx = next(self._iterator)
+        except StopIteration:
+            self._handle_stop_iteration("append frame")
         self._backend.write(pos_idx, idx, frame, frame_metadata=frame_metadata)
         self._state["has_appended"] = True
+
+    def skip(self, *, frames: int = 1) -> None:
+        """Skip N frames in acquisition order without writing data.
+
+        This method advances the stream's position by the specified number of frames
+        without writing any actual data. The behavior depends on the backend:
+
+        - **Zarr backends**: Skipped regions use the array's fill_value (default 0).
+          For unlimited dimensions, the array is resized to accommodate the skip.
+        - **TIFF backend**: Writes zero-filled placeholder frames to maintain the
+          sequential IFD structure required by the format.
+
+        Parameters
+        ----------
+        frames : int, optional
+            (Keyword only). Number of frames to skip, by default 1. Must be positive.
+
+        Raises
+        ------
+        ValueError
+            If frames <= 0
+        IndexError
+            If skipping would exceed the total number of frames expected based on
+            dimensions (for finite dimensions only). Unlimited dimensions never raise
+            this error.
+
+        Examples
+        --------
+        >>> with create_stream(settings) as stream:
+        ...     stream.append(frame1)  # Write frame at index 0
+        ...     stream.skip(frames=1)  # Skip frame at index 1
+        ...     # try something that may fail
+        ...     try:
+        ...         frame_generator = setup_next_10_frames()
+        ...     except SomeError:
+        ...         stream.skip(frames=10)  # Skip next 10 frames
+        ...     else:
+        ...         for frameN in frame_generator:
+        ...             stream.append(frameN)
+        ...     stream.append(frame_last)  # Continue writing at next index
+        """
+        if frames <= 0:
+            raise ValueError(f"frames must be positive, got {frames}")
+
+        # Collect all indices to skip and pass batch to backend
+        try:
+            indices = [next(self._iterator) for _ in range(frames)]
+        except StopIteration:
+            self._handle_stop_iteration("skip frames", frames)
+        self._backend.advance(indices)
 
     def get_metadata(self) -> Any:
         """Retrieve metadata from the backend.  Meaning is format-dependent."""
@@ -281,7 +352,7 @@ def create_stream(settings: AcquisitionSettings) -> OMEStream:
     except FileExistsError:
         backend.finalize()
         raise
-    return OMEStream(backend, router)
+    return OMEStream(backend, router, settings.num_frames)
 
 
 def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:

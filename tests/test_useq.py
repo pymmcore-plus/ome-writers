@@ -455,6 +455,69 @@ def test_useq_manual_units() -> None:
     assert time_dim.count == 3
 
 
+time_plans = [
+    useq.TIntervalDuration(interval=0.1, duration=1.0),
+    useq.TIntervalLoops(interval=0.0, loops=3),
+    useq.TDurationLoops(duration=1.0, loops=4),
+    useq.MultiPhaseTimePlan(
+        phases=[
+            useq.TIntervalLoops(interval=0, loops=2),
+            useq.TIntervalLoops(interval=0.5, loops=2),
+        ]
+    ),
+]
+z_plans = [
+    useq.ZRangeAround(range=3.0, step=1.0),
+    useq.ZTopBottom(top=2.0, bottom=2.0, step=1.0),
+    useq.ZAboveBelow(above=2.0, below=1.0, step=1.0),
+    useq.ZAbsolutePositions(absolute=[0.0, 1.0, 2.0]),
+    useq.ZRelativePositions(relative=[-1.0, 0.0, 1.0]),
+]
+grid_plans = [
+    useq.GridRowsColumns(rows=2, columns=2),
+    useq.GridWidthHeight(fov_height=50, fov_width=50, width=100.0, height=100.0),
+    useq.RandomPoints(
+        num_points=4,
+        max_width=100.0,
+        max_height=100.0,
+        random_seed=42,
+    ),
+    useq.GridFromEdges(
+        fov_width=50.0,
+        fov_height=50.0,
+        left=0.0,
+        right=100.0,
+        top=0.0,
+        bottom=100.0,
+        mode=useq.OrderMode.spiral,
+    ),
+    useq.GridFromPolygon(
+        fov_height=50.0,
+        fov_width=50.0,
+        vertices=[(0, 0), (100, 0), (100, 100), (0, 100)],
+    ),
+]
+
+
+@pytest.mark.parametrize("time_plan", time_plans, ids=lambda tp: type(tp).__name__)
+@pytest.mark.parametrize("z_plan", z_plans, ids=lambda zp: type(zp).__name__)
+@pytest.mark.parametrize("grid_plan", grid_plans, ids=lambda gp: type(gp).__name__)
+def test_useq_plans_combination(
+    time_plan: useq.AnyTimePlan,
+    z_plan: useq.AnyZPlan,
+    grid_plan: useq.MultiPointPlan,
+) -> None:
+    """Test that various combinations of time, z, and grid plans work."""
+    seq = useq.MDASequence(
+        time_plan=time_plan,
+        z_plan=z_plan,
+        grid_plan=grid_plan,
+    )
+    dims = dims_from_useq(seq, image_width=64, image_height=64)
+    settings = AcquisitionSettings(dimensions=dims, root_path="", dtype="u2")
+    assert settings.num_frames == len(list(seq))
+
+
 @pytest.mark.parametrize(
     ("name", "plate_row", "plate_column", "fov_idx", "expected"),
     [
