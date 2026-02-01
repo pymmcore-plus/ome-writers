@@ -82,6 +82,7 @@ def test_position_with_plate_context() -> None:
     )
 
     assert pos_dim.count == 3
+    assert pos_dim.coords
     assert [p.name for p in pos_dim.coords] == ["A1/0", "A1/1", "B2/0"]
     assert pos_dim.coords[0].plate_row == "A"
     assert pos_dim.coords[2].plate_column == "2"
