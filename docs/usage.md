@@ -421,13 +421,13 @@ for a certain number of frames, and have it skip ahead appropriately. This may
 be done using the [`skip`][ome_writers.OMEStream.skip] method of the stream
 object:
 
-```pythonpython
+```python
 with create_stream(settings) as stream:
     for ...:
         try:
-            frame = setup_and_acquire_frame(...)
+            frame = setup_and_acquire_frame(...) # may raise SomeAcquisitionError
         except SomeAcquisitionError:
-            stream.skip(frames=1)
+            stream.skip(frames=1)  # could be more than 1 frame
         else:
             stream.append(frame)
 ```

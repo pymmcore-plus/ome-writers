@@ -251,3 +251,4 @@ class ArrayBackend(ABC):
             These are the same things normally passed to `write()`, but grouped into
             n frames to support optimized handling.
         """
+        ...
