@@ -68,9 +68,7 @@ Multi-position with position interleaved (time-lapse across positions):
 ...         Dimension(
 ...             name="p",
 ...             type="position",
-...             coords=[
-...                 Position(name="A1"),
-...                 Position(name="B2"),
+...             coords=["A1", "B2"],
 ...             ],
 ...         ),
 ...         Dimension(name="c", count=2),

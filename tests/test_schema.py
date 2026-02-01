@@ -266,10 +266,6 @@ def test_dims_from_standard_axes_names_values() -> None:
     with pytest.raises(ValueError, match="Standard axes names must be one of"):
         dims_from_standard_axes({"invalid": 10, "y": 64, "x": 64})
 
-    # Test dims_from_standard_axes with invalid position value
-    with pytest.raises(ValueError, match="Invalid position value"):
-        dims_from_standard_axes({"p": "invalid", "y": 64, "x": 64})
-
 
 def test_acquisition_settings_properties() -> None:
     """Test AcquisitionSettings properties for coverage."""
@@ -487,21 +483,16 @@ def test_array_dimensions() -> None:
 
 def test_dims_from_standard_axes_with_positions_list() -> None:
     """Test dims_from_standard_axes with position list."""
-    dims = dims_from_standard_axes(
-        {"p": ["pos1", "pos2"], "y": 64, "x": 128},
-    )
+    dims = dims_from_standard_axes({"p": ["pos1", "pos2"], "y": 64, "x": 128})
     assert len(dims) == 3
     assert dims[0].type == "position"
     assert dims[0].coords is not None
     assert [p.name for p in dims[0].coords] == ["pos1", "pos2"]
 
-    dims = dims_from_standard_axes(
-        {"p": 3, "y": 64, "x": 128},
-    )
+    dims = dims_from_standard_axes({"p": 3, "y": 64, "x": 128})
     assert len(dims) == 3
     assert dims[0].type == "position"
-    assert dims[0].coords is not None
-    assert [p.name for p in dims[0].coords] == ["0", "1", "2"]
+    assert dims[0].count == 3
 
 
 def test_storage_order_acquisition() -> None:

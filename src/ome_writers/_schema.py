@@ -108,29 +108,10 @@ class StandardAxis(str, Enum):
         scale: float | None = None,
     ) -> Dimension:
         """Convert to Dimension with given count."""
-        if self == StandardAxis.POSITION:
-            if coords:
-                coords_list = [Position.model_validate(n) for n in coords]
-            elif count:
-                if not isinstance(count, int):
-                    raise ValueError(f"Invalid position value: {count}.")
-                coords_list = [Position(name=str(i)) for i in range(count)]
-            else:  # pragma: no cover
-                raise ValueError(
-                    "Either count or coords must be provided for position dimension."
-                )
-            return Dimension(
-                name=self.value,
-                type=self.dimension_type(),
-                coords=coords_list,
-                chunk_size=chunk_size,
-                shard_size_chunks=shard_size_chunks,
-                scale=scale,
-            )
-
         return Dimension(
             name=self.value,
             count=count,
+            coords=coords,
             type=self.dimension_type(),
             unit=self.unit(),
             chunk_size=chunk_size,
@@ -923,10 +904,7 @@ def dims_from_standard_axes(
     dims: list[Dimension] = []
     for axis in std_axes:
         value = sizes[axis.value]
-        if axis == StandardAxis.POSITION and isinstance(value, list):
-            kwargs = {"coords": value}
-        else:
-            kwargs = {"count": value}
+        kwargs = {"count": value} if isinstance(value, int) else {"coords": value}
         dims.append(
             axis.to_dimension(
                 chunk_size=chunk_shapes.get(axis),
