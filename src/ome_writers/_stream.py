@@ -6,7 +6,7 @@ import sys
 import warnings
 import weakref
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from ome_writers._router import FrameRouter
 
@@ -53,10 +53,13 @@ class OMEStream:
 
     """
 
-    def __init__(self, backend: ArrayBackend, router: FrameRouter) -> None:
+    def __init__(
+        self, backend: ArrayBackend, router: FrameRouter, expected_frames: int | None
+    ) -> None:
         self._backend = backend
         self._router = router
         self._iterator = iter(router)
+        self._expected_frames = expected_frames
 
         # Mutable state container shared with finalizer
         self._state = {"has_appended": False}
@@ -77,6 +80,21 @@ class OMEStream:
                 stacklevel=2,
             )
         backend.finalize()
+
+    def _handle_stop_iteration(self, operation: str, frame_count: int = 1) -> NoReturn:
+        """Convert StopIteration to ValueError with helpful message."""
+        if self._expected_frames is not None:
+            suffix = f" (tried to skip {frame_count})" if frame_count > 1 else ""
+            msg = (
+                f"Cannot {operation}: would exceed total of {self._expected_frames} "
+                f"frames{suffix}. Check your AcquisitionSettings.dimensions. "
+                "If you need to write an unbounded number of frames, set the "
+                "count of your first dimension to None."
+            )
+        else:  # pragma: no cover
+            msg = f"Cannot {operation}: iteration finished unexpectedly. This is a bug "
+            "- please report it at https://github.com/pymmcore-plus/ome-writers/issues"
+        raise IndexError(msg)
 
     def append(self, frame: np.ndarray, *, frame_metadata: dict | None = None) -> None:
         """Write the next frame in acquisition order.
@@ -104,11 +122,14 @@ class OMEStream:
 
         Raises
         ------
-        StopIteration
-            If all frames have been written (for finite dimensions only).
-            For unlimited dimensions, never raises StopIteration.
+        ValueError
+            If attempting to append more frames than expected based on dimensions
+            (for finite dimensions only). Unlimited dimensions never raise this error.
         """
-        pos_idx, idx = next(self._iterator)
+        try:
+            pos_idx, idx = next(self._iterator)
+        except StopIteration:
+            self._handle_stop_iteration("append frame")
         self._backend.write(pos_idx, idx, frame, frame_metadata=frame_metadata)
         self._state["has_appended"] = True
 
@@ -131,9 +152,8 @@ class OMEStream:
         Raises
         ------
         ValueError
-            If frames <= 0.
-        StopIteration
-            If skipping would exceed the total number of frames for finite dimensions.
+            If frames <= 0, or if skipping would exceed the total number of frames
+            for finite dimensions.
 
         Examples
         --------
@@ -153,9 +173,11 @@ class OMEStream:
         if frames <= 0:
             raise ValueError(f"frames must be positive, got {frames}")
 
-        # Collect all indices to skip (may raise StopIteration)
-        # and pass whole batch to backend for handling
-        indices = [next(self._iterator) for _ in range(frames)]
+        # Collect all indices to skip and pass batch to backend
+        try:
+            indices = [next(self._iterator) for _ in range(frames)]
+        except StopIteration:
+            self._handle_stop_iteration("skip frames", frames)
         self._backend.advance(indices)
 
     def get_metadata(self) -> Any:
@@ -327,7 +349,7 @@ def create_stream(settings: AcquisitionSettings) -> OMEStream:
     except FileExistsError:
         backend.finalize()
         raise
-    return OMEStream(backend, router)
+    return OMEStream(backend, router, settings.num_frames)
 
 
 def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:
