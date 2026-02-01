@@ -412,3 +412,28 @@ directory that contains multiple files (e.g. `some_data/pos0.ome.tiff`,
 that `AcquisitionSettings.root_path` does, and you cannot assume that
 `output_path` will always be a file or a directory (though these things *can* be
 determined by and gleaned from your `format` settings).
+
+## Dealing with Bad Frames
+
+They can't all be perfect!  Sometimes during an acquisition, things unexpectedly
+go wrong: a hardware autofocus fails, a camera frame is dropped, etc...
+
+In these cases, you likely want to tell the stream that no data will be coming
+for a certain number of frames, and have it skip ahead appropriately. This may
+be done using the [`skip`][ome_writers.OMEStream.skip] method of the stream
+object:
+
+```python
+with create_stream(settings) as stream:
+    for ...:
+        try:
+            frame = setup_and_acquire_frame(...) # may raise SomeAcquisitionError
+        except SomeAcquisitionError:
+            stream.skip(frames=1)  # could be more than 1 frame
+        else:
+            stream.append(frame)
+```
+
+If you know that you will need to skip more than one frame (for example,
+autofocus fails on a position and you need to skip the whole z-stack), then
+pass `skip(frames=n)` where `n` is the number of frames to skip.
