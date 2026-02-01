@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, cast
 import numpy as np
 import numpy.typing as npt
 
-from ome_writers._schema import Dimension, PositionDimension, dims_from_standard_axes
+from ome_writers._schema import Dimension, dims_from_standard_axes
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -17,7 +17,7 @@ def fake_data_for_sizes(
     *,
     dtype: npt.DTypeLike = np.uint16,
     chunk_sizes: Mapping[str, int] | None = None,
-) -> tuple[Iterator[np.ndarray], list[Dimension | PositionDimension], np.dtype]:
+) -> tuple[Iterator[np.ndarray], list[Dimension], np.dtype]:
     """Simple helper function to create a data generator and dimensions.
 
     Provide the sizes of the dimensions you would like to "acquire", along with the

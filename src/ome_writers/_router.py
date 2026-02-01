@@ -59,17 +59,19 @@ pos=0, idx=(1, 2)
 
 Multi-position with position interleaved (time-lapse across positions):
 
->>> from ome_writers import Position, PositionDimension, AcquisitionSettings, Dimension
+>>> from ome_writers import Position, AcquisitionSettings, Dimension
 >>> from ome_writers._router import FrameRouter
 >>> settings = AcquisitionSettings(
 ...     root_path="test.zarr",
 ...     dimensions=[
 ...         Dimension(name="t", count=2),
-...         PositionDimension(
-...             positions=[
+...         Dimension(
+...             name="p",
+...             type="position",
+...             coords=[
 ...                 Position(name="A1"),
 ...                 Position(name="B2"),
-...             ]
+...             ],
 ...         ),
 ...         Dimension(name="c", count=2),
 ...         Dimension(name="y", count=64, type="space"),
@@ -107,12 +109,12 @@ class FrameRouter:
     We differentiate between three sets of dimensions:
     1. In-frame Dimensions (usually the last two dimensions, often called Y and X and
        of type='space').
-    2. Index Dimensions: all non-frame Dimensions excluding PositionDimension (used
+    2. Index Dimensions: all non-frame Dimensions excluding position dimensions (used
        for indexing within each position when appending new frames)
        (we also track the permutation of index-dimensions into "storage order", if the
        user has specified a storage order that differs from acquisition order).
-    3. Position Dimension: PositionDimension, if present (used to select which position
-       array to write to).
+    3. Position Dimension: position dimension (type='position'), if present (used to
+       select which position array to write to).
 
     Routers *may* be iterated over multiple times; each iteration resets to the
     beginning.

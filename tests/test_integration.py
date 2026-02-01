@@ -21,7 +21,6 @@ from ome_writers import (
     Dimension,
     Plate,
     Position,
-    PositionDimension,
     _memory,
     _stream,
     create_stream,
@@ -83,7 +82,7 @@ CASES = [
     AcquisitionSettings(
         root_path="tmp",
         dimensions=[
-            PositionDimension(positions=["Pos0", "Pos1"]),
+            D(name="p", type="position", coords=["Pos0", "Pos1"]),
             D(name="z", count=3, type="space"),
             D(name="y", count=128, chunk_size=64, type="space", scale=0.1),
             D(name="x", count=128, chunk_size=64, type="space", scale=0.1),
@@ -95,7 +94,7 @@ CASES = [
         root_path="tmp",
         dimensions=[
             D(name="t", count=3, type="time"),
-            PositionDimension(positions=["Pos0", "Pos1"]),
+            D(name="p", type="position", coords=["Pos0", "Pos1"]),
             D(name="y", count=128, chunk_size=64, type="space", scale=0.1),
             D(name="x", count=128, chunk_size=64, type="space", scale=0.1),
         ],
@@ -106,12 +105,14 @@ CASES = [
         root_path="tmp",
         dimensions=[
             D(name="t", count=3, chunk_size=1, type="time"),
-            PositionDimension(
-                positions=[
+            D(
+                name="p",
+                type="position",
+                coords=[
                     Position(name="fov0", plate_row="A", plate_column="1"),
                     Position(name="fov0", plate_row="C", plate_column="4"),
                     Position(name="fov1", plate_row="C", plate_column="4"),
-                ]
+                ],
             ),
             D(name="c", count=2, chunk_size=1, type="channel"),
             D(name="z", count=4, chunk_size=1, type="space"),
@@ -195,7 +196,7 @@ CASES = [
     AcquisitionSettings(
         root_path="tmp",
         dimensions=[
-            PositionDimension(positions=["Pos0", "Pos1"]),
+            D(name="p", type="position", coords=["Pos0", "Pos1"]),
             D(name="z", count=8, chunk_size=4, type="space"),
             D(name="y", count=64, chunk_size=64, type="space", scale=0.1),
             D(name="x", count=64, chunk_size=64, type="space", scale=0.1),
@@ -207,13 +208,15 @@ CASES = [
         root_path="tmp",
         dimensions=[
             D(name="t", count=2, type="time"),
-            PositionDimension(
-                positions=[
+            D(
+                name="p",
+                type="position",
+                coords=[
                     Position(name="Pos0", grid_row=0, grid_column=0),
                     Position(name="Pos0", grid_row=0, grid_column=1),
                     Position(name="Pos1", grid_row=0, grid_column=0),
                     Position(name="Pos1", grid_row=0, grid_column=1),
-                ]
+                ],
             ),
             D(name="c", count=2, type="channel"),
             D(name="y", count=64, chunk_size=64, type="space", scale=0.1),

@@ -16,7 +16,6 @@ from ome_writers import (
     Dimension,
     Plate,
     Position,
-    PositionDimension,
     create_stream,
 )
 
@@ -68,7 +67,7 @@ def test_update_metadata_multiposition(tmp_path: Path, tiff_backend: str) -> Non
     settings = AcquisitionSettings(
         root_path=str(tmp_path / "multipos.ome.tiff"),
         dimensions=[
-            PositionDimension(positions=["Pos0", "Pos1"]),
+            Dimension(name="p", type="position", coords=["Pos0", "Pos1"]),
             Dimension(name="t", count=2, type="time"),
             Dimension(name="y", count=32, type="space"),
             Dimension(name="x", count=32, type="space"),
@@ -145,11 +144,13 @@ def test_update_metadata_with_plates(tmp_path: Path, tiff_backend: str) -> None:
     settings = AcquisitionSettings(
         root_path=str(tmp_path / "plate.ome.tiff"),
         dimensions=[
-            PositionDimension(
-                positions=[
+            Dimension(
+                name="p",
+                type="position",
+                coords=[
                     Position(name="Well_A01", plate_row="A", plate_column="1"),
                     Position(name="Well_A02", plate_row="A", plate_column="2"),
-                ]
+                ],
             ),
             Dimension(name="y", count=32, type="space"),
             Dimension(name="x", count=32, type="space"),
@@ -257,7 +258,7 @@ def test_tiff_multiposition_detailed_metadata(
     settings = AcquisitionSettings(
         root_path=str(tmp_path / "multipos.ome.tiff"),
         dimensions=[
-            PositionDimension(positions=["Pos0", "Pos1"]),
+            Dimension(name="p", type="position", coords=["Pos0", "Pos1"]),
             Dimension(name="c", count=2, type="channel"),
             Dimension(name="z", count=3, type="space", scale=1.0, unit="micrometer"),
             Dimension(name="t", count=1, type="time"),
@@ -296,7 +297,7 @@ def test_prepare_meta(tmp_path: Path) -> None:
     settings = AcquisitionSettings(
         root_path=tmp_path / "test.ome.tiff",
         dimensions=[
-            PositionDimension(positions=["Pos0", "Pos1"]),
+            Dimension(name="p", type="position", coords=["Pos0", "Pos1"]),
             Dimension(name="t", count=2, type="time"),
             Dimension(name="c", count=1, type="channel"),
             Dimension(name="y", count=32, type="space"),
@@ -411,7 +412,7 @@ def test_frame_metadata_multiposition(tmp_path: Path, tiff_backend: str) -> None
     settings = AcquisitionSettings(
         root_path=root,
         dimensions=[
-            PositionDimension(positions=["Pos0", "Pos1"]),
+            Dimension(name="p", type="position", coords=["Pos0", "Pos1"]),
             Dimension(name="t", count=2, type="time"),
             Dimension(name="y", count=16, type="space"),
             Dimension(name="x", count=16, type="space"),
@@ -491,7 +492,7 @@ MULTI_FILE_MODES = [
 # this will be removed once we expose the modes via the public API
 def _write_with_mode(
     tmp_path: Path,
-    dimensions: list[Dimension | PositionDimension],
+    dimensions: list[Dimension],
     mode: MetadataMode,
     plate: Plate | None = None,
 ) -> None:
@@ -536,7 +537,7 @@ def _get_full_ome(tmp_path: Path, mode: MetadataMode) -> ome_types.OME | None:
 def test_basic_multiposition(tmp_path: Path, mode: MetadataMode) -> None:
     """Test basic multi-position without plate."""
     dimensions = [
-        PositionDimension(positions=["Pos0", "Pos1"]),
+        Dimension(name="p", type="position", coords=["Pos0", "Pos1"]),
         Dimension(name="c", count=2, type="channel"),
         Dimension(name="y", count=32, type="space"),
         Dimension(name="x", count=32, type="space"),
@@ -567,7 +568,7 @@ def test_5d_with_physical_sizes(tmp_path: Path, mode: MetadataMode) -> None:
     """Test full 5D acquisition with physical pixel sizes."""
     dimensions = [
         Dimension(name="t", count=2, type="time"),
-        PositionDimension(positions=["Pos0", "Pos1"]),
+        Dimension(name="p", type="position", coords=["Pos0", "Pos1"]),
         Dimension(name="c", count=3, type="channel"),
         Dimension(name="z", count=4, type="space", scale=2.0, unit="micrometer"),
         Dimension(name="y", count=64, type="space", scale=0.5, unit="micrometer"),
@@ -595,12 +596,14 @@ def test_5d_with_physical_sizes(tmp_path: Path, mode: MetadataMode) -> None:
 def test_plate_basic(tmp_path: Path, mode: MetadataMode) -> None:
     """Test plate with one field per well."""
     dimensions = [
-        PositionDimension(
-            positions=[
+        Dimension(
+            name="p",
+            type="position",
+            coords=[
                 Position(name="A1", plate_row="A", plate_column="1"),
                 Position(name="A2", plate_row="A", plate_column="2"),
                 Position(name="B1", plate_row="B", plate_column="1"),
-            ]
+            ],
         ),
         Dimension(name="y", count=32, type="space"),
         Dimension(name="x", count=32, type="space"),
@@ -624,12 +627,14 @@ def test_plate_basic(tmp_path: Path, mode: MetadataMode) -> None:
 def test_plate_multiple_fields(tmp_path: Path, mode: MetadataMode) -> None:
     """Test plate with multiple fields per well."""
     dimensions = [
-        PositionDimension(
-            positions=[
+        Dimension(
+            name="p",
+            type="position",
+            coords=[
                 Position(name="fov1", plate_row="A", plate_column="1"),
                 Position(name="fov2", plate_row="A", plate_column="1"),
                 Position(name="fov1", plate_row="A", plate_column="2"),
-            ]
+            ],
         ),
         Dimension(name="y", count=32, type="space"),
         Dimension(name="x", count=32, type="space"),
@@ -654,7 +659,7 @@ def test_plate_multiple_fields(tmp_path: Path, mode: MetadataMode) -> None:
 def test_file_structure_by_mode(tmp_path: Path, mode: MetadataMode) -> None:
     """Verify correct file structure for each metadata mode."""
     dimensions = [
-        PositionDimension(positions=["Pos0", "Pos1"]),
+        Dimension(name="p", type="position", coords=["Pos0", "Pos1"]),
         Dimension(name="y", count=32, type="space"),
         Dimension(name="x", count=32, type="space"),
     ]
@@ -734,7 +739,7 @@ def test_pixel_data_integrity(tmp_path: Path, mode: MetadataMode) -> None:
     import tifffile
 
     dimensions = [
-        PositionDimension(positions=["Pos0", "Pos1"]),
+        Dimension(name="p", type="position", coords=["Pos0", "Pos1"]),
         Dimension(name="z", count=2, type="space"),
         Dimension(name="y", count=32, type="space"),
         Dimension(name="x", count=32, type="space"),

@@ -41,7 +41,7 @@ ZarrBackendName: TypeAlias = Literal[
     "acquire-zarr", "tensorstore", "zarrs-python", "zarr-python"
 ]
 BackendName: TypeAlias = TiffBackendName | ZarrBackendName
-DimensionType: TypeAlias = Literal["space", "time", "channel", "other"]
+DimensionType: TypeAlias = Literal["space", "time", "channel", "position", "other"]
 StandardAxisKey: TypeAlias = Literal["x", "y", "z", "c", "t", "p"]
 
 
@@ -86,6 +86,8 @@ class StandardAxis(str, Enum):
             return "time"
         if self == StandardAxis.CHANNEL:
             return "channel"
+        if self == StandardAxis.POSITION:
+            return "position"
         return "other"  # pragma: no cover
 
     def unit(self) -> str | None:
@@ -100,24 +102,31 @@ class StandardAxis(str, Enum):
         self,
         *,
         count: int | None = None,
-        positions: list[str | Position] | None = None,
+        coords: list[str | Position] | None = None,
         chunk_size: int | None = None,
         shard_size_chunks: int | None = None,
         scale: float | None = None,
-    ) -> Dimension | PositionDimension:
-        """Convert to Dimension or PositionDimension with given count."""
+    ) -> Dimension:
+        """Convert to Dimension with given count."""
         if self == StandardAxis.POSITION:
-            if positions:
-                positions = [Position.model_validate(n) for n in positions]
+            if coords:
+                coords_list = [Position.model_validate(n) for n in coords]
             elif count:
                 if not isinstance(count, int):
                     raise ValueError(f"Invalid position value: {count}.")
-                positions = [Position(name=str(i)) for i in range(count)]
+                coords_list = [Position(name=str(i)) for i in range(count)]
             else:  # pragma: no cover
                 raise ValueError(
-                    "Either count or positions must be provided for PositionDimension."
+                    "Either count or coords must be provided for position dimension."
                 )
-            return PositionDimension(positions=positions)
+            return Dimension(
+                name=self.value,
+                type=self.dimension_type(),
+                coords=coords_list,
+                chunk_size=chunk_size,
+                shard_size_chunks=shard_size_chunks,
+                scale=scale,
+            )
 
         return Dimension(
             name=self.value,
@@ -241,16 +250,17 @@ class Dimension(_BaseModel):
         "in the specified `unit`. (e.g. the physical coordinate of the first pixel "
         "or timepoint, in some XYZ stage or other coordinate system).",
     )
-    coords: list[str | float | Channel] | None = Field(
+    coords: list[str | float | Channel | Position] | None = Field(
         default=None,
         description="Explicit coordinate values for each element along this dimension."
         "This is primarily a convenience for specifying categorical coordinates, such "
-        "as channel names, and may also be used to explicitly list non-uniform spatial "
-        "or temporal coordinates. If provided, the length of this list must match "
-        "the `count` of this dimension. If `count` is `None`, the length of this list "
-        "will be used as the count. Item types may additionally be validated based on "
-        "the dimension `type` (e.g. coords may be a list of `Channel` objects, but "
-        "only if the dimension type is 'channel').",
+        "as channel names or position names, and may also be used to explicitly list "
+        "non-uniform spatial or temporal coordinates. If provided, the length of this "
+        "list must match the `count` of this dimension. If `count` is `None`, the "
+        "length of this list will be used as the count. Item types may additionally be "
+        "validated based on the dimension `type` (e.g. coords may be a list of "
+        "`Channel` objects, but only if the dimension type is 'channel'; or a list of "
+        "`Position` objects, but only if the dimension type is 'position').",
     )
 
     @model_validator(mode="before")
@@ -288,12 +298,21 @@ class Dimension(_BaseModel):
                 dim_type = data.get("type")
                 if dim_type == "channel":
                     data["coords"] = [Channel.model_validate(c) for c in coords]
+                elif dim_type == "position":
+                    positions = [Position.model_validate(c) for c in coords]
+                    # Validate unique names per group for position dimensions
+                    data["coords"] = _validate_unique_names_per_group(positions)
 
         return data
 
 
 class Position(_BaseModel):
     """A single acquisition position.
+
+    This object may be used (instead of a plain string) in the
+    [`Dimension.coords`][ome_writers.Dimension] list
+    for dimensions of `type='position'` when you want to specify more than just position
+    name.
 
     This represents a physical position in space associated with a single camera frame
     or field of view.  Optional fields such as `grid/plate_row/column` indicate that the
@@ -393,75 +412,24 @@ PositionList: TypeAlias = Annotated[
 ]
 
 
-class PositionDimension(_BaseModel):
-    """Positions (meta-dimension) in acquisition order.
-
-    Unlike Dimension, positions don't become an array axis—they become
-    separate arrays/files (this is currently true for both OME-Zarr and OME-TIFF).
-    The position of PositionDimension in the dimensions list determines when
-    positions are visited during acquisition.
-    """
-
-    positions: PositionList = Field(
-        description="List of positions in acquisition order.  String literals "
-        "are also accepted and will be converted to Position objects with the "
-        "given name.",
-    )
-    name: Annotated[str, MinLen(1)] = Field(
-        default="p",
-        description="Name of this position dimension. Default is 'p'.",
-    )
-
-    @property
-    def count(self) -> int:
-        """Number of positions in the list."""
-        return len(self.positions)
-
-    @property
-    def names(self) -> list[str]:
-        """Position names in acquisition order."""
-        return [p.name for p in self.positions]
-
-    @property
-    def unit(self) -> None:
-        """Unit is always None for PositionDimension.
-
-        Provided for symmetry with Dimension.
-        """
-        return None
-
-    @property
-    def scale(self) -> Literal[1]:
-        """Scale is always None for PositionDimension.
-
-        Provided for symmetry with Dimension.
-        """
-        return 1
-
-
-def _validate_dims_list(
-    dims: tuple[Dimension | PositionDimension, ...],
-) -> tuple[Dimension | PositionDimension, ...]:
+def _validate_dims_list(dims: tuple[Dimension, ...]) -> tuple[Dimension, ...]:
     """Validate dimensions list for AcquisitionSettings."""
-    # ensure at most one PositionDimension and 2-5 non-position dimensions.
-    # ensure unique position names within each well (row/column combination)
+    # ensure at most one position dimension and 2-5 non-position dimensions.
     has_pos = False
     n_dims = 0
     name_counts: dict[str, int] = {}
     for idx, dim in enumerate(dims):
         name_counts.setdefault(dim.name, 0)
         name_counts[dim.name] += 1
-        if isinstance(dim, PositionDimension):
+        if dim.type == "position":
             if has_pos:
-                raise ValueError("Only one PositionDimension is allowed.")
+                raise ValueError("Only one position dimension is allowed.")
             has_pos = True
         else:
             n_dims += 1
-            # only the first dimension can be unbounded
-            if dim.count is None and idx != 0:
-                raise ValueError(
-                    "Only the first dimension may be unbounded (count=None)."
-                )
+        # only the first dimension can be unbounded
+        if dim.count is None and idx != 0:
+            raise ValueError("Only the first dimension may be unbounded (count=None).")
 
     if n_dims < 2:
         raise ValueError(
@@ -479,7 +447,7 @@ def _validate_dims_list(
 
     # ensure at least 2 spatial dimensions at the end
     for dim in dims[-2:]:
-        if not isinstance(dim, Dimension) or dim.type not in {"space", None}:
+        if dim.type not in {"space", None}:
             raise ValueError(
                 "The last two dimensions must be spatial dimensions (type='space')."
             )
@@ -496,16 +464,16 @@ def _validate_dims_list(
 
 
 DimensionsList: TypeAlias = Annotated[
-    tuple[Dimension | PositionDimension, ...], AfterValidator(_validate_dims_list)
+    tuple[Dimension, ...], AfterValidator(_validate_dims_list)
 ]
-"""Assembled list of Dimensions and PositionDimensions."""
+"""Assembled list of Dimensions."""
 
 
 class Plate(_BaseModel):
     """Plate structure for OME metadata.
 
     This defines the plate geometry (rows/columns) for metadata generation.
-    Acquisition order is determined by `PositionDimension` in `AcquisitionSettings`,
+    Acquisition order is determined by position dimension in `AcquisitionSettings`,
     not by this class.
     """
 
@@ -626,8 +594,8 @@ class AcquisitionSettings(_BaseModel):
         description="List of dimensions in order of acquisition. Must include at least "
         "two spatial 'in-frame' dimensions (usually Y and X) at the end. May not "
         "include more than 5 non-position dimensions total. May include one "
-        "`PositionDimension` to specify multiple acquisition positions. Only the first "
-        "dimension may be unbounded (count=None).",
+        "position dimension (type='position') to specify multiple acquisition "
+        "positions. Only the first dimension may be unbounded (count=None).",
     )
     dtype: Annotated[str, BeforeValidator(_validate_dtype)] = Field(
         description="Data type of the pixel data to be written, e.g. 'uint8', "
@@ -660,8 +628,8 @@ class AcquisitionSettings(_BaseModel):
     plate: Plate | None = Field(
         default=None,
         description="Plate structure for OME metadata. If specified, requires a "
-        "`PositionDimension` in `dimensions`, and all positions must have "
-        "row/column defined. Presence of this field indicates plate mode.",
+        "position dimension (type='position') in `dimensions`, and all positions must "
+        "have row/column defined. Presence of this field indicates plate mode.",
     )
     overwrite: bool = Field(
         default=False,
@@ -705,15 +673,18 @@ class AcquisitionSettings(_BaseModel):
     def positions(self) -> tuple[Position, ...]:
         """Position objects in acquisition order."""
         for dim in self.dimensions[:-2]:  # last 2 dims may never be positions
-            if isinstance(dim, PositionDimension):
-                return tuple(dim.positions)
+            if dim.type == "position":
+                if dim.coords:
+                    return tuple(cast("Position", c) for c in dim.coords)
+                # fallback for position dim without coords (shouldn't happen)
+                return (Position(name="0"),)  # pragma: no cover
         return (Position(name="0"),)  # single default position
 
     @property
     def position_dimension_index(self) -> int | None:
-        """Index of PositionDimension in dimensions, or None if not present."""
+        """Index of position dimension in dimensions, or None if not present."""
         for i, dim in enumerate(self.dimensions[:-2]):
-            if isinstance(dim, PositionDimension):
+            if dim.type == "position":
                 return i
         return None
 
@@ -724,15 +695,13 @@ class AcquisitionSettings(_BaseModel):
 
     @property
     def index_dimensions(self) -> tuple[Dimension, ...]:
-        """All NON-frame Dimensions, excluding PositionDimension dimensions."""
-        return tuple(dim for dim in self.dimensions[:-2] if isinstance(dim, Dimension))
+        """All NON-frame Dimensions, excluding position dimensions."""
+        return tuple(dim for dim in self.dimensions[:-2] if dim.type != "position")
 
     @property
     def array_dimensions(self) -> tuple[Dimension, ...]:
-        """All Dimensions excluding PositionDimension dimensions."""
-        return tuple(
-            dim for dim in self.dimensions if not isinstance(dim, PositionDimension)
-        )
+        """All Dimensions excluding position dimensions."""
+        return tuple(dim for dim in self.dimensions if dim.type != "position")
 
     @property
     def storage_index_dimensions(self) -> tuple[Dimension, ...]:
@@ -750,7 +719,7 @@ class AcquisitionSettings(_BaseModel):
 
     @property
     def array_storage_dimensions(self) -> tuple[Dimension, ...]:
-        """All Dimensions (excluding PositionDimension) in storage order."""
+        """All Dimensions (excluding position dimension) in storage order."""
         return self.storage_index_dimensions + self.frame_dimensions
 
     # --------- Validators ---------
@@ -803,13 +772,14 @@ class AcquisitionSettings(_BaseModel):
     def _validate_plate_positions(self) -> AcquisitionSettings:
         """Validate plate mode requirements."""
         if self.plate is not None:
-            # Ensure there is a PositionDimension
+            # Ensure there is a position dimension
             # and that all positions have row/column assigned
             for dim in self.dimensions:
-                if isinstance(dim, PositionDimension):
+                if dim.type == "position":
+                    positions = self.positions
                     names_without_row_col = [
                         pos.name
-                        for pos in dim.positions
+                        for pos in positions
                         if pos.plate_row is None or pos.plate_column is None
                     ]
                     if names_without_row_col:
@@ -820,7 +790,7 @@ class AcquisitionSettings(_BaseModel):
 
                     names_with_bad_coords = [
                         pos.name
-                        for pos in dim.positions
+                        for pos in positions
                         if ((r := pos.plate_row) and r not in self.plate.row_names)
                         or (
                             (c := pos.plate_column) and c not in self.plate.column_names
@@ -837,7 +807,7 @@ class AcquisitionSettings(_BaseModel):
                     break
             else:
                 raise ValueError(
-                    "Plate mode requires a PositionDimension in dimensions."
+                    "Plate mode requires a position dimension in dimensions."
                 )
 
         return self
@@ -900,15 +870,15 @@ def dims_from_standard_axes(
     sizes: Mapping[str, int | Sequence[str | Position] | None],
     chunk_shapes: Mapping[str | StandardAxis, int] | None = None,
     shard_shapes: Mapping[str | StandardAxis, int] | None = None,
-) -> list[Dimension | PositionDimension]:
+) -> list[Dimension]:
     """Create dimensions from standard axis names.
 
     Standard axes are {'x', 'y', 'z', 'c', 't', 'p'}. Dimension types and units
     are inferred from these names. Chunk shapes default to 1 for non-XY dimensions.
 
     For positions ('p'), the value can be:
-    - int: creates PositionDimension with names "0", "1", ...
-    - list[str | Position]: creates PositionDimension with those names or Position
+    - int: creates a position Dimension (type='position') with names "0", "1", ...
+    - list[str | Position]: creates a position Dimension with those names or Position
       objects
 
     Parameters
@@ -925,7 +895,7 @@ def dims_from_standard_axes(
 
     Returns
     -------
-    list[Dimension | PositionDimension]
+    list[Dimension]
         Dimensions in the order specified by sizes.
 
     Examples
@@ -950,11 +920,11 @@ def dims_from_standard_axes(
             chunk_shapes[axis] = size if isinstance(size, int) and axis in x_or_y else 1
 
     shard_shapes = dict(shard_shapes) if shard_shapes else {}
-    dims: list[Dimension | PositionDimension] = []
+    dims: list[Dimension] = []
     for axis in std_axes:
         value = sizes[axis.value]
         if axis == StandardAxis.POSITION and isinstance(value, list):
-            kwargs = {"positions": value}
+            kwargs = {"coords": value}
         else:
             kwargs = {"count": value}
         dims.append(

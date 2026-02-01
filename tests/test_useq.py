@@ -226,8 +226,6 @@ SEQ_CASES = [
 @pytest.mark.parametrize("case", SEQ_CASES, ids=lambda c: c.id)
 def test_useq_to_dims(case: Case) -> None:
     """Test dims_from_useq with different position configurations."""
-    from ome_writers._schema import PositionDimension
-
     seq = case.seq
     pix_size = 0.103
     img_count = 64
@@ -265,7 +263,7 @@ def test_useq_to_dims(case: Case) -> None:
     settings = AcquisitionSettings(dimensions=dims, root_path="", dtype="u2")
     assert settings.num_frames == len(events)
 
-    pos_dim = next((d for d in dims if isinstance(d, PositionDimension)), None)
+    pos_dim = next((d for d in dims if d.type == "position"), None)
     if case.expected_positions is None:
         assert pos_dim is None
         return
@@ -274,13 +272,13 @@ def test_useq_to_dims(case: Case) -> None:
 
     # Verify that number of positions matches unique (p,g) combinations
     unique_pg = {(e.index.get("p", 0), e.index.get("g")) for e in events}
-    assert len(pos_dim.positions) == len(unique_pg), (
-        f"Position count mismatch: dims_from_useq created {len(pos_dim.positions)} "
+    assert pos_dim.count == len(unique_pg), (
+        f"Position count mismatch: dims_from_useq created {pos_dim.count} "
         f"positions but useq iteration has {len(unique_pg)} unique (p,g) combos"
     )
 
     # Check all position attributes
-    for pos, exp_pos in zip(pos_dim.positions, case.expected_positions, strict=True):
+    for pos, exp_pos in zip(pos_dim.coords, case.expected_positions, strict=True):
         assert pos.name == exp_pos.name
         assert pos.plate_row == exp_pos.plate_row
         assert pos.plate_column == exp_pos.plate_col

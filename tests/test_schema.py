@@ -8,7 +8,6 @@ from ome_writers._schema import (
     Dimension,
     Plate,
     Position,
-    PositionDimension,
     StandardAxis,
     dims_from_standard_axes,
 )
@@ -72,18 +71,20 @@ def test_plate_metadata() -> None:
 
 def test_position_with_plate_context() -> None:
     """Test Position can carry plate row/column info."""
-    pos_dim = PositionDimension(
-        positions=[
+    pos_dim = Dimension(
+        name="p",
+        type="position",
+        coords=[
             Position(name="A1/0", plate_row="A", plate_column="1"),
             Position(name="A1/1", plate_row="A", plate_column="1"),
             Position(name="B2/0", plate_row="B", plate_column="2"),
-        ]
+        ],
     )
 
     assert pos_dim.count == 3
-    assert pos_dim.names == ["A1/0", "A1/1", "B2/0"]
-    assert pos_dim.positions[0].plate_row == "A"
-    assert pos_dim.positions[2].plate_column == "2"
+    assert [p.name for p in pos_dim.coords] == ["A1/0", "A1/1", "B2/0"]
+    assert pos_dim.coords[0].plate_row == "A"
+    assert pos_dim.coords[2].plate_column == "2"
 
 
 def test_plate_requires_row_column() -> None:
@@ -95,9 +96,11 @@ def test_plate_requires_row_column() -> None:
             root_path="plate.ome.zarr",
             dimensions=[
                 Dimension(name="t", count=2, type="time"),
-                PositionDimension(
+                Dimension(
+                    name="p",
+                    type="position",
                     # Missing row/column
-                    positions=[Position(name="A1")]
+                    coords=[Position(name="A1")],
                 ),
                 Dimension(name="y", count=16, type="space"),
                 Dimension(name="x", count=16, type="space"),
@@ -110,7 +113,7 @@ def test_plate_requires_row_column() -> None:
 
 def test_plate_requires_position_dimension() -> None:
     with pytest.raises(
-        ValueError, match="Plate mode requires a PositionDimension in dimensions"
+        ValueError, match="Plate mode requires a position dimension in dimensions"
     ):
         AcquisitionSettings(
             root_path="plate.zarr",
@@ -134,11 +137,13 @@ def test_plate_position_warnings(caplog: pytest.LogCaptureFixture) -> None:
             root_path="plate.zarr",
             dimensions=[
                 Dimension(name="t", count=2, type="time"),
-                PositionDimension(
-                    positions=[
+                Dimension(
+                    name="p",
+                    type="position",
+                    coords=[
                         Position(name="Pos1", plate_row="A", plate_column="1"),
                         Position(name="Pos2", plate_row="C", plate_column="3"),  # Bad
-                    ]
+                    ],
                 ),
                 Dimension(name="y", count=16, type="space"),
                 Dimension(name="x", count=16, type="space"),
@@ -156,11 +161,13 @@ def test_duplicate_names_rejected() -> None:
         AcquisitionSettings(
             root_path="test.zarr",
             dimensions=[
-                PositionDimension(
-                    positions=[
+                Dimension(
+                    name="p",
+                    type="position",
+                    coords=[
                         Position(name="fov0", plate_row="C", plate_column="4"),
                         Position(name="fov0", plate_row="C", plate_column="4"),
-                    ]
+                    ],
                 ),
                 Dimension(name="y", count=16, type="space"),
                 Dimension(name="x", count=16, type="space"),
@@ -174,11 +181,13 @@ def test_duplicate_names_rejected() -> None:
         AcquisitionSettings(
             root_path="test.zarr",
             dimensions=[
-                PositionDimension(
-                    positions=[
+                Dimension(
+                    name="p",
+                    type="position",
+                    coords=[
                         Position(name="fov0"),
                         Position(name="fov0"),
-                    ]
+                    ],
                 ),
                 Dimension(name="y", count=16, type="space"),
                 Dimension(name="x", count=16, type="space"),
@@ -195,38 +204,44 @@ def test_same_name_allowed_in_different_groups() -> None:
     """
     # Same name, same grid coords, but different plate coords
     # (e.g., "fov0" at grid position (0,0) in wells A/1 and B/2)
-    pd = PositionDimension(
-        positions=[
+    pd = Dimension(
+        name="p",
+        type="position",
+        coords=[
             Position(
                 name="fov0", plate_row="A", plate_column="1", grid_row=0, grid_column=0
             ),
             Position(
                 name="fov0", plate_row="B", plate_column="2", grid_row=0, grid_column=0
             ),
-        ]
+        ],
     )
-    assert len(pd.positions) == 2
+    assert len(pd.coords) == 2
 
     # Same name, same plate coords, but different grid coords
     # (e.g., "fov0" at different grid positions within the same well)
-    pd = PositionDimension(
-        positions=[
+    pd = Dimension(
+        name="p",
+        type="position",
+        coords=[
             Position(
                 name="fov0", plate_row="A", plate_column="1", grid_row=0, grid_column=0
             ),
             Position(
                 name="fov0", plate_row="A", plate_column="1", grid_row=1, grid_column=1
             ),
-        ]
+        ],
     )
-    assert len(pd.positions) == 2
+    assert len(pd.coords) == 2
 
     # Same name, same plate AND same grid coords
     with pytest.raises(
         ValueError, match="Position names must be unique within each group"
     ):
-        PositionDimension(
-            positions=[
+        Dimension(
+            name="p",
+            type="position",
+            coords=[
                 Position(
                     name="fov0",
                     plate_row="A",
@@ -241,7 +256,7 @@ def test_same_name_allowed_in_different_groups() -> None:
                     grid_row=0,
                     grid_column=0,
                 ),
-            ]
+            ],
         )
 
 
@@ -318,20 +333,20 @@ def test_standard_axis_methods() -> None:
     assert StandardAxis.Z.dimension_type() == "space"
     assert StandardAxis.TIME.dimension_type() == "time"
     assert StandardAxis.CHANNEL.dimension_type() == "channel"
-    assert StandardAxis.POSITION.dimension_type() == "other"
+    assert StandardAxis.POSITION.dimension_type() == "position"
     assert StandardAxis.Z.unit() == "micrometer"
     assert StandardAxis.TIME.unit() == "second"
     assert StandardAxis.CHANNEL.unit() is None
 
 
 def test_multiple_position_dimensions_error() -> None:
-    """Test that only one PositionDimension is allowed."""
-    with pytest.raises(ValueError, match="Only one PositionDimension is allowed"):
+    """Test that only one position dimension is allowed."""
+    with pytest.raises(ValueError, match="Only one position dimension is allowed"):
         AcquisitionSettings(
             root_path="test.zarr",
             dimensions=[
-                PositionDimension(positions=[Position(name="p1")]),
-                PositionDimension(positions=[Position(name="p2")]),
+                Dimension(name="p", type="position", coords=[Position(name="p1")]),
+                Dimension(name="p2", type="position", coords=[Position(name="p2")]),
                 Dimension(name="y", count=64, type="space"),
                 Dimension(name="x", count=64, type="space"),
             ],
@@ -452,12 +467,12 @@ def test_num_frames_with_unbounded() -> None:
 
 
 def test_array_dimensions() -> None:
-    """Test array_dimensions excludes PositionDimension."""
+    """Test array_dimensions excludes position dimension."""
     settings = AcquisitionSettings(
         root_path="test.zarr",
         dimensions=[
             Dimension(name="t", count=10, type="time"),
-            PositionDimension(positions=[Position(name="pos1")]),
+            Dimension(name="p", type="position", coords=[Position(name="pos1")]),
             Dimension(name="y", count=64, type="space"),
             Dimension(name="x", count=64, type="space"),
         ],
@@ -475,15 +490,17 @@ def test_dims_from_standard_axes_with_positions_list() -> None:
         {"p": ["pos1", "pos2"], "y": 64, "x": 128},
     )
     assert len(dims) == 3
-    assert isinstance(dims[0], PositionDimension)
-    assert [p.name for p in dims[0].positions] == ["pos1", "pos2"]
+    assert dims[0].type == "position"
+    assert dims[0].coords is not None
+    assert [p.name for p in dims[0].coords] == ["pos1", "pos2"]
 
     dims = dims_from_standard_axes(
         {"p": 3, "y": 64, "x": 128},
     )
     assert len(dims) == 3
-    assert isinstance(dims[0], PositionDimension)
-    assert [p.name for p in dims[0].positions] == ["0", "1", "2"]
+    assert dims[0].type == "position"
+    assert dims[0].coords is not None
+    assert [p.name for p in dims[0].coords] == ["0", "1", "2"]
 
 
 def test_storage_order_acquisition() -> None:

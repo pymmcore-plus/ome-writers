@@ -184,7 +184,7 @@ See the [single 5D image example](../examples/single_5d_image.md).
 # for each time point, visit each position, and for each channel, acquire a 3D stack:
 dimensions=[
     Dimension(name="t", count=2, chunk_size=1, type="time"),
-    PositionDimension(positions=["Pos0", "Pos1"]),
+    Dimension(name="p", type="position", coords=["Pos0", "Pos1"]),
     Dimension(name="c", count=3, chunk_size=1, type="channel"),
     Dimension(name="z", count=4, chunk_size=1, type="space", scale=5, unit="um"),
     Dimension(name="y", count=512, chunk_size=256, type="space", scale=2, unit="um"),
@@ -212,15 +212,17 @@ settings = AcquisitionSettings(
     root_path="example_5d_plate",
     dimensions=[
         Dimension(name="t", count=2, chunk_size=1, type="time"),
-        PositionDimension(
+        Dimension(
+            name="p",
+            type="position",
             # order should match stage position traversal during acquisition
-            positions=[
+            coords=[
                 Position(name="fov0", plate_row="A", plate_column="1"),
                 Position(name="fov0", plate_row="A", plate_column="2"),
                 # note ... two fovs in same well
                 Position(name="fov0", plate_row="C", plate_column="4"),
                 Position(name="fov1", plate_row="C", plate_column="4"),
-            ]
+            ],
         ),
         Dimension(name="c", count=3, chunk_size=1, type="channel"),
         Dimension(name="z", count=4, chunk_size=1, type="space"),
@@ -248,7 +250,7 @@ first `Dimension` may be unbounded.
 ```python
 dimensions=[
     Dimension(name="t", count=None, type="time"),
-    PositionDimension(positions=["Pos0", "Pos1"]),
+    Dimension(name="p", type="position", coords=["Pos0", "Pos1"]),
     Dimension(name="y", count=256, chunk_size=64, type="space"),
     Dimension(name="x", count=256, chunk_size=64, type="space"),
 ]

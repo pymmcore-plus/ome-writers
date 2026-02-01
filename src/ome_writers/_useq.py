@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ome_writers._schema import Dimension, Position, PositionDimension, StandardAxis
+from ome_writers._schema import Dimension, Position, StandardAxis
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -24,8 +24,8 @@ def dims_from_useq(
     pixel_size_um: float | None = None,
     chunk_shapes: Mapping[str, int] | None = None,
     shard_shapes: Mapping[str, int] | None = None,
-) -> list[Dimension | PositionDimension]:
-    """Convert a [`useq.MDASequence`][] to a list of [`Dimension`][ome_writers.Dimension] `|` [`PositionDimension`][ome_writers.PositionDimension] for ome-writers.
+) -> list[Dimension]:
+    """Convert a [`useq.MDASequence`][] to a list of [`Dimension`][ome_writers.Dimension] for ome-writers.
 
     !!! tip "Important"
         `useq-schema` has a very expressive API that can generate complex,
@@ -96,7 +96,7 @@ def dims_from_useq(
     units = units or {}
     chunk_shapes = chunk_shapes or {}
     shard_shapes = shard_shapes or {}
-    dims: list[Dimension | PositionDimension] = []
+    dims: list[Dimension] = []
     position_dim_added = False
     used_axes = seq.used_axes
 
@@ -116,7 +116,7 @@ def dims_from_useq(
         if ax_name in (Axis.POSITION, Axis.GRID):
             if not position_dim_added and has_positions:
                 if positions := _build_positions(seq):
-                    dims.append(StandardAxis.POSITION.to_dimension(positions=positions))
+                    dims.append(StandardAxis.POSITION.to_dimension(coords=positions))
                     position_dim_added = True
             continue
 
@@ -128,21 +128,20 @@ def dims_from_useq(
             chunk_size=chunk_shapes.get(ax_name),
             shard_size_chunks=shard_shapes.get(ax_name),
         )
-        if isinstance(dim, Dimension):
-            if unit := units.get(str(ax_name)):
-                dim.scale, dim.unit = unit
-            else:
-                # Default units for known axes
-                if std_axis == StandardAxis.TIME and seq.time_plan:
-                    # MultiPhaseTimePlan doesn't have interval attribute
-                    if hasattr(seq.time_plan, "interval"):
-                        dim.scale = seq.time_plan.interval.total_seconds()  # ty: ignore
-                        dim.unit = "second"
-                elif std_axis == StandardAxis.Z and seq.z_plan:
-                    # ZAbsolutePositions/ZRelativePositions don't have step
-                    dim.unit = "micrometer"
-                    if hasattr(seq.z_plan, "step"):
-                        dim.scale = seq.z_plan.step  # ty: ignore
+        if unit := units.get(str(ax_name)):
+            dim.scale, dim.unit = unit
+        else:
+            # Default units for known axes
+            if std_axis == StandardAxis.TIME and seq.time_plan:
+                # MultiPhaseTimePlan doesn't have interval attribute
+                if hasattr(seq.time_plan, "interval"):
+                    dim.scale = seq.time_plan.interval.total_seconds()  # ty: ignore
+                    dim.unit = "second"
+            elif std_axis == StandardAxis.Z and seq.z_plan:
+                # ZAbsolutePositions/ZRelativePositions don't have step
+                dim.unit = "micrometer"
+                if hasattr(seq.z_plan, "step"):
+                    dim.scale = seq.z_plan.step  # ty: ignore
         dims.append(dim)
 
     dims.extend(
