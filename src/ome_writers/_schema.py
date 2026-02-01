@@ -434,14 +434,34 @@ class Dimension(_BaseModel):
                 except TypeError:
                     raise ValueError("`coords` must be an iterable type.") from None
 
+            count = data.get("count")
             unit = data.get("unit")
             if (dim_type := data.get("type")) is None:
                 dim_type = _infer_dim_type(coords, unit)
 
+            # Handle position dimension auto-generation and unbounded validation
+            if dim_type == "position":
+                if coords is None:
+                    if count is None:
+                        raise NotImplementedError(
+                            "Unbounded position dimensions (count=None) are not yet "
+                            "implemented. Please provide explicit coords or a finite "
+                            "count."
+                        )
+                    # Auto-generate position coords from count
+                    coords = [Position(name=str(i)) for i in range(count)]
+                    data["coords"] = coords
+                elif len(coords) == 0:
+                    raise NotImplementedError(
+                        "Empty coords for position dimensions are not yet implemented. "
+                        "Please provide explicit position names or use count to "
+                        "auto-generate."
+                    )
+
             # Now proceed with standard validation
             if coords is not None:
                 # Ensure count matches coords length, inferring count if needed
-                if (count := data.get("count")) is None:
+                if count is None:
                     data["count"] = len(coords)
                 elif len(coords) != count:
                     raise ValueError(

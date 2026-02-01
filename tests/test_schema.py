@@ -633,3 +633,44 @@ def test_position_dimension_deprecation() -> None:
 
     pdims3 = Dimension(name="p", coords=[Position(name="Pos0"), Position(name="Pos1")])
     assert pdims1.model_dump() == pdims3.model_dump()
+
+
+def test_position_auto_generation_from_count() -> None:
+    """Test that positions are auto-generated when count is provided without coords."""
+    pdim = Dimension(name="p", type="position", count=3)
+
+    assert pdim.count == 3
+    assert pdim.coords is not None
+    assert len(pdim.coords) == 3
+    assert [p.name for p in pdim.coords] == ["0", "1", "2"]
+
+    # Verify it works in AcquisitionSettings
+    settings = AcquisitionSettings(
+        root_path="test.zarr",
+        dimensions=[
+            pdim,
+            Dimension(name="y", count=64, type="space"),
+            Dimension(name="x", count=64, type="space"),
+        ],
+        dtype="uint16",
+    )
+    assert len(settings.positions) == 3
+    assert [p.name for p in settings.positions] == ["0", "1", "2"]
+
+
+def test_unbounded_position_raises_not_implemented() -> None:
+    """Test that unbounded positions (count=None) raise NotImplementedError."""
+    with pytest.raises(
+        NotImplementedError,
+        match=r"Unbounded position dimensions.*not yet implemented",
+    ):
+        Dimension(name="p", type="position", count=None)
+
+
+def test_empty_position_coords_raises_not_implemented() -> None:
+    """Test that empty coords list raises NotImplementedError."""
+    with pytest.raises(
+        NotImplementedError,
+        match=r"Empty coords for position dimensions.*not yet implemented",
+    ):
+        Dimension(name="p", type="position", coords=[])
