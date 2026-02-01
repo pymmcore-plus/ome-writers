@@ -622,12 +622,10 @@ class PositionDimension(Dimension):
 if TYPE_CHECKING:
 
     class ChannelDimension(Dimension):
-        # name: str = "c"
         type: Literal["channel"] = "channel"  # type: ignore
         coords: list[Channel] | None = None  # type: ignore
 
     class SpatialDimension(Dimension):
-        # name: str = "x" | "y" | "z"
         type: Literal["space"] = "space"  # type: ignore
         coords: list[float] | None = None  # type: ignore
 

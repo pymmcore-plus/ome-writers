@@ -631,5 +631,5 @@ def test_position_dimension_deprecation() -> None:
     pdims2 = Dimension(name="p", type="position", coords=["Pos0", "Pos1"])
     assert pdims1.model_dump() == pdims2.model_dump()
 
-    pdims3 = Dimension(name="p", coords=[Position(name="Pos0"), "Pos1"])
+    pdims3 = Dimension(name="p", coords=[Position(name="Pos0"), Position(name="Pos1")])
     assert pdims1.model_dump() == pdims3.model_dump()
