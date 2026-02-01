@@ -18,10 +18,6 @@ from ome_writers._schema import AcquisitionSettings, dims_from_standard_axes
 FORMAT = "auto" if len(sys.argv) < 2 else sys.argv[1]
 
 
-class AutofocusError(Exception):
-    """Simulated autofocus failure."""
-
-
 settings = AcquisitionSettings(
     root_path="example_frame_skipping",
     dimensions=dims_from_standard_axes(
@@ -33,6 +29,10 @@ settings = AcquisitionSettings(
 )
 
 nt, npos, nc, nz, *_ = cast("tuple[int, ...]", settings.shape)
+
+
+class AutofocusError(Exception):
+    """Simulated autofocus failure."""
 
 
 def attempt_autofocus(pos: int) -> None:
