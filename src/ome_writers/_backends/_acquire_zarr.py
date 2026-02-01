@@ -6,15 +6,14 @@ import gc
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 import acquire_zarr as az
+import numpy as np
 
 from ome_writers._backends._yaozarrs import YaozarrsBackend
 from ome_writers._schema import Dimension
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
     from pathlib import Path
-
-    import numpy as np
 
     from ome_writers._schema import AcquisitionSettings, Dimension
 
@@ -35,6 +34,8 @@ class AcquireZarrBackend(YaozarrsBackend):
         super().__init__()
         self._stream: az.ZarrStream | None = None
         self._az_pos_keys: list[str] = []
+        self._dtype: str = ""
+        self._frame_shape: tuple[int, ...] = ()
         # hack to deal with the fact that acquire-zarr overwrites zarr.json files
         # with empty group metadata, even when using output_key="..."
         # see https://github.com/acquire-project/acquire-zarr/issues/186
@@ -75,6 +76,12 @@ class AcquireZarrBackend(YaozarrsBackend):
         assert self._root is not None
         # Build position -> output_key mapping from placeholder arrays
         self._az_pos_keys = [arr.output_key for arr in self._arrays]
+
+        # Store dtype and frame shape for advance() method
+        self._dtype = settings.dtype
+        self._frame_shape = tuple(
+            d.count for d in settings.array_storage_dimensions[-2:]
+        )
 
         # Backup zarr.json files created by yaozarrs before acquire-zarr
         # potentially overwrites them (will be restored in finalize)
@@ -121,6 +128,34 @@ class AcquireZarrBackend(YaozarrsBackend):
         output_key = self._az_pos_keys[position_index]
         self._stream.append(frame, key=output_key)
         self._store_frame_metadata(position_index, index, frame_metadata)
+
+    def advance(self, indices: Sequence[tuple[int, tuple[int, ...]]]) -> None:
+        """Write fill-value frames to maintain sequential acquire-zarr structure.
+
+        acquire-zarr requires sequential writes. When frames are skipped during
+        acquisition, we write zero-filled placeholder frames to maintain the
+        sequential structure.
+
+        Note: acquire-zarr's stream accepts buffers of arbitrary size, so we can
+        append all skipped frames for each position as a single buffer rather than
+        looping frame-by-frame.
+        """
+        if self._stream is None:  # pragma: no cover
+            raise RuntimeError("Backend not prepared.")
+
+        # Group indices by position to batch appends
+        position_frame_count: dict[int, int] = {}
+        for pos_idx, _storage_idx in indices:
+            position_frame_count[pos_idx] = position_frame_count.get(pos_idx, 0) + 1
+
+        # For each position, append a single buffer with all skipped frames
+        # acquire-zarr will reshape appropriately
+        for pos_idx, frame_count in position_frame_count.items():
+            output_key = self._az_pos_keys[pos_idx]
+            # Create buffer: (frame_count * frame_height * frame_width) flattened
+            total_elements = frame_count * np.prod(self._frame_shape)
+            fill_buffer = np.zeros(total_elements, dtype=self._dtype)
+            self._stream.append(fill_buffer, key=output_key)
 
     def finalize(self) -> None:
         """Close stream and release resources."""

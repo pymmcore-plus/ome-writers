@@ -226,6 +226,30 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         else:
             self._chunk_buffers = None
 
+    def _ensure_array_size(
+        self, position_index: int, indices: Sequence[tuple[int, ...]]
+    ) -> None:
+        """Resize array if needed to accommodate the given indices.
+
+        This method calculates the maximum extent across all provided indices
+        and resizes the array once if needed. It also updates chunk buffer
+        index_shape for buffered backends.
+        """
+        array = self._arrays[position_index]
+        current_shape = list(array.shape)
+        new_shape = current_shape.copy()
+
+        # Find maximum extent across all indices
+        for storage_idx in indices:
+            for i, idx_val in enumerate(storage_idx):
+                new_shape[i] = max(new_shape[i], idx_val + 1)
+
+        # Resize only once if needed
+        if new_shape != current_shape:
+            self._resize(array, new_shape)
+            if self._chunk_buffers:
+                self._chunk_buffers[position_index].index_shape = new_shape[:-2]
+
     def write(
         self,
         position_index: int,
@@ -238,19 +262,11 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         if self._finalized:  # pragma: no cover
             raise RuntimeError("Cannot write after finalize().")
 
-        array = self._arrays[position_index]
-
-        # Resize if needed (index may be shorter than shape due to spatial dims)
-        new_shape = list(array.shape)
-        for i, idx_val in enumerate(index):
-            new_shape[i] = max(new_shape[i], idx_val + 1)
-
-        if new_shape != list(array.shape):
-            self._resize(array, new_shape)
-            if self._chunk_buffers:
-                self._chunk_buffers[position_index].index_shape = new_shape[:-2]
+        # Resize array if needed to accommodate index
+        self._ensure_array_size(position_index, [index])
 
         # Route to buffered or direct write
+        array = self._arrays[position_index]
         if self._chunk_buffers:
             self._write_with_buffering(
                 self._chunk_buffers[position_index], array, index, frame
@@ -259,6 +275,25 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
             self._write(array, index, frame)
 
         self._store_frame_metadata(position_index, index, frame_metadata)
+
+    def advance(self, indices: Sequence[tuple[int, tuple[int, ...]]]) -> None:
+        """Efficiently resize arrays once based on maximum extent of skipped indices.
+
+        For Zarr backends, skipping frames only requires resizing arrays to
+        accommodate the new indices. No data is written - skipped regions use
+        the array's fill_value.
+        """
+        if self._finalized:  # pragma: no cover
+            raise RuntimeError("Cannot advance after finalize().")
+
+        # Group indices by position
+        position_indices: dict[int, list[tuple[int, ...]]] = {}
+        for pos_idx, storage_idx in indices:
+            position_indices.setdefault(pos_idx, []).append(storage_idx)
+
+        # For each position, resize once to accommodate all indices
+        for pos_idx, storage_indices in position_indices.items():
+            self._ensure_array_size(pos_idx, storage_indices)
 
     def _store_frame_metadata(
         self,
