@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
 from ome_writers import __version__
 from ome_writers._backends._backend import ArrayBackend
 from ome_writers._backends._chunk_buffer import ChunkBuffer
+from ome_writers._schema import is_channel_dim
 
 try:
     from yaozarrs import DimSpec, v05
@@ -35,7 +36,6 @@ if TYPE_CHECKING:
     from ome_writers._router import FrameRouter
     from ome_writers._schema import (
         AcquisitionSettings,
-        Channel,
         Dimension,
         Plate,
         Position,
@@ -512,11 +512,10 @@ def _build_yaozarrs_image_model(dims: list[Dimension]) -> v05.Image:
         )
         for dim in dims
     ]
-    channel_dim = next((d for d in dims if d.type == "channel"), None)
+    channel_dim = next((d for d in dims if is_channel_dim(d)), None)
     if channel_dim is not None and channel_dim.coords:
-        channels = cast("list[Channel]", channel_dim.coords)
         omero_channels = []
-        for c in channels:
+        for c in channel_dim.coords:
             color = (
                 c.color.as_hex(format="long").lstrip("#").upper() if c.color else None
             )

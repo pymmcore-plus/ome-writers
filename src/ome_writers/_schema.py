@@ -11,7 +11,6 @@ from typing import (
     Any,
     Literal,
     TypeAlias,
-    cast,
     get_args,
 )
 
@@ -874,9 +873,9 @@ class AcquisitionSettings(_BaseModel):
     def positions(self) -> tuple[Position, ...]:
         """Position objects in acquisition order."""
         for dim in self.dimensions[:-2]:  # last 2 dims may never be positions
-            if dim.type == "position":
+            if is_position_dim(dim):
                 if dim.coords:
-                    return tuple(cast("Position", c) for c in dim.coords)
+                    return tuple(dim.coords)
                 # fallback for position dim without coords (shouldn't happen)
                 return (Position(name="0"),)  # pragma: no cover
         return (Position(name="0"),)  # single default position
@@ -892,7 +891,7 @@ class AcquisitionSettings(_BaseModel):
     @property
     def frame_dimensions(self) -> tuple[Dimension, ...]:
         """In-frame dimensions, currently always last two dims (usually (Y,X))."""
-        return cast("tuple[Dimension, ...]", self.dimensions[-2:])
+        return self.dimensions[-2:]
 
     @property
     def index_dimensions(self) -> tuple[Dimension, ...]:

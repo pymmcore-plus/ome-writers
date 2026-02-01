@@ -9,7 +9,7 @@ or use `pytest --benchmark-only` or `--codspeed` with pytest-codspeed.
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -110,7 +110,7 @@ def _make_frames(settings: AcquisitionSettings) -> list[np.ndarray]:
 
     # Pre-allocate all frames
     dims = settings.dimensions
-    frame_shape = cast("tuple[int, ...]", tuple(d.count for d in dims[-2:]))
+    frame_shape = tuple(d.count or 1 for d in dims[-2:])
     iinfo = np.iinfo(settings.dtype)
     return [
         np.random.randint(iinfo.min, iinfo.max, frame_shape, dtype=settings.dtype)  # ty: ignore
