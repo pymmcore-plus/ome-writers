@@ -26,6 +26,7 @@ def _chdir_argv(path: Path, argv: list[str]) -> Iterator[None]:
         sys_module.argv = original_argv
 
 
+@pytest.mark.filterwarnings("ignore:PositionDimension is deprecated:DeprecationWarning")
 @pytest.mark.parametrize("example_path", EXAMPLES, ids=lambda p: p.stem)
 def test_example_runs(example_path: Path, tmp_path: Path, any_backend: str) -> None:
     """Test that each example script runs without error."""

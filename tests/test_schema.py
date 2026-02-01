@@ -3,8 +3,9 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from ome_writers._schema import (
+from ome_writers import (
     AcquisitionSettings,
+    Channel,
     Dimension,
     Plate,
     Position,
@@ -564,3 +565,71 @@ def test_storage_order_invalid_list() -> None:
             dtype="uint16",
             storage_order=["z", "t", "y", "x"],  # 'z' doesn't exist in index dims
         )
+
+
+def test_dimension_coords_unit_conflicts() -> None:
+    """Test that conflicting coords and unit/type combinations are rejected."""
+
+    # Channel coords with spatial unit (conflicting inference)
+    with pytest.raises(
+        ValueError,
+        match=r"inference.*coords suggests.*channel.*unit suggests.*space",
+    ):
+        Dimension(name="test", coords=[Channel(name="red")], unit="micrometer")
+
+    # Position coords with temporal unit (conflicting inference)
+    with pytest.raises(
+        ValueError,
+        match=r"inference.*coords suggests.*position.*unit suggests.*time",
+    ):
+        Dimension(name="test", coords=[Position(name="A1")], unit="second")
+
+    # Channel coords with explicit incompatible type
+    with pytest.raises(
+        ValueError,
+        match=r"Channel objects in coords require type='channel'.*got type='time'",
+    ):
+        Dimension(name="test", coords=[Channel(name="red")], type="time")
+
+    # Position coords with explicit incompatible type
+    with pytest.raises(
+        ValueError,
+        match=r"Position objects in coords require type='position'.*got type='space'",
+    ):
+        Dimension(name="test", coords=[Position(name="A1")], type="space")
+
+
+def test_dimension_coords_mixing_types() -> None:
+    """Test that mixing incompatible types in coords is rejected."""
+
+    # Mix Channel with non-str, non-Channel types
+    with pytest.raises(ValueError, match=r"May not mix Channel objects"):
+        Dimension(name="test", coords=[Channel(name="red"), 123])
+    with pytest.raises(ValueError, match=r"May not mix Channel objects"):
+        Dimension(name="test", coords=[Channel(name="red"), Position(name="A1")])
+
+    # Mix Position with non-str, non-Position types
+    with pytest.raises(ValueError, match=r"May not mix Position objects"):
+        Dimension(name="test", coords=[Position(name="A1"), 456])
+
+    # But mixing with strings is OK
+    dim1 = Dimension(name="c", coords=[Channel(name="red"), "blue"])
+    assert dim1.type == "channel"
+    assert len(dim1.coords) == 2
+
+    dim2 = Dimension(name="p", coords=[Position(name="A1"), "B2"])
+    assert dim2.type == "position"
+    assert len(dim2.coords) == 2
+
+
+def test_position_dimension_deprecation() -> None:
+    from ome_writers import PositionDimension
+
+    with pytest.warns(DeprecationWarning, match="PositionDimension is deprecated"):
+        pdims1 = PositionDimension(positions=["Pos0", "Pos1"])  # type: ignore
+
+    pdims2 = Dimension(name="p", type="position", coords=["Pos0", "Pos1"])
+    assert pdims1.model_dump() == pdims2.model_dump()
+
+    pdims3 = Dimension(name="p", coords=[Position(name="Pos0"), "Pos1"])
+    assert pdims1.model_dump() == pdims3.model_dump()

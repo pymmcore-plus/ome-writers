@@ -22,6 +22,7 @@ from ome_writers._schema import (
     OmeZarrFormat,
     Plate,
     Position,
+    PositionDimension,
     StandardAxis,
     dims_from_standard_axes,
 )
@@ -37,6 +38,7 @@ __all__ = [
     "OmeZarrFormat",
     "Plate",
     "Position",
+    "PositionDimension",
     "StandardAxis",
     "__version__",
     "create_stream",
