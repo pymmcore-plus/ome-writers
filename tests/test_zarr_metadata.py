@@ -12,7 +12,6 @@ from ome_writers import (
     AcquisitionSettings,
     Channel,
     Dimension,
-    PositionDimension,
     create_stream,
 )
 
@@ -80,7 +79,7 @@ def test_get_metadata_multiposition(tmp_path: Path) -> None:
     settings = AcquisitionSettings(
         root_path=str(tmp_path / "multipos.zarr"),
         dimensions=[
-            PositionDimension(positions=["Pos0", "Pos1"]),
+            Dimension(name="p", type="position", coords=["Pos0", "Pos1"]),
             Dimension(name="c", count=1, type="channel"),
             Dimension(name="y", count=16, chunk_size=16, type="space"),
             Dimension(name="x", count=16, chunk_size=16, type="space"),
@@ -318,7 +317,7 @@ def test_frame_metadata_multiposition(tmp_path: Path) -> None:
     settings = AcquisitionSettings(
         root_path=root,
         dimensions=[
-            PositionDimension(positions=["Pos0", "Pos1"]),
+            Dimension(name="p", type="position", coords=["Pos0", "Pos1"]),
             Dimension(name="t", count=2, type="time"),
             Dimension(name="y", count=16, chunk_size=16, type="space"),
             Dimension(name="x", count=16, chunk_size=16, type="space"),

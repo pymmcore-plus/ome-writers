@@ -116,16 +116,42 @@ ANY_TIME_TO_NGFF.update(
 )
 
 
-def cast_unit_to_ngff(
-    unit: str, dim_type: DimensionType | None
-) -> tuple[str, DimensionType | None]:
-    """Cast a unit string to its NGFF-compliant equivalent."""
+def infer_dim_type_from_unit(unit: str | None) -> DimensionType | None:
+    """Infer the dimension type from a given unit string."""
+    if unit is None:
+        return None
+    unit_lower = str(unit).lower() if len(unit) > 2 else unit
+    if unit_lower in ANY_LENGTH_TO_NGFF:
+        return "space"
+    elif unit_lower in ANY_TIME_TO_NGFF:
+        return "time"
+    return None
+
+
+def cast_unit_to_ngff(unit: str, dim_type: DimensionType | None) -> str:
+    """Cast a unit string to its NGFF-compliant equivalent.
+
+    Note: This function does NOT infer dim_type. Inference should be done
+    by infer_dim_type_from_unit before calling this function.
+
+    Parameters
+    ----------
+    unit : str
+        The unit string to validate and cast.
+    dim_type : DimensionType | None
+        The dimension type. If "space" or "time", validates that unit is appropriate.
+
+    Returns
+    -------
+    str
+        The NGFF-compliant unit string.
+    """
     # all versions of units longer than 2 characters should be lowercased for matching
     unit_lower = str(unit).lower() if len(unit) > 2 else unit
 
     if dim_type == "space":
         try:
-            return ANY_LENGTH_TO_NGFF[unit_lower], dim_type
+            return ANY_LENGTH_TO_NGFF[unit_lower]
         except KeyError as e:
             raise ValueError(
                 f"Unrecognized unit of length: {unit!r}.\n  "
@@ -133,23 +159,15 @@ def cast_unit_to_ngff(
             ) from e
     elif dim_type == "time":
         try:
-            return ANY_TIME_TO_NGFF[unit_lower], dim_type
+            return ANY_TIME_TO_NGFF[unit_lower]
         except KeyError as e:
             raise ValueError(
                 f"Unrecognized unit of time: {unit!r}.\n  "
                 f"Recognized units of time include: {list(ANY_TIME_TO_NGFF.keys())}"
             ) from e
 
-    # if the user only provided unit, but not dim_type, try to infer dim_type from unit
-    elif dim_type is None:
-        if unit_lower in ANY_LENGTH_TO_NGFF:
-            return ANY_LENGTH_TO_NGFF[unit_lower], "space"
-        elif unit_lower in ANY_TIME_TO_NGFF:
-            return ANY_TIME_TO_NGFF[unit_lower], "time"
-
-    # at this point, dim_type is either "channel", "other", or still None, but with
-    # an unrecognized unit
-    return unit, dim_type
+    # For other dimension types (channel, position, other, None), return unit as-is
+    return unit
 
 
 NGFF_TO_OME_UNITS = {**NGFF_TO_OME_UNITS_LENGTH, **NGFF_TO_OME_UNITS_TIME}

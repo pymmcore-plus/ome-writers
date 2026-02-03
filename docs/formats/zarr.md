@@ -87,10 +87,10 @@ multiple arrays, each stored in a separate group within the root OME-Zarr group.
 
 === "Multi-well Plates (HCS)"
 
-    If you declare `AcquisitionSettings.plate` along with a `PositionDimension`
-    containing [`Position`s][ome_writers.Position] that define `plate_well`/`plate_column`
-    information, the output structure will follow the [OME-Zarr HCS
-    specification](https://ngff.openmicroscopy.org/0.5/index.html#plate-md):
+    If you declare `AcquisitionSettings.plate` along with a position dimension
+    (type='position') containing [`Position`s][ome_writers.Position] that define
+    `plate_well`/`plate_column` information, the output structure will follow the
+    [OME-Zarr HCS specification](https://ngff.openmicroscopy.org/0.5/index.html#plate-md):
 
     ```
     output_path.ome.zarr/

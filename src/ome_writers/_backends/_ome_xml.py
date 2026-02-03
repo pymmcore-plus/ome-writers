@@ -12,11 +12,10 @@ import ome_types
 import ome_types.model as ome
 import tifffile
 
-from ome_writers._schema import Channel, Dimension, Position, PositionDimension
 from ome_writers._units import ngff_to_ome_unit
 
 if TYPE_CHECKING:
-    from ome_writers._schema import AcquisitionSettings
+    from ome_writers._schema import AcquisitionSettings, Channel, Dimension, Position
 
 BinaryOnly = ome.OME.BinaryOnly
 COMPANION_IDX = -1  # special index for .companion.ome files
@@ -107,7 +106,7 @@ def prepare_metadata(
     if any(
         dim.name.lower() not in "tczyx"
         for dim in settings.dimensions
-        if not isinstance(dim, PositionDimension)
+        if dim.type != "position"
     ):  # pragma: no cover
         raise ValueError("Dimension names must be one of 't', 'c', 'z', 'y', 'x'")
 
@@ -256,7 +255,7 @@ def _build_full_model(
     settings: AcquisitionSettings, file_infos: list[FileInfo], mode: MetadataMode
 ) -> ome_types.OME:
     """Build complete OME model with all series/images."""
-    dims = [d for d in settings.dimensions if not isinstance(d, PositionDimension)]
+    dims = [d for d in settings.dimensions if d.type != "position"]
     dimension_order = _get_dimension_order(dims)
     channel_dim = next(
         (d for d in dims if d.type == "channel" or d.name.lower() == "c"), None
