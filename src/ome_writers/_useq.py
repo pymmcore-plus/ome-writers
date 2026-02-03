@@ -414,7 +414,7 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
                 # if this line ever raises an exception,
                 # break it into two parts:
                 # 1. create position, 2. try to add coords, suppressing errors.
-                pos_sum = pos + gp
+                pos_sum = pos + gp  # type: ignore
                 positions.append(
                     Position(
                         name=name,

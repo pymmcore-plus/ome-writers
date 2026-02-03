@@ -527,7 +527,7 @@ def test_useq_plans_combination(
     assert settings.num_frames == len(list(seq))
 
 
-def test_well_plate_fov_folder_names(tmp_path: Path) -> None:
+def test_well_plate_fov_folder_names(tmp_path: Path, zarr_backend: str) -> None:
     """Test that WellPlatePlan with multi-FOV creates correct zarr folder structure."""
     import numpy as np
 
@@ -549,7 +549,7 @@ def test_well_plate_fov_folder_names(tmp_path: Path) -> None:
         root_path=str(tmp_path / "test_fov_names.ome.zarr"),
         **useq_to_acquisition_settings(seq, image_width=64, image_height=64),
         dtype="uint16",
-        format="ome-zarr",
+        format=zarr_backend,
     )
 
     # Create stream and write some frames
