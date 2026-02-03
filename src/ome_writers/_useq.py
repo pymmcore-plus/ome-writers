@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
+import useq
+
 from ome_writers._schema import (
     Dimension,
     Plate,
@@ -14,8 +16,6 @@ from ome_writers._schema import (
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from typing import TypeAlias
-
-    import useq
 
 
 # UnitTuple is a tuple of (scale, unit); e.g. (1, "s")
@@ -31,8 +31,48 @@ def dims_from_useq(
     pixel_size_um: float | None = None,
     chunk_shapes: Mapping[str, int] | None = None,
     shard_shapes: Mapping[str, int] | None = None,
-) -> list[Dimension | PositionDimension]:
-    """Convert a [`useq.MDASequence`][] to a list of [`Dimension`][ome_writers.Dimension] `|` [`PositionDimension`][ome_writers.PositionDimension] for ome-writers.
+) -> dict[str, list[Dimension | PositionDimension] | Plate | None]:
+    """Convert a [`useq.MDASequence`][] to settings for [`AcquisitionSettings`][ome_writers.AcquisitionSettings].
+
+    !!! warning "Deprecated"
+        This function is deprecated and will be removed in a future version.
+        Use [`useq_to_acquisition_settings`][ome_writers.useq_to_acquisition_settings]
+        instead.
+
+    See [`useq_to_acquisition_settings`][ome_writers.useq_to_acquisition_settings]
+    for full documentation.
+    """  # noqa: E501
+    import warnings
+
+    warnings.warn(
+        "`dims_from_useq`` is deprecated and will be removed in a future version. "
+        "Use useq_to_acquisition_settings instead whuch returns a dict with both "
+        "`dimensions` and `plate` keys.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return useq_to_acquisition_settings(
+        seq=seq,
+        image_width=image_width,
+        image_height=image_height,
+        units=units,
+        pixel_size_um=pixel_size_um,
+        chunk_shapes=chunk_shapes,
+        shard_shapes=shard_shapes,
+    )
+
+
+def useq_to_acquisition_settings(
+    seq: useq.MDASequence,
+    image_width: int,
+    image_height: int,
+    *,
+    units: Mapping[str, UnitTuple | None] | None = None,
+    pixel_size_um: float | None = None,
+    chunk_shapes: Mapping[str, int] | None = None,
+    shard_shapes: Mapping[str, int] | None = None,
+) -> dict[str, list[Dimension | PositionDimension] | Plate | None]:
+    """Convert a [`useq.MDASequence`][] to settings for [`AcquisitionSettings`][ome_writers.AcquisitionSettings].
 
     !!! tip "Important"
         `useq-schema` has a very expressive API that can generate complex,
@@ -169,45 +209,7 @@ def dims_from_useq(
         ]
     )
 
-    return dims
-
-
-def plate_from_useq(useq_plate: useq.WellPlatePlan) -> Plate:
-    """Convert a useq WellPlatePlan to an ome-writers Plate.
-
-    Parameters
-    ----------
-    omew_module : module
-        The ome_writers module.
-    useq_plate : useq.WellPlatePlan
-        The useq WellPlatePlan to convert.
-
-    Returns
-    -------
-    omew_module.Plate
-        The converted ome-writers Plate.
-    """
-
-    plate = useq_plate.plate
-    well_names = plate.all_well_names
-
-    # Extract row names from first column (e.g., A1, B1, C1... -> A, B, C...)
-    row_names = []
-    for name in well_names[:, 0]:
-        match = re.match(r"^([A-Za-z]+)", str(name))
-        if match:
-            row_names.append(match.group(1))
-
-    # Extract column names from first row (e.g., A1, A2, A3... -> 1, 2, 3...)
-    column_names = []
-    for name in well_names[0, :]:
-        match = re.search(r"(\d+)$", str(name))
-        if match:
-            column_names.append(match.group(1))
-
-    return Plate(
-        row_names=row_names, column_names=column_names, name=plate.name or None
-    )
+    return {"dimensions": dims, "plate": _plate_from_useq(seq)}
 
 
 def _validate_sequence(seq: useq.MDASequence) -> None:
@@ -355,10 +357,12 @@ def _build_well_plate_positions(plate_plan: useq.WellPlatePlan) -> list[Position
         plate_column = str(col_idx + 1)
         for fov_idx, well_pos in enumerate(well_positions):
             pos = next(plate_iter)  # grab the next AbsolutePosition in the outer loop
-            pos_name = _create_position_name(plate_row, plate_column, fov_idx, pos)
+            # NOTE: the pos.name is a useq's auto-generated name, either WellName_fovN
+            # for multi-fovs (e.g. A1_0000, etc) or just WellName for single fov
+            # (e.g. A1, B3, etc). We replace it with `fov{fov_idx}.
             positions.append(
                 Position(
-                    name=pos_name,
+                    name=f"fov{fov_idx}",
                     plate_row=plate_row,
                     plate_column=plate_column,
                     grid_row=getattr(well_pos, "row", None),
@@ -369,24 +373,6 @@ def _build_well_plate_positions(plate_plan: useq.WellPlatePlan) -> list[Position
             )
 
     return positions
-
-
-def _create_position_name(
-    plate_row: str,
-    plate_column: str,
-    fov_idx: int,
-    pos: useq.Position,
-) -> str:
-    # When well_points_plan creates multiple FOVs, useq names positions like "A1_0000"
-    # For OME-Zarr (and yaozarrs) compliance (field names must match ^[A-Za-z0-9]+$),
-    # sanitize names with non-alphanumeric characters
-    if pos.name and not re.match(r"^[A-Za-z0-9]+$", pos.name):
-        # Name contains non-alphanumeric chars - use well-relative index
-        pos_name = f"fov{fov_idx}"
-    else:
-        # Name is already alphanumeric-compliant or None
-        pos_name = pos.name or f"{plate_row}{plate_column}"
-    return pos_name
 
 
 def _row_idx_to_letter(index: int) -> str:
@@ -428,7 +414,7 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
                 # if this line ever raises an exception,
                 # break it into two parts:
                 # 1. create position, 2. try to add coords, suppressing errors.
-                pos_sum = pos + gp  # type: ignore [operator]
+                pos_sum = pos + gp
                 positions.append(
                     Position(
                         name=name,
@@ -452,3 +438,42 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
             )
 
     return positions
+
+
+def _plate_from_useq(seq: useq.MDASequence) -> Plate | None:
+    """Convert a useq WellPlatePlan to an ome-writers Plate.
+
+    Parameters
+    ----------
+    seq : useq.MDASequence
+        The useq MDASequence containing the stage_positions.
+
+    Returns
+    -------
+    omew_module.Plate
+        The converted ome-writers Plate.
+    """
+    useq_plate = seq.stage_positions
+    if not isinstance(useq_plate, useq.WellPlatePlan):
+        return None
+
+    plate = useq_plate.plate
+    well_names = plate.all_well_names
+
+    # Extract row names from first column (e.g., A1, B1, C1... -> A, B, C...)
+    row_names = []
+    for name in well_names[:, 0]:
+        match = re.match(r"^([A-Za-z]+)", str(name))
+        if match:
+            row_names.append(match.group(1))
+
+    # Extract column names from first row (e.g., A1, A2, A3... -> 1, 2, 3...)
+    column_names = []
+    for name in well_names[0, :]:
+        match = re.search(r"(\d+)$", str(name))
+        if match:
+            column_names.append(match.group(1))
+
+    return Plate(
+        row_names=row_names, column_names=column_names, name=plate.name or None
+    )

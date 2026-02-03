@@ -16,7 +16,7 @@ import numpy as np
 import useq
 from pymmcore_plus import CMMCorePlus
 
-from ome_writers import AcquisitionSettings, create_stream, dims_from_useq
+from ome_writers import AcquisitionSettings, create_stream, useq_to_acquisition_settings
 
 # Initialize pymmcore-plus core and load system configuration (null = demo config)
 core = CMMCorePlus()
@@ -48,8 +48,9 @@ pixel_size_um = core.getPixelSizeUm()
 
 settings = AcquisitionSettings(
     root_path="example_pymmcore_plus",
-    # use dims_from_useq to convert MDASequence to ome_writers.Dimensions
-    dimensions=dims_from_useq(
+    # use useq_to_acquisition_settings to convert MDASequence to ome_writers
+    # AcquisitionSettings `dimensions` and `plate` fields
+    **useq_to_acquisition_settings(
         seq,
         image_width=image_width,
         image_height=image_height,
