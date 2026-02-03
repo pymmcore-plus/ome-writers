@@ -32,7 +32,29 @@ jobs:
       - run: uv run prek --all-files
       - run: uv run pyright
 
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      bench: ${{ steps.filter.outputs.bench }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            bench:
+              - 'src/ome_writers/_stream.py'
+              - 'src/ome_writers/_schema.py'
+              - 'src/ome_writers/_router.py'
+              - 'src/ome_writers/_backends/**'
+              - 'tests/test_bench.py'
+              - 'pyproject.toml'
+
   benchmarks:
+    needs: changes
+    # skip on PRs that don't touch relevant files (CodSpeed partial runs
+    # will fill in historical data for the missing benchmarks)
+    if: needs.changes.outputs.bench == 'true' || github.event_name != 'pull_request'
     # using bare-metal runner for more consistent benchmark results
     # this has time limit
     runs-on: codspeed-macro
