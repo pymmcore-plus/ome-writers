@@ -1,6 +1,7 @@
 """Benchmarks for ome-writers write performance.
 
 To run this file, explicitly run:
+
 pytest tests/test_bench.py
 
 or use `pytest --benchmark-only` or `--codspeed` with pytest-codspeed.
