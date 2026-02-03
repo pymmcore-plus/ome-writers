@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, cast
 import numpy as np
 import pytest
 
-from ome_writers import AcquisitionSettings, Dimension, _stream, create_stream
+from ome_writers import AcquisitionSettings, Dimension, create_stream
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -29,14 +29,13 @@ if all(
     pytest.skip("use --benchmark to run benchmark", allow_module_level=True)
 
 
+from tests import conftest
+
 pytestmark = pytest.mark.benchmark
 np.random.seed(0)  # For reproducible benchmarks
 
 D = Dimension
 
-ZARR_BACKENDS = [
-    b.name for b in _stream.BACKENDS if b.is_available() and b.format == "zarr"
-]
 
 # Benchmark cases: subset of integration test cases focused on common patterns
 # Optimized for CI speed while preserving chunk crossing and async queue behaviors
@@ -113,12 +112,14 @@ def _make_frames(settings: AcquisitionSettings) -> list[np.ndarray]:
     frame_shape = cast("tuple[int, ...]", tuple(d.count for d in dims[-2:]))
     iinfo = np.iinfo(settings.dtype)
     return [
-        np.random.randint(iinfo.min, iinfo.max, frame_shape, dtype=settings.dtype)  # ty: ignore
+        np.random.randint(
+            iinfo.min, iinfo.max, frame_shape, dtype=np.dtype(settings.dtype)
+        )
         for _ in range(num_frames)
     ]
 
 
-@pytest.mark.parametrize("backend", ZARR_BACKENDS)
+@pytest.mark.parametrize("backend", conftest.AVAILABLE_BACKENDS)
 @pytest.mark.parametrize("case", BENCHMARK_CASES)
 def test_bench_append(
     backend: str,
