@@ -44,8 +44,8 @@ files in the output directory**
     images, angles on a light-sheet microscope, etc.) or that exceed 5
     dimensions in any way other will be structured as multiple OME-TIFF files, one per
     position/series.  For example, if `AcquisitionSettings.root_path` is
-    "dest/my_file.ome.tiff" and there are 4 positions in the
-    [`PositionDimension`][ome_writers.PositionDimension], the output will be:
+    "dest/my_file.ome.tiff" and there are 4 positions in a
+    position dimension (type='position'), the output will be:
 
     ```
     dest/my_file_position_p000.ome.tiff
@@ -59,11 +59,11 @@ files in the output directory**
 
 === "Multi-well Plates (HCS)"
 
-    If you declare `AcquisitionSettings.plate` along with a `PositionDimension`
-    containing [`Position`s][ome_writers.Position] that define `plate_well`/`plate_column`
-    information, the output follows the same pattern as above, but HCS metadata is included
-    in the OME-XML.  **Work in progress:** full support for HCS metadata in OME-TIFF is
-    still being developed.
+    If you declare `AcquisitionSettings.plate` along with a position dimension
+    (type='position') containing [`Position`s][ome_writers.Position] that define
+    `plate_well`/`plate_column` information, the output follows the same pattern as above,
+    but HCS metadata is included in the OME-XML.  **Work in progress:** full support for
+    HCS metadata in OME-TIFF is still being developed.
 
     !!! example "Example Code"
         [Writing plates](../examples/plate.md)

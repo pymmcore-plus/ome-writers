@@ -210,12 +210,14 @@ class AcquireZarrBackend(YaozarrsBackend):
                 "Standalone 'zstd' compression (without blosc) is not supported by "
                 "acquire-zarr. Use 'blosc-zstd' instead."
             )
-        if compression == "lzw":
+        if compression == "lzw":  # pragma: no cover
             raise ValueError(
                 "LZW compression is not supported for Zarr format. "
                 "Use 'blosc-zstd' or 'blosc-lz4' instead."
             )
-        raise ValueError(f"Unsupported compression for acquire-zarr: {compression}")
+        raise ValueError(  # pragma: no cover
+            f"Unsupported compression for acquire-zarr: {compression}"
+        )
 
 
 # -----------------------------------------------------------------------------

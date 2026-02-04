@@ -3,18 +3,13 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-import useq
-
-from ome_writers._schema import (
-    Dimension,
-    Plate,
-    Position,
-    StandardAxis,
-)
+from ome_writers._schema import Dimension, Plate, Position, StandardAxis
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from typing import TypeAlias, TypedDict
+
+    import useq
 
     class AcquisitionSettingsDict(TypedDict):
         """Return type for useq_to_acquisition_settings."""
@@ -37,17 +32,17 @@ def dims_from_useq(
     chunk_shapes: Mapping[str, int] | None = None,
     shard_shapes: Mapping[str, int] | None = None,
 ) -> list[Dimension]:
-    """Convert a `useq.MDASequence` to a list of [`Dimension`][ome_writers.Dimension] for ome-writers.
+    """Convert a `useq.MDASequence` to a list of [`Dimension`][ome_writers.Dimension].
 
     !!! warning "Deprecated"
         This function is deprecated and will be removed in a future version.
         Use [`useq_to_acquisition_settings`][ome_writers.useq_to_acquisition_settings]
         instead to convert MDASequence to ome_writers AcquisitionSettings `dimensions`
-        and `plate` fields."
+        and `plate` fields.
 
     See [`useq_to_acquisition_settings`][ome_writers.useq_to_acquisition_settings]
     for full documentation.
-    """  # noqa: E501
+    """
     import warnings
 
     warnings.warn(
@@ -156,7 +151,7 @@ def _dims_from_useq(
     chunk_shapes: Mapping[str, int] | None = None,
     shard_shapes: Mapping[str, int] | None = None,
 ) -> list[Dimension]:
-    """Convert a [`useq.MDASequence`][] to a list of [`Dimension`][ome_writers.Dimension] for ome-writers."""  # noqa: E501
+    """Build dimension list from a useq.MDASequence."""
     try:
         from useq import Axis, MDASequence
     except ImportError:
@@ -192,7 +187,7 @@ def _dims_from_useq(
         if ax_name in (Axis.POSITION, Axis.GRID):
             if not position_dim_added and has_positions:
                 if positions := _build_positions(seq):
-                    dims.append(StandardAxis.POSITION.to_dimension(positions=positions))
+                    dims.append(StandardAxis.POSITION.to_dimension(coords=positions))
                     position_dim_added = True
             continue
 
@@ -204,7 +199,6 @@ def _dims_from_useq(
             chunk_size=chunk_shapes.get(ax_name),
             shard_size_chunks=shard_shapes.get(ax_name),
         )
-        assert isinstance(dim, Dimension)
         if unit := units.get(str(ax_name)):
             dim.scale, dim.unit = unit
         else:
@@ -470,20 +464,11 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
 
 
 def _plate_from_useq(seq: useq.MDASequence) -> Plate | None:
-    """Convert a useq WellPlatePlan to an ome-writers Plate.
+    """Convert a useq WellPlatePlan to an ome-writers Plate."""
+    import useq as _useq
 
-    Parameters
-    ----------
-    seq : useq.MDASequence
-        The useq MDASequence containing the stage_positions.
-
-    Returns
-    -------
-    omew_module.Plate
-        The converted ome-writers Plate.
-    """
     useq_plate = seq.stage_positions
-    if not isinstance(useq_plate, useq.WellPlatePlan):
+    if not isinstance(useq_plate, _useq.WellPlatePlan):
         return None
 
     plate = useq_plate.plate

@@ -11,12 +11,11 @@ from typing import (
     Any,
     Literal,
     TypeAlias,
-    cast,
     get_args,
 )
 
 import numpy as np
-from annotated_types import MinLen
+from annotated_types import Len, MinLen
 from pydantic import (
     AfterValidator,
     BaseModel,
@@ -24,25 +23,24 @@ from pydantic import (
     ConfigDict,
     Field,
     PositiveInt,
+    TypeAdapter,
     model_validator,
 )
-from pydantic_extra_types.color import Color  # noqa: TC002  (used by pydantic)
+from pydantic_extra_types.color import Color  # noqa TC002
 
 from ome_writers._memory import warn_if_high_memory_usage
 from ome_writers._stream import AVAILABLE_BACKENDS
-from ome_writers._units import cast_unit_to_ngff
+from ome_writers._units import cast_unit_to_ngff, infer_dim_type_from_unit
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-FileFormat: TypeAlias = Literal["ome-tiff", "ome-zarr"]
-TiffBackendName: TypeAlias = Literal["tifffile"]
-ZarrBackendName: TypeAlias = Literal[
-    "acquire-zarr", "tensorstore", "zarrs-python", "zarr-python"
-]
-BackendName: TypeAlias = TiffBackendName | ZarrBackendName
-DimensionType: TypeAlias = Literal["space", "time", "channel", "other"]
-StandardAxisKey: TypeAlias = Literal["x", "y", "z", "c", "t", "p"]
+    from typing_extensions import Self, TypeIs
+
+
+# ======================================
+# common base model with config
+# =======================================
 
 
 class _BaseModel(BaseModel):
@@ -55,12 +53,22 @@ class _BaseModel(BaseModel):
     )
 
 
-def _validate_dtype(dtype: Any) -> str:
-    """Validate dtype is a valid string."""
-    try:
-        return np.dtype(dtype).name
-    except Exception as e:
-        raise ValueError(f"Invalid dtype: {dtype!r}: {e}") from e
+# =======================================
+# Type Aliases and Enums
+# =======================================
+
+FileFormat: TypeAlias = Literal["ome-tiff", "ome-zarr"]
+TiffBackendName: TypeAlias = Literal["tifffile"]
+ZarrBackendName: TypeAlias = Literal[
+    "acquire-zarr", "tensorstore", "zarrs-python", "zarr-python"
+]
+BackendName: TypeAlias = TiffBackendName | ZarrBackendName
+DimensionType: TypeAlias = Literal["space", "time", "channel", "position", "other"]
+StandardAxisKey: TypeAlias = Literal["x", "y", "z", "c", "t", "p"]
+
+TiffCompression: TypeAlias = Literal["lzw", "none"]
+ZarrCompression: TypeAlias = Literal["blosc-zstd", "blosc-lz4", "zstd", "none"]
+Compression: TypeAlias = Literal["blosc-zstd", "blosc-lz4", "zstd", "lzw", "none"]
 
 
 class StandardAxis(str, Enum):
@@ -86,7 +94,9 @@ class StandardAxis(str, Enum):
             return "time"
         if self == StandardAxis.CHANNEL:
             return "channel"
-        return "other"  # pragma: no cover
+        if self == StandardAxis.POSITION:
+            return "position"
+        return "other"  # pragma: no cover (not reachable)
 
     def unit(self) -> str | None:
         """Return unit for this standard axis, or None if unknown."""
@@ -100,34 +110,44 @@ class StandardAxis(str, Enum):
         self,
         *,
         count: int | None = None,
-        positions: list[str | Position] | None = None,
+        coords: list[str | Position] | None = None,
         chunk_size: int | None = None,
         shard_size_chunks: int | None = None,
         scale: float | None = None,
-    ) -> Dimension | PositionDimension:
-        """Convert to Dimension or PositionDimension with given count."""
-        if self == StandardAxis.POSITION:
-            if positions:
-                positions = [Position.model_validate(n) for n in positions]
-            elif count:
-                if not isinstance(count, int):
-                    raise ValueError(f"Invalid position value: {count}.")
-                positions = [Position(name=str(i)) for i in range(count)]
-            else:  # pragma: no cover
-                raise ValueError(
-                    "Either count or positions must be provided for PositionDimension."
-                )
-            return PositionDimension(positions=positions)
-
+    ) -> Dimension:
+        """Convert to Dimension with given count."""
         return Dimension(
             name=self.value,
             count=count,
+            coords=coords,
             type=self.dimension_type(),
             unit=self.unit(),
             chunk_size=chunk_size,
             shard_size_chunks=shard_size_chunks,
             scale=scale,
         )
+
+
+# =======================================
+# Types with Validators
+
+NonNullStr: TypeAlias = Annotated[str, MinLen(1)]
+
+
+def _validate_dtype(dtype: Any) -> str:
+    """Validate dtype is a valid string."""
+    try:
+        return np.dtype(dtype).name
+    except Exception as e:
+        raise ValueError(f"Invalid dtype: {dtype!r}: {e}") from e
+
+
+DTypeStr: TypeAlias = Annotated[str, BeforeValidator(_validate_dtype)]
+
+
+# =======================================
+# Dimensions and Related Coordinate Types
+# =======================================
 
 
 class Channel(_BaseModel):
@@ -142,7 +162,7 @@ class Channel(_BaseModel):
     to `omero.channels` for OME-Zarr.
     """
 
-    name: Annotated[str, MinLen(1)] = Field(
+    name: NonNullStr = Field(
         description="A name for the channel, suitable for presentation to the user.",
     )
 
@@ -184,116 +204,26 @@ class Channel(_BaseModel):
     # (one can always use `stream.get/update_metadata()` to manually update metadata)
 
 
-class Dimension(_BaseModel):
-    """A single array dimension."""
+def _validate_channel_list(channels: list[Channel]) -> list[Channel]:
+    """Validate channel names are unique."""
+    names = [ch.name for ch in channels]
+    if len(names) != len(set(names)):
+        raise ValueError("Channel names must be unique.")
+    return channels
 
-    name: Annotated[str, MinLen(1)] = Field(
-        description="User-defined name. Can be anything, but prefer using standard "
-        "names like 'x', 'y', 'z', 'c', 't' where possible. Must be unique across all "
-        "dimensions in an acquisition.",
-    )
-    count: PositiveInt | None = Field(
-        default=None,
-        description="Size of this dimension (in number of elements/pixels)."
-        "None indicates an unbounded (unlimited) 'append' dimension. "
-        "Only the first dimension in may be unbounded.",
-    )
-    chunk_size: PositiveInt | None = Field(
-        default=None,
-        description="Number of elements in a chunk for this dimension, for storage "
-        "backends that support chunking (e.g. Zarr). If None, defaults to full size "
-        "(i.e. `count`) for the last two 'frame' dimensions, and 1 for others.",
-    )
-    shard_size_chunks: PositiveInt | None = Field(
-        default=None,
-        description="Number of chunks per shard (*NOT* number of pixels per shard), "
-        "for storage backends that support sharding (e.g. Zarr v3). If not specified, "
-        "no sharding is used (i.e. chunks are the unit of storage).",
-    )
-    type: DimensionType | None = Field(
-        default=None,
-        description="Type of this dimension. Must be one of `'space'`, `'time'`, "
-        "`'channel'` or `'other'`. If `None`, type _may_ be inferred from the provided "
-        "`unit`, or from standard dimension `names` like `'x'`, `'y'`, `'z'`, `'c'`, "
-        "`'t'`.",
-    )
-    unit: str | None = Field(
-        default=None,
-        description="Physical unit for this dimension. "
-        "If `type` is `'space'` or `'time'`, this MUST be a valid unit of length or "
-        "time. Both [OME-NGFF unit "
-        "names](https://ngff.openmicroscopy.org/latest/index.html#axes-md) (_e.g._, "
-        "`'micrometer'`, `'millisecond'`), and [OME-XML "
-        "abbreviations](https://www.openmicroscopy.org/Schemas/Documentation/Generated/OME-2016-06/ome_xsd.html#UnitsLength)"
-        " (_e.g._, `'um'`, `'ms'`) are accepted. "
-        "If `type` is `None`, then it will be inferred from the unit if a recognized "
-        "unit is provided.",
-    )
-    scale: float | None = Field(
-        default=None,
-        description="Physical size of a single element along this dimension, "
-        "in the specified `unit`. For spatial dimensions, this is often referred to "
-        "as 'pixel size'.  For time dimensions, this would be the time interval.",
-    )
-    translation: float | None = Field(
-        default=None,
-        description="Physical offset of the first element along this dimension, "
-        "in the specified `unit`. (e.g. the physical coordinate of the first pixel "
-        "or timepoint, in some XYZ stage or other coordinate system).",
-    )
-    coords: list[str | float | Channel] | None = Field(
-        default=None,
-        description="Explicit coordinate values for each element along this dimension."
-        "This is primarily a convenience for specifying categorical coordinates, such "
-        "as channel names, and may also be used to explicitly list non-uniform spatial "
-        "or temporal coordinates. If provided, the length of this list must match "
-        "the `count` of this dimension. If `count` is `None`, the length of this list "
-        "will be used as the count. Item types may additionally be validated based on "
-        "the dimension `type` (e.g. coords may be a list of `Channel` objects, but "
-        "only if the dimension type is 'channel').",
-    )
 
-    @model_validator(mode="before")
-    @classmethod
-    def _validate_model(cls, data: Any) -> Any:
-        """Validate that unit is NGFF-compliant if specified.
-
-        Ensure that unit matches dim type, and infer dim type from unit if missing.
-
-        After validation, Dimensions with type "space" or "time" are guaranteed to
-        to have valid NGFF units.  Those with type "channel", "other", or None may
-        still have arbitrary units.
-        """
-        if isinstance(data, dict):
-            if (unit := data.get("unit")) is not None:
-                cast_unit, dim_type = cast_unit_to_ngff(unit, data.get("type"))
-                data["unit"] = cast_unit
-                data["type"] = dim_type
-
-            if (coords := data.get("coords")) is not None:
-                count = data.get("count")
-                try:
-                    coords = list(coords)
-                except TypeError:
-                    raise ValueError("`coords` must be an iterable type.") from None
-                if count is None:
-                    data["count"] = len(coords)
-                elif len(coords) != count:
-                    raise ValueError(
-                        f"Length of coords ({len(coords)}) does not match count "
-                        f"({count})."
-                    )
-
-                # validate item type by dimension type
-                dim_type = data.get("type")
-                if dim_type == "channel":
-                    data["coords"] = [Channel.model_validate(c) for c in coords]
-
-        return data
+ChannelList: TypeAlias = Annotated[
+    list[Channel], AfterValidator(_validate_channel_list)
+]
 
 
 class Position(_BaseModel):
     """A single acquisition position.
+
+    This object may be used (instead of a plain string) in the
+    [`Dimension.coords`][ome_writers.Dimension] list
+    for dimensions of `type='position'` when you want to specify more than just position
+    name.
 
     This represents a physical position in space associated with a single camera frame
     or field of view.  Optional fields such as `grid/plate_row/column` indicate that the
@@ -302,7 +232,7 @@ class Position(_BaseModel):
     should match those used in the spatial Dimensions of the acquisition.
     """
 
-    name: Annotated[str, MinLen(1)] = Field(
+    name: NonNullStr = Field(
         description="Unique name for this position. Within a list of positions, "
         "names must be unique within each `(plate_row, plate_column)` or "
         "`(grid_row, grid_column)` pair.",
@@ -344,8 +274,21 @@ class Position(_BaseModel):
             return {"name": value}
         return value
 
+    @model_validator(mode="after")
+    def _validate_coordinate_pairs(self) -> Self:
+        if (self.plate_row is None) != (self.plate_column is None):
+            raise ValueError(
+                "plate_row and plate_column must both be set or both be None"
+            )
+        if (self.grid_row is None) != (self.grid_column is None):
+            raise ValueError(
+                "grid_row and grid_column must both be set or both be None"
+            )
 
-def _validate_unique_names_per_group(positions: list[Position]) -> list[Position]:
+        return self
+
+
+def _validate_position_list(positions: list[Position]) -> list[Position]:
     """Validate position names are unique within each hierarchical group.
 
     For positions with plate coordinates or grid coordinates, names must be unique
@@ -389,79 +332,237 @@ def _validate_unique_names_per_group(positions: list[Position]) -> list[Position
 
 
 PositionList: TypeAlias = Annotated[
-    list[Position], AfterValidator(_validate_unique_names_per_group)
+    list[Position], AfterValidator(_validate_position_list)
 ]
 
 
-class PositionDimension(_BaseModel):
-    """Positions (meta-dimension) in acquisition order.
+class Dimension(_BaseModel):
+    """A single dimension in the acquisition.
 
-    Unlike Dimension, positions don't become an array axis—they become
-    separate arrays/files (this is currently true for both OME-Zarr and OME-TIFF).
-    The position of PositionDimension in the dimensions list determines when
-    positions are visited during acquisition.
+    Dimensions define the shape and order of axis iteration during the acquisition.
     """
 
-    positions: PositionList = Field(
-        description="List of positions in acquisition order.  String literals "
-        "are also accepted and will be converted to Position objects with the "
-        "given name.",
+    name: NonNullStr = Field(
+        description="User-defined name. Can be anything, but prefer using standard "
+        "names like 'x', 'y', 'z', 'c', 't' where possible. Must be unique across all "
+        "dimensions in an acquisition.",
     )
-    name: Annotated[str, MinLen(1)] = Field(
-        default="p",
-        description="Name of this position dimension. Default is 'p'.",
+    count: PositiveInt | None = Field(
+        default=None,
+        description="Size of this dimension (in number of elements/pixels)."
+        "None indicates an unbounded (unlimited) 'append' dimension. "
+        "Only the first dimension in may be unbounded.",
+    )
+    type: DimensionType | None = Field(
+        default=None,
+        description="Type of this dimension. Must be one of `'space'`, `'time'`, "
+        "`'channel'`, `'position'`, or `'other'`. If not provided, type will be "
+        "inferred from:\n\n1. `coords` if it contains `Channel` or `Position` objects\n"
+        "2. `unit` if it's a recognized spatial or temporal unit\n"
+        "3. standard dimension `name` like `'x'`, `'y'`, `'z'`, `'c'`, `'t'`, `'p'`. "
+        "Note: If both `coords` and `unit` would infer conflicting types, an error "
+        "is raised.",
+    )
+    # see is_channel_dim, is_position_dim helpers below for TypeIs casting
+    coords: list[str | float | Channel | Position] | None = Field(
+        default=None,
+        description="Explicit coordinate values for each element along this dimension. "
+        "This is primarily a convenience for specifying categorical coordinates, such "
+        "as channels or positions, and may also be used to explicitly list "
+        "non-uniform spatial or temporal coordinates. If provided, the length of this "
+        "list must match the `count` of this dimension. If `count` is missing, the "
+        "length of this list will be used as the count. "
+        "If coords contains `Channel` objects, `type` will be inferred as `'channel'` "
+        "(if not already set). If coords contains `Position` objects, `type` will be "
+        "inferred as `'position'`. Mixing `Channel`/`Position` objects with "
+        "incompatible types (including each other) raises an error.",
+    )
+    chunk_size: PositiveInt | None = Field(
+        default=None,
+        description="Number of elements in a chunk for this dimension, for storage "
+        "backends that support chunking (e.g. Zarr). If None, defaults to full size "
+        "(i.e. `count`) for the last two 'frame' dimensions, and 1 for others.",
+    )
+    shard_size_chunks: PositiveInt | None = Field(
+        default=None,
+        description="Number of chunks per shard (*NOT* number of pixels per shard), "
+        "for storage backends that support sharding (e.g. Zarr v3). If not specified, "
+        "no sharding is used (i.e. chunks are the unit of storage).",
+    )
+    unit: str | None = Field(
+        default=None,
+        description="Physical unit for this dimension. "
+        "If `type` is `'space'` or `'time'`, this MUST be a valid unit of length or "
+        "time. Both [OME-NGFF unit "
+        "names](https://ngff.openmicroscopy.org/latest/index.html#axes-md) (_e.g._, "
+        "`'micrometer'`, `'millisecond'`), and [OME-XML "
+        "abbreviations](https://www.openmicroscopy.org/Schemas/Documentation/Generated/OME-2016-06/ome_xsd.html#UnitsLength)"
+        " (_e.g._, `'um'`, `'ms'`) are accepted. "
+        "If `type` is not provided, it will be inferred from `unit` if it's a "
+        "recognized spatial or temporal unit. Note: If `coords` also implies a type "
+        "(via `Channel`/`Position` objects), both must agree or an error is raised.",
+    )
+    scale: float | None = Field(
+        default=None,
+        description="Physical size of a single element along this dimension, "
+        "in the specified `unit`. For spatial dimensions, this is often refers to "
+        "the pixel size.  For time dimensions, this would be the time interval.",
+    )
+    translation: float | None = Field(
+        default=None,
+        description="Physical offset of the first element along this dimension, "
+        "in the specified `unit`. (e.g. the physical coordinate of the first pixel "
+        "or timepoint, in some XYZ stage or other coordinate system).",
     )
 
-    @property
-    def count(self) -> int:
-        """Number of positions in the list."""
-        return len(self.positions)
+    @model_validator(mode="before")
+    @classmethod
+    def _validate_model(cls, data: Any) -> Any:
+        """Validate that unit is NGFF-compliant if specified.
 
-    @property
-    def names(self) -> list[str]:
-        """Position names in acquisition order."""
-        return [p.name for p in self.positions]
+        Ensure that unit matches dim type, and infer dim type from unit if missing.
 
-    @property
-    def unit(self) -> None:
-        """Unit is always None for PositionDimension.
-
-        Provided for symmetry with Dimension.
+        After validation, Dimensions with type "space" or "time" are guaranteed to
+        to have valid NGFF units.  Those with type "channel", "other", or None may
+        still have arbitrary units.
         """
-        return None
+        if isinstance(data, dict):
+            if (coords := data.get("coords")) is not None:
+                try:
+                    coords = list(coords)
+                except TypeError:  # pragma: no cover
+                    raise ValueError("`coords` must be an iterable type.") from None
 
-    @property
-    def scale(self) -> Literal[1]:
-        """Scale is always None for PositionDimension.
+            count = data.get("count")
+            unit = data.get("unit")
+            if (dim_type := data.get("type")) is None:
+                dim_type = _infer_dim_type(coords, unit)
 
-        Provided for symmetry with Dimension.
-        """
-        return 1
+            # Handle position dimension auto-generation and unbounded validation
+            if dim_type == "position":
+                if coords is None:
+                    if count is None:
+                        raise NotImplementedError(
+                            "Unbounded position dimensions (count=None) are not yet "
+                            "implemented. Please provide explicit coords or a finite "
+                            "count."
+                        )
+                    # Auto-generate position coords from count
+                    coords = [Position(name=str(i)) for i in range(count)]
+                    data["coords"] = coords
+                elif len(coords) == 0:
+                    raise NotImplementedError(
+                        "Empty coords for position dimensions are not yet implemented. "
+                        "Please provide explicit position names or use count to "
+                        "auto-generate."
+                    )
+
+            # Now proceed with standard validation
+            if coords is not None:
+                # Ensure count matches coords length, inferring count if needed
+                if count is None:
+                    data["count"] = len(coords)
+                elif len(coords) != count:
+                    raise ValueError(
+                        f"Length of coords ({len(coords)}) does not match count "
+                        f"({count})."
+                    )
+
+                # Validate and cast coords
+                coords = _validate_coords_by_type(coords, dim_type)
+                data["coords"] = coords
+                if dim_type is not None:
+                    data["type"] = dim_type
+
+            # Validate and cast unit
+            if unit is not None:
+                data["unit"] = cast_unit_to_ngff(unit, dim_type)
+                if dim_type is not None:
+                    data["type"] = dim_type
+        return data
 
 
-def _validate_dims_list(
-    dims: tuple[Dimension | PositionDimension, ...],
-) -> tuple[Dimension | PositionDimension, ...]:
+def _infer_dim_type(coords: list[Any] | None, unit: str | None) -> DimensionType | None:
+    # detect potential type inference from coords and unit to catch conflicts early
+
+    from_unit = infer_dim_type_from_unit(unit)
+
+    from_coords: DimensionType | None = None
+    if coords:
+        if any(isinstance(c, Channel) for c in coords):
+            from_coords = "channel"
+        elif any(isinstance(c, Position) for c in coords):
+            from_coords = "position"
+
+    # Check for conflicts between coords and unit inference
+    if from_coords and from_unit and from_coords != from_unit:
+        raise ValueError(
+            f"Conflicting dimension type inference: coords suggests "
+            f"type='{from_coords}' but unit suggests "
+            f"type='{from_unit}'. Please specify an explicit "
+            f"`type` or remove the conflicting field."
+        )
+
+    return from_coords or from_unit or None
+
+
+_cast_channels = TypeAdapter(ChannelList).validate_python
+_cast_positions = TypeAdapter(PositionList).validate_python
+
+
+def _validate_coords_by_type(
+    coords: list[Any], dim_type: DimensionType | None
+) -> list[Any]:
+    """Validate coords are compatible with dim_type and cast if needed.
+
+    Note: This function does NOT infer dim_type. Inference should be done
+    by _infer_dim_type before calling this function.
+    """
+    if any(isinstance(c, Channel) for c in coords):
+        if not all(isinstance(c, (str, Channel)) for c in coords):
+            raise ValueError("May not mix Channel objects with other coord types.")
+        if dim_type and dim_type != "channel":
+            raise ValueError(
+                f"Channel objects in coords require type='channel', "
+                f"got type='{dim_type}'"
+            )
+
+    if any(isinstance(c, Position) for c in coords):
+        if not all(isinstance(c, (str, Position)) for c in coords):
+            raise ValueError("May not mix Position objects with other coord types.")
+        if dim_type and dim_type != "position":
+            raise ValueError(
+                f"Position objects in coords require type='position', "
+                f"got type='{dim_type}'"
+            )
+
+    # Cast coords based on dim_type
+    if dim_type == "channel":
+        return _cast_channels(coords)
+    elif dim_type == "position":
+        return _cast_positions(coords)
+
+    return coords
+
+
+def _validate_dims_list(dims: tuple[Dimension, ...]) -> tuple[Dimension, ...]:
     """Validate dimensions list for AcquisitionSettings."""
-    # ensure at most one PositionDimension and 2-5 non-position dimensions.
-    # ensure unique position names within each well (row/column combination)
+    # ensure at most one position dimension and 2-5 non-position dimensions.
     has_pos = False
     n_dims = 0
     name_counts: dict[str, int] = {}
     for idx, dim in enumerate(dims):
         name_counts.setdefault(dim.name, 0)
         name_counts[dim.name] += 1
-        if isinstance(dim, PositionDimension):
+        if dim.type == "position":
             if has_pos:
-                raise ValueError("Only one PositionDimension is allowed.")
+                raise ValueError("Only one position dimension is allowed.")
             has_pos = True
         else:
             n_dims += 1
-            # only the first dimension can be unbounded
-            if dim.count is None and idx != 0:
-                raise ValueError(
-                    "Only the first dimension may be unbounded (count=None)."
-                )
+        # only the first dimension can be unbounded
+        if dim.count is None and idx != 0:
+            raise ValueError("Only the first dimension may be unbounded (count=None).")
 
     if n_dims < 2:
         raise ValueError(
@@ -479,7 +580,7 @@ def _validate_dims_list(
 
     # ensure at least 2 spatial dimensions at the end
     for dim in dims[-2:]:
-        if not isinstance(dim, Dimension) or dim.type not in {"space", None}:
+        if dim.type not in {"space", None}:
             raise ValueError(
                 "The last two dimensions must be spatial dimensions (type='space')."
             )
@@ -495,39 +596,77 @@ def _validate_dims_list(
     return tuple(dims)
 
 
-DimensionsList: TypeAlias = Annotated[
-    tuple[Dimension | PositionDimension, ...], AfterValidator(_validate_dims_list)
+DimensionList: TypeAlias = Annotated[
+    tuple[Dimension, ...],
+    AfterValidator(_validate_dims_list),
+    # included for the schema, but added *after* the AfterValidator for now...
+    # because I prefer the error message the user receives from from _validate_dims_list
+    Len(min_length=2, max_length=6),
 ]
-"""Assembled list of Dimensions and PositionDimensions."""
+"""Assembled list of Dimensions."""
 
 
-class Plate(_BaseModel):
-    """Plate structure for OME metadata.
-
-    This defines the plate geometry (rows/columns) for metadata generation.
-    Acquisition order is determined by `PositionDimension` in `AcquisitionSettings`,
-    not by this class.
-    """
-
-    row_names: list[str] = Field(
-        description="List of *all* row names in the plate, e.g. "
-        "`['A', 'B', 'C', ...]`. This is used to indicate the full plate structure in "
-        "OME metadata, even if not all wells are acquired.",
-    )
-    column_names: list[str] = Field(
-        description="List of *all* column names in the plate, e.g. "
-        "`['1', '2', '3', ...]`. This is used to indicate the full plate structure in "
-        "OME metadata, even if not all wells are acquired.",
-    )
-    name: str | None = Field(
-        default=None,
-        description="Optional name for the plate.",
-    )
+# --------------------------------------------------------------------
+# "virtual" subclasses
+# with `is_x_dim()` helpers for TypeIs casting for internal use
+# --------------------------------------------------------------------
 
 
-TiffCompression: TypeAlias = Literal["lzw", "none"]
-ZarrCompression: TypeAlias = Literal["blosc-zstd", "blosc-lz4", "zstd", "none"]
-Compression: TypeAlias = Literal["blosc-zstd", "blosc-lz4", "zstd", "lzw", "none"]
+class PositionDimension(Dimension):
+    """Deprecated: use Dimension(type='position', ...) instead."""
+
+    name: str = "p"
+    type: Literal["position"] = "position"  # type: ignore
+    coords: list[Position] | None = None  # type: ignore
+
+    def model_post_init(self, __context: Any) -> None:
+        warnings.warn(
+            "PositionDimension is deprecated. "
+            "Use Dimension(name='p', type='position', coords=[...]) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _convert_positions_to_coords(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "name" not in data:
+                data["name"] = "p"
+            if (positions := data.pop("positions", None)) is not None:
+                data["coords"] = TypeAdapter(PositionList).validate_python(positions)
+        return data
+
+
+if TYPE_CHECKING:
+
+    class ChannelDimension(Dimension):
+        type: Literal["channel"] = "channel"  # type: ignore
+        coords: list[Channel] | None = None  # type: ignore
+
+    class SpatialDimension(Dimension):
+        type: Literal["space"] = "space"  # type: ignore
+        coords: list[float] | None = None  # type: ignore
+
+
+def is_channel_dim(dim: Dimension) -> TypeIs[ChannelDimension]:
+    """Return whether this Dimension is a ChannelDimension."""
+    return dim.type == "channel"
+
+
+def is_position_dim(dim: Dimension) -> TypeIs[PositionDimension]:
+    """Return whether this Dimension is a PositionDimension."""
+    return dim.type == "position"
+
+
+def is_spatial_dim(dim: Dimension) -> TypeIs[SpatialDimension]:
+    """Return whether this Dimension is a SpatialDimension."""
+    return dim.type == "space"
+
+
+# ===============================================================
+# Formats and Backends
+# ===============================================================
 
 
 class OmeTiffFormat(_BaseModel):
@@ -605,6 +744,35 @@ Format: TypeAlias = Annotated[
 ]
 
 
+# ===============================================================
+# Acquisition Settings and Related Types
+# ===============================================================
+
+
+class Plate(_BaseModel):
+    """Plate structure for OME metadata.
+
+    This defines the plate geometry (rows/columns) for metadata generation.
+    Acquisition order is determined by position dimension in `AcquisitionSettings`,
+    not by this class.
+    """
+
+    row_names: list[str] = Field(
+        description="List of *all* row names in the plate, e.g. "
+        "`['A', 'B', 'C', ...]`. This is used to indicate the full plate structure in "
+        "OME metadata, even if not all wells are acquired.",
+    )
+    column_names: list[str] = Field(
+        description="List of *all* column names in the plate, e.g. "
+        "`['1', '2', '3', ...]`. This is used to indicate the full plate structure in "
+        "OME metadata, even if not all wells are acquired.",
+    )
+    name: str | None = Field(
+        default=None,
+        description="Optional name for the plate.",
+    )
+
+
 class AcquisitionSettings(_BaseModel):
     """Top-level acquisition settings.
 
@@ -622,14 +790,14 @@ class AcquisitionSettings(_BaseModel):
         "to use an `.ome.zarr` extension for OME-Zarr directories and `.ome.tiff` "
         "for OME-TIFF files.",
     )
-    dimensions: DimensionsList = Field(
+    dimensions: DimensionList = Field(
         description="List of dimensions in order of acquisition. Must include at least "
         "two spatial 'in-frame' dimensions (usually Y and X) at the end. May not "
         "include more than 5 non-position dimensions total. May include one "
-        "`PositionDimension` to specify multiple acquisition positions. Only the first "
-        "dimension may be unbounded (count=None).",
+        "position dimension (type='position') to specify multiple acquisition "
+        "positions. Only the first dimension may be unbounded (count=None).",
     )
-    dtype: Annotated[str, BeforeValidator(_validate_dtype)] = Field(
+    dtype: DTypeStr = Field(
         description="Data type of the pixel data to be written, e.g. 'uint8', "
         "'uint16', 'float32', etc. Must be a valid numpy DTypeLike string.",
     )
@@ -660,8 +828,8 @@ class AcquisitionSettings(_BaseModel):
     plate: Plate | None = Field(
         default=None,
         description="Plate structure for OME metadata. If specified, requires a "
-        "`PositionDimension` in `dimensions`, and all positions must have "
-        "row/column defined. Presence of this field indicates plate mode.",
+        "position dimension (type='position') in `dimensions`, and all positions must "
+        "have row/column defined. Presence of this field indicates plate mode.",
     )
     overwrite: bool = Field(
         default=False,
@@ -705,34 +873,35 @@ class AcquisitionSettings(_BaseModel):
     def positions(self) -> tuple[Position, ...]:
         """Position objects in acquisition order."""
         for dim in self.dimensions[:-2]:  # last 2 dims may never be positions
-            if isinstance(dim, PositionDimension):
-                return tuple(dim.positions)
+            if is_position_dim(dim):
+                if dim.coords:
+                    return tuple(dim.coords)
+                # fallback for position dim without coords (shouldn't happen)
+                return (Position(name="0"),)  # pragma: no cover
         return (Position(name="0"),)  # single default position
 
     @property
     def position_dimension_index(self) -> int | None:
-        """Index of PositionDimension in dimensions, or None if not present."""
+        """Index of position dimension in dimensions, or None if not present."""
         for i, dim in enumerate(self.dimensions[:-2]):
-            if isinstance(dim, PositionDimension):
+            if dim.type == "position":
                 return i
         return None
 
     @property
     def frame_dimensions(self) -> tuple[Dimension, ...]:
         """In-frame dimensions, currently always last two dims (usually (Y,X))."""
-        return cast("tuple[Dimension, ...]", self.dimensions[-2:])
+        return self.dimensions[-2:]
 
     @property
     def index_dimensions(self) -> tuple[Dimension, ...]:
-        """All NON-frame Dimensions, excluding PositionDimension dimensions."""
-        return tuple(dim for dim in self.dimensions[:-2] if isinstance(dim, Dimension))
+        """All NON-frame Dimensions, excluding position dimensions."""
+        return tuple(dim for dim in self.dimensions[:-2] if dim.type != "position")
 
     @property
     def array_dimensions(self) -> tuple[Dimension, ...]:
-        """All Dimensions excluding PositionDimension dimensions."""
-        return tuple(
-            dim for dim in self.dimensions if not isinstance(dim, PositionDimension)
-        )
+        """All Dimensions excluding position dimensions."""
+        return tuple(dim for dim in self.dimensions if dim.type != "position")
 
     @property
     def storage_index_dimensions(self) -> tuple[Dimension, ...]:
@@ -750,7 +919,7 @@ class AcquisitionSettings(_BaseModel):
 
     @property
     def array_storage_dimensions(self) -> tuple[Dimension, ...]:
-        """All Dimensions (excluding PositionDimension) in storage order."""
+        """All Dimensions (excluding position dimension) in storage order."""
         return self.storage_index_dimensions + self.frame_dimensions
 
     # --------- Validators ---------
@@ -803,13 +972,14 @@ class AcquisitionSettings(_BaseModel):
     def _validate_plate_positions(self) -> AcquisitionSettings:
         """Validate plate mode requirements."""
         if self.plate is not None:
-            # Ensure there is a PositionDimension
+            # Ensure there is a position dimension
             # and that all positions have row/column assigned
             for dim in self.dimensions:
-                if isinstance(dim, PositionDimension):
+                if dim.type == "position":
+                    positions = self.positions
                     names_without_row_col = [
                         pos.name
-                        for pos in dim.positions
+                        for pos in positions
                         if pos.plate_row is None or pos.plate_column is None
                     ]
                     if names_without_row_col:
@@ -820,7 +990,7 @@ class AcquisitionSettings(_BaseModel):
 
                     names_with_bad_coords = [
                         pos.name
-                        for pos in dim.positions
+                        for pos in positions
                         if ((r := pos.plate_row) and r not in self.plate.row_names)
                         or (
                             (c := pos.plate_column) and c not in self.plate.column_names
@@ -837,7 +1007,7 @@ class AcquisitionSettings(_BaseModel):
                     break
             else:
                 raise ValueError(
-                    "Plate mode requires a PositionDimension in dimensions."
+                    "Plate mode requires a position dimension in dimensions."
                 )
 
         return self
@@ -900,15 +1070,15 @@ def dims_from_standard_axes(
     sizes: Mapping[str, int | Sequence[str | Position] | None],
     chunk_shapes: Mapping[str | StandardAxis, int] | None = None,
     shard_shapes: Mapping[str | StandardAxis, int] | None = None,
-) -> list[Dimension | PositionDimension]:
+) -> list[Dimension]:
     """Create dimensions from standard axis names.
 
     Standard axes are {'x', 'y', 'z', 'c', 't', 'p'}. Dimension types and units
     are inferred from these names. Chunk shapes default to 1 for non-XY dimensions.
 
     For positions ('p'), the value can be:
-    - int: creates PositionDimension with names "0", "1", ...
-    - list[str | Position]: creates PositionDimension with those names or Position
+    - int: creates a position Dimension (type='position') with names "0", "1", ...
+    - list[str | Position]: creates a position Dimension with those names or Position
       objects
 
     Parameters
@@ -925,7 +1095,7 @@ def dims_from_standard_axes(
 
     Returns
     -------
-    list[Dimension | PositionDimension]
+    list[Dimension]
         Dimensions in the order specified by sizes.
 
     Examples
@@ -950,13 +1120,10 @@ def dims_from_standard_axes(
             chunk_shapes[axis] = size if isinstance(size, int) and axis in x_or_y else 1
 
     shard_shapes = dict(shard_shapes) if shard_shapes else {}
-    dims: list[Dimension | PositionDimension] = []
+    dims: list[Dimension] = []
     for axis in std_axes:
         value = sizes[axis.value]
-        if axis == StandardAxis.POSITION and isinstance(value, list):
-            kwargs = {"positions": value}
-        else:
-            kwargs = {"count": value}
+        kwargs = {"count": value} if isinstance(value, int) else {"coords": value}
         dims.append(
             axis.to_dimension(
                 chunk_size=chunk_shapes.get(axis),

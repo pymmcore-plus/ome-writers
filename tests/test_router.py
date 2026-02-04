@@ -11,7 +11,6 @@ from ome_writers._schema import (
     AcquisitionSettings,
     Dimension,
     Position,
-    PositionDimension,
     dims_from_standard_axes,
 )
 
@@ -201,7 +200,11 @@ def test_router_unlimited_with_positions() -> None:
         root_path="test.zarr",
         dimensions=[
             Dimension(name="t", count=None, type="time"),
-            PositionDimension(positions=[Position(name="A1"), Position(name="B2")]),
+            Dimension(
+                name="p",
+                type="position",
+                coords=[Position(name="A1"), Position(name="B2")],
+            ),
             Dimension(name="y", count=16, type="space"),
             Dimension(name="x", count=16, type="space"),
         ],
