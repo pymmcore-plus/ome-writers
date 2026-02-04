@@ -9,13 +9,18 @@ from ome_writers._schema import (
     Dimension,
     Plate,
     Position,
-    PositionDimension,
     StandardAxis,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-    from typing import TypeAlias
+    from typing import TypeAlias, TypedDict
+
+    class AcquisitionSettingsDict(TypedDict):
+        """Return type for useq_to_acquisition_settings."""
+
+        dimensions: list[Dimension]
+        plate: Plate | None
 
 
 # UnitTuple is a tuple of (scale, unit); e.g. (1, "s")
@@ -31,13 +36,14 @@ def dims_from_useq(
     pixel_size_um: float | None = None,
     chunk_shapes: Mapping[str, int] | None = None,
     shard_shapes: Mapping[str, int] | None = None,
-) -> dict[str, list[Dimension | PositionDimension] | Plate | None]:
-    """Convert a [`useq.MDASequence`][] to settings for [`AcquisitionSettings`][ome_writers.AcquisitionSettings].
+) -> list[Dimension]:
+    """Convert a `useq.MDASequence` to a list of [`Dimension`][ome_writers.Dimension] for ome-writers.
 
     !!! warning "Deprecated"
         This function is deprecated and will be removed in a future version.
         Use [`useq_to_acquisition_settings`][ome_writers.useq_to_acquisition_settings]
-        instead.
+        instead to convert MDASequence to ome_writers AcquisitionSettings `dimensions`
+        and `plate` fields."
 
     See [`useq_to_acquisition_settings`][ome_writers.useq_to_acquisition_settings]
     for full documentation.
@@ -45,13 +51,13 @@ def dims_from_useq(
     import warnings
 
     warnings.warn(
-        "`dims_from_useq`` is deprecated and will be removed in a future version. "
-        "Use useq_to_acquisition_settings instead whuch returns a dict with both "
-        "`dimensions` and `plate` keys.",
+        "`dims_from_useq` is deprecated and will be removed in a future version. "
+        "Use `useq_to_acquisition_settings` instead to convert MDASequence to "
+        "ome_writers AcquisitionSettings `dimensions` and `plate` fields.",
         DeprecationWarning,
         stacklevel=2,
     )
-    return useq_to_acquisition_settings(
+    return _dims_from_useq(
         seq=seq,
         image_width=image_width,
         image_height=image_height,
@@ -71,7 +77,7 @@ def useq_to_acquisition_settings(
     pixel_size_um: float | None = None,
     chunk_shapes: Mapping[str, int] | None = None,
     shard_shapes: Mapping[str, int] | None = None,
-) -> dict[str, list[Dimension | PositionDimension] | Plate | None]:
+) -> AcquisitionSettingsDict:
     """Convert a [`useq.MDASequence`][] to settings for [`AcquisitionSettings`][ome_writers.AcquisitionSettings].
 
     !!! tip "Important"
@@ -128,6 +134,29 @@ def useq_to_acquisition_settings(
     NotImplementedError
         If the sequence contains any of the unsupported patterns listed above.
     """  # noqa: E501
+    dims = _dims_from_useq(
+        seq=seq,
+        image_width=image_width,
+        image_height=image_height,
+        units=units,
+        pixel_size_um=pixel_size_um,
+        chunk_shapes=chunk_shapes,
+        shard_shapes=shard_shapes,
+    )
+    return {"dimensions": dims, "plate": _plate_from_useq(seq)}
+
+
+def _dims_from_useq(
+    seq: useq.MDASequence,
+    image_width: int,
+    image_height: int,
+    *,
+    units: Mapping[str, UnitTuple | None] | None = None,
+    pixel_size_um: float | None = None,
+    chunk_shapes: Mapping[str, int] | None = None,
+    shard_shapes: Mapping[str, int] | None = None,
+) -> list[Dimension]:
+    """Convert a [`useq.MDASequence`][] to a list of [`Dimension`][ome_writers.Dimension] for ome-writers."""  # noqa: E501
     try:
         from useq import Axis, MDASequence
     except ImportError:
@@ -143,7 +172,7 @@ def useq_to_acquisition_settings(
     units = units or {}
     chunk_shapes = chunk_shapes or {}
     shard_shapes = shard_shapes or {}
-    dims: list[Dimension | PositionDimension] = []
+    dims: list[Dimension] = []
     position_dim_added = False
     used_axes = seq.used_axes
 
@@ -175,21 +204,21 @@ def useq_to_acquisition_settings(
             chunk_size=chunk_shapes.get(ax_name),
             shard_size_chunks=shard_shapes.get(ax_name),
         )
-        if isinstance(dim, Dimension):
-            if unit := units.get(str(ax_name)):
-                dim.scale, dim.unit = unit
-            else:
-                # Default units for known axes
-                if std_axis == StandardAxis.TIME and seq.time_plan:
-                    # MultiPhaseTimePlan doesn't have interval attribute
-                    if hasattr(seq.time_plan, "interval"):
-                        dim.scale = seq.time_plan.interval.total_seconds()  # ty: ignore
-                        dim.unit = "second"
-                elif std_axis == StandardAxis.Z and seq.z_plan:
-                    # ZAbsolutePositions/ZRelativePositions don't have step
-                    dim.unit = "micrometer"
-                    if hasattr(seq.z_plan, "step"):
-                        dim.scale = seq.z_plan.step  # ty: ignore
+        assert isinstance(dim, Dimension)
+        if unit := units.get(str(ax_name)):
+            dim.scale, dim.unit = unit
+        else:
+            # Default units for known axes
+            if std_axis == StandardAxis.TIME and seq.time_plan:
+                # MultiPhaseTimePlan doesn't have interval attribute
+                if hasattr(seq.time_plan, "interval"):
+                    dim.scale = seq.time_plan.interval.total_seconds()  # ty: ignore
+                    dim.unit = "second"
+            elif std_axis == StandardAxis.Z and seq.z_plan:
+                # ZAbsolutePositions/ZRelativePositions don't have step
+                dim.unit = "micrometer"
+                if hasattr(seq.z_plan, "step"):
+                    dim.scale = seq.z_plan.step  # ty: ignore
         dims.append(dim)
 
     dims.extend(
@@ -209,7 +238,7 @@ def useq_to_acquisition_settings(
         ]
     )
 
-    return {"dimensions": dims, "plate": _plate_from_useq(seq)}
+    return dims
 
 
 def _validate_sequence(seq: useq.MDASequence) -> None:
@@ -414,7 +443,7 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
                 # if this line ever raises an exception,
                 # break it into two parts:
                 # 1. create position, 2. try to add coords, suppressing errors.
-                pos_sum = pos + gp  # type: ignore
+                pos_sum = pos + gp  # type: ignore [operator]
                 positions.append(
                     Position(
                         name=name,
