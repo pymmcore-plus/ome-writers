@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pytest
 
-from ome_writers._schema import AcquisitionSettings
-from ome_writers._useq import useq_to_acquisition_settings
+from ome_writers import AcquisitionSettings, create_stream, useq_to_acquisition_settings
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -527,9 +527,6 @@ def test_useq_plans_combination(
 
 def test_well_plate_fov_folder_names(tmp_path: Path, zarr_backend: str) -> None:
     """Test that WellPlatePlan with multi-FOV creates correct zarr folder structure."""
-    import numpy as np
-
-    from ome_writers import create_stream
 
     # Create a WellPlatePlan with multi-FOV
     seq = useq.MDASequence(
