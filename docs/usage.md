@@ -176,7 +176,7 @@ dimensions=[
 ]
 ```
 
-See the [single 5D image example](../examples/single_5d_image.md).
+See the [single 5D image example](./examples/single_5d_image.md).
 
 ### Multiple Positions
 
@@ -196,7 +196,7 @@ At this time, *neither* OME-TIFF *nor* OME-Zarr support more than
 5 dimensions in a single image. So these datasets will be composed
 of multiple 5D images, one per position.
 
-See the [multi-position example](../examples/multiposition.md).
+See the [multi-position example](./examples/multiposition.md).
 
 ### Multi-well plates (HCS)
 
@@ -238,7 +238,7 @@ settings = AcquisitionSettings(
 )
 ```
 
-See the [multi-well plate example](../examples/plate.md).
+See the [multi-well plate example](./examples/plate.md).
 
 ### Unbounded Dimensions
 
@@ -256,14 +256,14 @@ dimensions=[
 ]
 ```
 
-See the [unbounded dimensions example](../examples/unbounded.md).
+See the [unbounded dimensions example](./examples/unbounded.md).
 
 ### Everything Else
 
 If your dataset is fundamentally incompatible with the limitations of either
 OME-TIFF or OME-Zarr (e.g. ragged dimensions, more than 5 dimensions per image,
 non-standard axes, non-deterministic axes), we recommend following the patterns
-explained in the [event-driven example](../examples/event_driven.md).
+explained in the [event-driven example](./examples/event_driven.md).
 
 In short:
 
@@ -288,7 +288,7 @@ In short:
     `frame_metadata` can be associated with each frame in the
     [`append`][ome_writers.OMEStream.append] function.  This metadata is stored
     in the OME-XML/OME-NGFF metadata (see the
-    [example](../examples/event_driven.md) for details), and may be used to
+    [example](./examples/event_driven.md) for details), and may be used to
     (manually) arrange frames into some higher-level structure after
     acquisition.
 
