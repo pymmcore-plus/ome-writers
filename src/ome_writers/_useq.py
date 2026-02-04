@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import warnings
 from typing import TYPE_CHECKING
 
 from ome_writers._schema import Dimension, Plate, Position, StandardAxis
@@ -32,48 +33,13 @@ def dims_from_useq(
     chunk_shapes: Mapping[str, int] | None = None,
     shard_shapes: Mapping[str, int] | None = None,
 ) -> list[Dimension]:
-    """Convert a `useq.MDASequence` to a list of [`Dimension`][ome_writers.Dimension].
+    """Convert a [`useq.MDASequence`][] to a list of [`Dimension`][ome_writers.Dimension] for ome-writers.
 
     !!! warning "Deprecated"
         This function is deprecated and will be removed in a future version.
         Use [`useq_to_acquisition_settings`][ome_writers.useq_to_acquisition_settings]
         instead to convert MDASequence to ome_writers AcquisitionSettings `dimensions`
         and `plate` fields.
-
-    See [`useq_to_acquisition_settings`][ome_writers.useq_to_acquisition_settings]
-    for full documentation.
-    """
-    import warnings
-
-    warnings.warn(
-        "`dims_from_useq` is deprecated and will be removed in a future version. "
-        "Use `useq_to_acquisition_settings` instead to convert MDASequence to "
-        "ome_writers AcquisitionSettings `dimensions` and `plate` fields.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return _dims_from_useq(
-        seq=seq,
-        image_width=image_width,
-        image_height=image_height,
-        units=units,
-        pixel_size_um=pixel_size_um,
-        chunk_shapes=chunk_shapes,
-        shard_shapes=shard_shapes,
-    )
-
-
-def useq_to_acquisition_settings(
-    seq: useq.MDASequence,
-    image_width: int,
-    image_height: int,
-    *,
-    units: Mapping[str, UnitTuple | None] | None = None,
-    pixel_size_um: float | None = None,
-    chunk_shapes: Mapping[str, int] | None = None,
-    shard_shapes: Mapping[str, int] | None = None,
-) -> AcquisitionSettingsDict:
-    """Convert a [`useq.MDASequence`][] to settings for [`AcquisitionSettings`][ome_writers.AcquisitionSettings].
 
     !!! tip "Important"
         `useq-schema` has a very expressive API that can generate complex,
@@ -129,29 +95,14 @@ def useq_to_acquisition_settings(
     NotImplementedError
         If the sequence contains any of the unsupported patterns listed above.
     """  # noqa: E501
-    dims = _dims_from_useq(
-        seq=seq,
-        image_width=image_width,
-        image_height=image_height,
-        units=units,
-        pixel_size_um=pixel_size_um,
-        chunk_shapes=chunk_shapes,
-        shard_shapes=shard_shapes,
+    warnings.warn(
+        "`dims_from_useq` is deprecated and will be removed in a future version. "
+        "Use `useq_to_acquisition_settings` instead to convert MDASequence to "
+        "ome_writers AcquisitionSettings `dimensions` and `plate` fields.",
+        DeprecationWarning,
+        stacklevel=2,
     )
-    return {"dimensions": dims, "plate": _plate_from_useq(seq)}
 
-
-def _dims_from_useq(
-    seq: useq.MDASequence,
-    image_width: int,
-    image_height: int,
-    *,
-    units: Mapping[str, UnitTuple | None] | None = None,
-    pixel_size_um: float | None = None,
-    chunk_shapes: Mapping[str, int] | None = None,
-    shard_shapes: Mapping[str, int] | None = None,
-) -> list[Dimension]:
-    """Build dimension list from a useq.MDASequence."""
     try:
         from useq import Axis, MDASequence
     except ImportError:
@@ -233,6 +184,60 @@ def _dims_from_useq(
     )
 
     return dims
+
+
+def useq_to_acquisition_settings(
+    seq: useq.MDASequence,
+    image_width: int,
+    image_height: int,
+    *,
+    units: Mapping[str, UnitTuple | None] | None = None,
+    pixel_size_um: float | None = None,
+    chunk_shapes: Mapping[str, int] | None = None,
+    shard_shapes: Mapping[str, int] | None = None,
+) -> AcquisitionSettingsDict:
+    """Convert a [`useq.MDASequence`][] to settings for [`AcquisitionSettings`][ome_writers.AcquisitionSettings].
+
+    See [`dims_from_useq`][ome_writers.dims_from_useq] for full documentation on
+    supported sequence patterns and restrictions.
+
+    Parameters
+    ----------
+    seq : useq.MDASequence
+        The `useq.MDASequence` to convert.
+    image_width : int
+        The expected width of the images in the stream.
+    image_height : int
+        The expected height of the images in the stream.
+    units : Mapping[str, UnitTuple | None] | None, optional
+        An optional mapping of dimension labels to their units.
+    pixel_size_um : float | None, optional
+        The size of a pixel in micrometers. If provided, it will be used to set the
+        scale for the spatial dimensions.
+    chunk_shapes : Mapping[str, int] | None, optional
+        An optional mapping of dimension names ("tczyx") to their chunk sizes.
+        (In number of pixels per chunk)
+    shard_shapes : Mapping[str, int] | None, optional
+        An optional mapping of dimension names ("tczyx") to their shard sizes
+        (in number of chunks per shard)
+
+    Raises
+    ------
+    NotImplementedError
+        If the sequence contains any of the unsupported patterns listed above.
+    """  # noqa: E501
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        dims = dims_from_useq(
+            seq=seq,
+            image_width=image_width,
+            image_height=image_height,
+            units=units,
+            pixel_size_um=pixel_size_um,
+            chunk_shapes=chunk_shapes,
+            shard_shapes=shard_shapes,
+        )
+    return {"dimensions": dims, "plate": _plate_from_useq(seq)}
 
 
 def _validate_sequence(seq: useq.MDASequence) -> None:
