@@ -48,7 +48,6 @@ pixel_size_um = core.getPixelSizeUm()
 
 settings = AcquisitionSettings(
     root_path="example_pymmcore_plus",
-    # use useq_to_acquisition_settings to convert MDASequence to ome_writers
     # use useq_to_acquisition_settings to convert MDASequence to a dictionary
     # of kwargs that can be passed to `ome_writers.AcquisitionSettings`
     # (currently, it will populate `dimensions` and `plate` fields)
