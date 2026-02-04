@@ -4,6 +4,8 @@ import re
 import warnings
 from typing import TYPE_CHECKING
 
+from typing_extensions import deprecated
+
 from ome_writers._schema import Dimension, Plate, Position, StandardAxis
 
 if TYPE_CHECKING:
@@ -23,6 +25,7 @@ if TYPE_CHECKING:
 UnitTuple: TypeAlias = tuple[float, str]
 
 
+@deprecated("Use 'useq_to_acquisition_settings' instead.")
 def dims_from_useq(
     seq: useq.MDASequence,
     image_width: int,
@@ -33,18 +36,17 @@ def dims_from_useq(
     chunk_shapes: Mapping[str, int] | None = None,
     shard_shapes: Mapping[str, int] | None = None,
 ) -> list[Dimension]:
-    """Convert a [`useq.MDASequence`][] to a list of [`Dimension`][ome_writers.Dimension] for ome-writers.
+    """Convert a [`useq.MDASequence`][] to a list of [`Dimension`][ome_writers.Dimension].
 
     !!! warning "Deprecated"
         This function is deprecated and will be removed in a future version.
         Use [`useq_to_acquisition_settings`][ome_writers.useq_to_acquisition_settings]
-        instead to convert MDASequence to ome_writers AcquisitionSettings `dimensions`
-        and `plate` fields.
+        instead.  Dimensions can be obtained from the returned dictionary.
     """  # noqa: E501
     warnings.warn(
         "`dims_from_useq` is deprecated and will be removed in a future version. "
-        "Use `useq_to_acquisition_settings` instead to convert MDASequence to "
-        "ome_writers AcquisitionSettings `dimensions` and `plate` fields.",
+        "Use `useq_to_acquisition_settings` instead: dimensions can be obtained "
+        "from the returned dictionary.",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -193,10 +195,34 @@ def useq_to_acquisition_settings(
         An optional mapping of dimension names ("tczyx") to their shard sizes
         (in number of chunks per shard)
 
+    Returns
+    -------
+    dict
+        A dictionary suitable for passing as keyword arguments to
+        [`AcquisitionSettings`][ome_writers.AcquisitionSettings].  Currently contains:
+
+        - `dimensions`: A list of [`Dimension`][ome_writers.Dimension] objects.
+        - `plate`: An [`Plate`][ome_writers.Plate] object if the sequence includes a
+          `WellPlatePlan`, otherwise `None`.
+
     Raises
     ------
     NotImplementedError
         If the sequence contains any of the unsupported patterns listed above.
+
+    Examples
+    --------
+    ```python
+    import useq
+    from ome_writers import useq_to_acquisition_settings, AcquisitionSettings
+
+    seq = useq.MDASequence(time_plan={"interval": 10, "loops": 5})
+    settings = AcquisitionSettings(
+        root_path="/data/acquisitions/acq1.ome.zarr",
+        **useq_to_acquisition_settings(seq, image_width=1024, image_height=1024),
+        dtype="uint16",
+    )
+    ```
     """  # noqa: E501
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
