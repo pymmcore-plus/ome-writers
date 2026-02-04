@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import warnings
 from typing import TYPE_CHECKING
 
@@ -475,22 +474,8 @@ def _plate_from_useq(seq: useq.MDASequence) -> Plate | None:
         return None
 
     plate = useq_plate.plate
-    well_names = plate.all_well_names
-
-    # Extract row names from first column (e.g., A1, B1, C1... -> A, B, C...)
-    row_names = []
-    for name in well_names[:, 0]:
-        match = re.match(r"^([A-Za-z]+)", str(name))
-        if match:
-            row_names.append(match.group(1))
-
-    # Extract column names from first row (e.g., A1, A2, A3... -> 1, 2, 3...)
-    column_names = []
-    for name in well_names[0, :]:
-        match = re.search(r"(\d+)$", str(name))
-        if match:
-            column_names.append(match.group(1))
-
     return Plate(
-        row_names=row_names, column_names=column_names, name=plate.name or None
+        row_names=[_row_idx_to_letter(i) for i in range(plate.rows)],
+        column_names=[str(i + 1) for i in range(plate.columns)],
+        name=plate.name or None,
     )
