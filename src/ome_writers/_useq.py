@@ -468,10 +468,10 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
 
 def _plate_from_useq(seq: useq.MDASequence) -> Plate | None:
     """Convert a useq WellPlatePlan to an ome-writers Plate."""
-    import useq as _useq
+    import useq
 
     useq_plate = seq.stage_positions
-    if not isinstance(useq_plate, _useq.WellPlatePlan):
+    if not isinstance(useq_plate, useq.WellPlatePlan):
         return None
 
     plate = useq_plate.plate
