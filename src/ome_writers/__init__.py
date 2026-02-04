@@ -27,7 +27,7 @@ from ome_writers._schema import (
     dims_from_standard_axes,
 )
 from ome_writers._stream import OMEStream, create_stream
-from ome_writers._useq import dims_from_useq
+from ome_writers._useq import dims_from_useq, useq_to_acquisition_settings
 
 __all__ = [
     "AcquisitionSettings",
@@ -44,4 +44,5 @@ __all__ = [
     "create_stream",
     "dims_from_standard_axes",
     "dims_from_useq",
+    "useq_to_acquisition_settings",
 ]

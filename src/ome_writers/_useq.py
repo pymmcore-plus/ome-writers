@@ -1,20 +1,30 @@
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING
 
-from ome_writers._schema import Dimension, Position, StandardAxis
+from typing_extensions import deprecated
+
+from ome_writers._schema import Dimension, Plate, Position, StandardAxis
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-    from typing import TypeAlias
+    from typing import TypeAlias, TypedDict
 
     import useq
+
+    class AcquisitionSettingsDict(TypedDict):
+        """Return type for useq_to_acquisition_settings."""
+
+        dimensions: list[Dimension]
+        plate: Plate | None
 
 
 # UnitTuple is a tuple of (scale, unit); e.g. (1, "s")
 UnitTuple: TypeAlias = tuple[float, str]
 
 
+@deprecated("Use 'useq_to_acquisition_settings' instead.")
 def dims_from_useq(
     seq: useq.MDASequence,
     image_width: int,
@@ -25,62 +35,21 @@ def dims_from_useq(
     chunk_shapes: Mapping[str, int] | None = None,
     shard_shapes: Mapping[str, int] | None = None,
 ) -> list[Dimension]:
-    """Convert a [`useq.MDASequence`][] to a list of [`Dimension`][ome_writers.Dimension] for ome-writers.
+    """Convert a [`useq.MDASequence`][] to a list of [`Dimension`][ome_writers.Dimension].
 
-    !!! tip "Important"
-        `useq-schema` has a very expressive API that can generate complex,
-        irregular multi-dimensional acquisition sequences. However, not all of these
-        patterns can be represented in a regular N-dimensional image data structure as
-        used by OME-TIFF/OME-NGFF. Sequences that result in ragged dimensions will
-        raise `NotImplementedError` when passed to this function.
-
-    The following restrictions apply:
-
-    **Grid and Position handling:**
-
-    - Position and grid axes must be adjacent in axis_order (e.g., `"pgcz"`, not
-      `"pcgz"`).
-    - When both `stage_positions` and `grid_plan` are specified, position must come
-      before grid in axis_order (e.g., "pgtcz" not "gptcz"). Grid-first order is only
-      supported when using `grid_plan` alone without `stage_positions`.
-    - Position subsequences may only contain a `grid_plan`, not time/channel/z-plans.
-      Different positions *may* have different grid shapes.
-    - If `stage_positions` is a `WellPlatePlan`, it cannot be
-      combined with an outer `grid_plan`. Use `well_points_plan` on the `WellPlatePlan`
-      instead.
-
-    **Channel, Z, and Time handling:**
-
-    - All channels must have the same `do_stack` value when a z_plan is present.
-    - All channels must have `acquire_every=1`. Skipping timepoints on some channels
-      creates ragged dimensions.
-    - Unbounded time plans (duration-based plans with interval=0) are not supported.
-
-    Parameters
-    ----------
-    seq : useq.MDASequence
-        The `useq.MDASequence` to convert.
-    image_width : int
-        The expected width of the images in the stream.
-    image_height : int
-        The expected height of the images in the stream.
-    units : Mapping[str, UnitTuple | None] | None, optional
-        An optional mapping of dimension labels to their units.
-    pixel_size_um : float | None, optional
-        The size of a pixel in micrometers. If provided, it will be used to set the
-        scale for the spatial dimensions.
-    chunk_shapes : Mapping[str, int] | None, optional
-        An optional mapping of dimension names ("tczyx") to their chunk sizes.
-        (In number of pixels per chunk)
-    shard_shapes : Mapping[str, int] | None, optional
-        An optional mapping of dimension names ("tczyx") to their shard sizes
-        (in number of chunks per shard)
-
-    Raises
-    ------
-    NotImplementedError
-        If the sequence contains any of the unsupported patterns listed above.
+    !!! warning "Deprecated"
+        This function is deprecated and will be removed in a future version.
+        Use [`useq_to_acquisition_settings`][ome_writers.useq_to_acquisition_settings]
+        instead.  Dimensions can be obtained from the returned dictionary.
     """  # noqa: E501
+    warnings.warn(
+        "`dims_from_useq` is deprecated and will be removed in a future version. "
+        "Use `useq_to_acquisition_settings` instead: dimensions can be obtained "
+        "from the returned dictionary.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     try:
         from useq import Axis, MDASequence
     except ImportError:
@@ -162,6 +131,110 @@ def dims_from_useq(
     )
 
     return dims
+
+
+def useq_to_acquisition_settings(
+    seq: useq.MDASequence,
+    image_width: int,
+    image_height: int,
+    *,
+    units: Mapping[str, UnitTuple | None] | None = None,
+    pixel_size_um: float | None = None,
+    chunk_shapes: Mapping[str, int] | None = None,
+    shard_shapes: Mapping[str, int] | None = None,
+) -> AcquisitionSettingsDict:
+    """Convert a [`useq.MDASequence`][] to settings for [`AcquisitionSettings`][ome_writers.AcquisitionSettings].
+
+    !!! tip "Important"
+        `useq-schema` has a very expressive API that can generate complex,
+        irregular multi-dimensional acquisition sequences. However, not all of these
+        patterns can be represented in a regular N-dimensional image data structure as
+        used by OME-TIFF/OME-NGFF. Sequences that result in ragged dimensions will
+        raise `NotImplementedError` when passed to this function.
+
+    The following restrictions apply:
+
+    **Grid and Position handling:**
+
+    - Position and grid axes must be adjacent in axis_order (e.g., `"pgcz"`, not
+      `"pcgz"`).
+    - When both `stage_positions` and `grid_plan` are specified, position must come
+      before grid in axis_order (e.g., "pgtcz" not "gptcz"). Grid-first order is only
+      supported when using `grid_plan` alone without `stage_positions`.
+    - Position subsequences may only contain a `grid_plan`, not time/channel/z-plans.
+      Different positions *may* have different grid shapes.
+    - If `stage_positions` is a `WellPlatePlan`, it cannot be
+      combined with an outer `grid_plan`. Use `well_points_plan` on the `WellPlatePlan`
+      instead.
+
+    **Channel, Z, and Time handling:**
+
+    - All channels must have the same `do_stack` value when a z_plan is present.
+    - All channels must have `acquire_every=1`. Skipping timepoints on some channels
+      creates ragged dimensions.
+    - Unbounded time plans (duration-based plans with interval=0) are not supported.
+
+    Parameters
+    ----------
+    seq : useq.MDASequence
+        The `useq.MDASequence` to convert.
+    image_width : int
+        The expected width of the images in the stream.
+    image_height : int
+        The expected height of the images in the stream.
+    units : Mapping[str, UnitTuple | None] | None, optional
+        An optional mapping of dimension labels to their units.
+    pixel_size_um : float | None, optional
+        The size of a pixel in micrometers. If provided, it will be used to set the
+        scale for the spatial dimensions.
+    chunk_shapes : Mapping[str, int] | None, optional
+        An optional mapping of dimension names ("tczyx") to their chunk sizes.
+        (In number of pixels per chunk)
+    shard_shapes : Mapping[str, int] | None, optional
+        An optional mapping of dimension names ("tczyx") to their shard sizes
+        (in number of chunks per shard)
+
+    Returns
+    -------
+    dict
+        A dictionary suitable for passing as keyword arguments to
+        [`AcquisitionSettings`][ome_writers.AcquisitionSettings].  Currently contains:
+
+        - `dimensions`: A list of [`Dimension`][ome_writers.Dimension] objects.
+        - `plate`: An [`Plate`][ome_writers.Plate] object if the sequence includes a
+          `WellPlatePlan`, otherwise `None`.
+
+    Raises
+    ------
+    NotImplementedError
+        If the sequence contains any of the unsupported patterns listed above.
+
+    Examples
+    --------
+    ```python
+    import useq
+    from ome_writers import useq_to_acquisition_settings, AcquisitionSettings
+
+    seq = useq.MDASequence(time_plan={"interval": 10, "loops": 5})
+    settings = AcquisitionSettings(
+        root_path="/data/acquisitions/acq1.ome.zarr",
+        **useq_to_acquisition_settings(seq, image_width=1024, image_height=1024),
+        dtype="uint16",
+    )
+    ```
+    """  # noqa: E501
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        dims = dims_from_useq(
+            seq=seq,
+            image_width=image_width,
+            image_height=image_height,
+            units=units,
+            pixel_size_um=pixel_size_um,
+            chunk_shapes=chunk_shapes,
+            shard_shapes=shard_shapes,
+        )
+    return {"dimensions": dims, "plate": _plate_from_useq(seq)}
 
 
 def _validate_sequence(seq: useq.MDASequence) -> None:
@@ -307,11 +380,14 @@ def _build_well_plate_positions(plate_plan: useq.WellPlatePlan) -> list[Position
     for row_idx, col_idx in plate_plan.selected_well_indices:
         plate_row = _row_idx_to_letter(row_idx)
         plate_column = str(col_idx + 1)
-        for well_pos in well_positions:
+        for fov_idx, well_pos in enumerate(well_positions):
             pos = next(plate_iter)  # grab the next AbsolutePosition in the outer loop
+            # NOTE: the pos.name is a useq's auto-generated name, either WellName_fovN
+            # for multi-fovs (e.g. A1_0000, etc) or just WellName for single fov
+            # (e.g. A1, B3, etc). We replace it with `fov{fov_idx}.
             positions.append(
                 Position(
-                    name=pos.name,
+                    name=f"fov{fov_idx}",
                     plate_row=plate_row,
                     plate_column=plate_column,
                     grid_row=getattr(well_pos, "row", None),
@@ -387,3 +463,19 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
             )
 
     return positions
+
+
+def _plate_from_useq(seq: useq.MDASequence) -> Plate | None:
+    """Convert a useq WellPlatePlan to an ome-writers Plate."""
+    import useq
+
+    useq_plate = seq.stage_positions
+    if not isinstance(useq_plate, useq.WellPlatePlan):
+        return None
+
+    plate = useq_plate.plate
+    return Plate(
+        row_names=[_row_idx_to_letter(i) for i in range(plate.rows)],
+        column_names=[str(i + 1) for i in range(plate.columns)],
+        name=plate.name or None,
+    )

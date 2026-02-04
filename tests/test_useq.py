@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
+import numpy as np
 import pytest
 
-from ome_writers._schema import AcquisitionSettings
-from ome_writers._useq import dims_from_useq
+from ome_writers import AcquisitionSettings, create_stream, useq_to_acquisition_settings
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 try:
     import useq
@@ -147,10 +151,10 @@ SEQ_CASES = [
         ),
         expected_dim_names=["p", "t", "c", "y", "x"],
         expected_positions=[
-            ExpectedPosition("A1_0000", "A", "1", grid_row=0, grid_col=0),
-            ExpectedPosition("A1_0001", "A", "1", grid_row=0, grid_col=1),
-            ExpectedPosition("B2_0000", "B", "2", grid_row=0, grid_col=0),
-            ExpectedPosition("B2_0001", "B", "2", grid_row=0, grid_col=1),
+            ExpectedPosition("fov0", "A", "1", grid_row=0, grid_col=0),
+            ExpectedPosition("fov1", "A", "1", grid_row=0, grid_col=1),
+            ExpectedPosition("fov0", "B", "2", grid_row=0, grid_col=0),
+            ExpectedPosition("fov1", "B", "2", grid_row=0, grid_col=1),
         ],
         id="well_plate_with_points",
     ),
@@ -225,13 +229,15 @@ SEQ_CASES = [
 
 @pytest.mark.parametrize("case", SEQ_CASES, ids=lambda c: c.id)
 def test_useq_to_dims(case: Case) -> None:
-    """Test dims_from_useq with different position configurations."""
+    """Test useq_to_acquisition_settings with different position configurations."""
     seq = case.seq
     pix_size = 0.103
     img_count = 64
-    dims = dims_from_useq(
+    result = useq_to_acquisition_settings(
         seq, image_width=img_count, image_height=img_count, pixel_size_um=pix_size
     )
+    dims = result["dimensions"]
+    assert dims is not None
 
     # Check dimension names
     assert [dim.name for dim in dims] == case.expected_dim_names
@@ -260,7 +266,7 @@ def test_useq_to_dims(case: Case) -> None:
             assert dim.count == len(seq.channels)
 
     events = list(case.seq)
-    settings = AcquisitionSettings(dimensions=dims, root_path="", dtype="u2")
+    settings = AcquisitionSettings(**result, root_path="", dtype="u2")
     assert settings.num_frames == len(events)
 
     pos_dim = next((d for d in dims if d.type == "position"), None)
@@ -273,8 +279,9 @@ def test_useq_to_dims(case: Case) -> None:
     # Verify that number of positions matches unique (p,g) combinations
     unique_pg = {(e.index.get("p", 0), e.index.get("g")) for e in events}
     assert pos_dim.count == len(unique_pg), (
-        f"Position count mismatch: dims_from_useq created {pos_dim.count} "
-        f"positions but useq iteration has {len(unique_pg)} unique (p,g) combos"
+        f"Position count mismatch: useq_to_acquisition_settings created "
+        f"{pos_dim.count} positions but useq iteration has "
+        f"{len(unique_pg)} unique (p,g) combos"
     )
 
     # Check all position attributes
@@ -424,7 +431,7 @@ RAGGED_CASES = [
 def test_unsupported_sequences_raise(seq: useq.MDASequence, error_pattern: str) -> None:
     """Test that ragged dimension cases raise NotImplementedError."""
     with pytest.raises(NotImplementedError, match=error_pattern):
-        dims_from_useq(seq, image_width=64, image_height=64)
+        useq_to_acquisition_settings(seq, image_width=64, image_height=64)
 
 
 def test_useq_manual_units() -> None:
@@ -435,7 +442,7 @@ def test_useq_manual_units() -> None:
         channels=["DAPI"],
     )
 
-    dims = dims_from_useq(
+    result = useq_to_acquisition_settings(
         seq,
         image_width=64,
         image_height=64,
@@ -446,6 +453,8 @@ def test_useq_manual_units() -> None:
             )
         },
     )
+    dims = result["dimensions"]
+    assert dims is not None
 
     time_dim = next(dim for dim in dims if dim.type == "time")
     assert time_dim.unit == "minute"
@@ -511,6 +520,44 @@ def test_useq_plans_combination(
         z_plan=z_plan,
         grid_plan=grid_plan,
     )
-    dims = dims_from_useq(seq, image_width=64, image_height=64)
-    settings = AcquisitionSettings(dimensions=dims, root_path="", dtype="u2")
+    result = useq_to_acquisition_settings(seq, image_width=64, image_height=64)
+    settings = AcquisitionSettings(**result, root_path="", dtype="u2")
     assert settings.num_frames == len(list(seq))
+
+
+def test_well_plate_fov_folder_names(tmp_path: Path, zarr_backend: str) -> None:
+    """Test that WellPlatePlan with multi-FOV creates correct zarr folder structure."""
+
+    # Create a WellPlatePlan with multi-FOV
+    seq = useq.MDASequence(
+        stage_positions=useq.WellPlatePlan(
+            plate=useq.WellPlate.from_str("96-well"),
+            a1_center_xy=(0.0, 0.0),
+            selected_wells=((0, 1), (0, 1)),  # Wells A1 and B2
+            well_points_plan=useq.GridRowsColumns(rows=1, columns=2),  # 2 FOVs per well
+        ),
+        channels=["DAPI"],
+    )
+
+    # Create AcquisitionSettings using **useq_to_acquisition_settings
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "test_fov_names.ome.zarr"),
+        **useq_to_acquisition_settings(seq, image_width=64, image_height=64),
+        dtype="uint16",
+        format=zarr_backend,
+    )
+
+    # Create stream and write some frames
+    dummy_frame = np.zeros((64, 64), dtype="uint16")
+    with create_stream(settings) as stream:
+        for _ in seq:
+            stream.append(dummy_frame)
+
+    # Check that zarr folders have the expected "fov0", "fov1" names
+    # For WellPlatePlan with plate layout, the structure should be:
+    # test_fov_names.ome.zarr/A/1/fov0/, A/1/fov1/, B/2/fov0/, B/2/fov1/
+    zarr_root = tmp_path / "test_fov_names.ome.zarr"
+    assert (zarr_root / "A" / "1" / "fov0").exists(), "Expected fov0 in well A1"
+    assert (zarr_root / "A" / "1" / "fov1").exists(), "Expected fov1 in well A1"
+    assert (zarr_root / "B" / "2" / "fov0").exists(), "Expected fov0 in well B2"
+    assert (zarr_root / "B" / "2" / "fov1").exists(), "Expected fov1 in well B2"
