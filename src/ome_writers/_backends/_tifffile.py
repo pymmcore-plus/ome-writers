@@ -251,7 +251,7 @@ class TiffBackend(ArrayBackend):
 
         mirror = self._position_managers[position_index].metadata_mirror
         model = mirror.model
-        map_annotations = model.structured_annotations.map_annotations
+        map_annotations = model.structured_annotations.map_annotations  # type: ignore
         if images := model.images:
             # {"the_z": 0, "the_c": 1, ...}
             plane_kwargs = {
