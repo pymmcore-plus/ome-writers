@@ -772,6 +772,53 @@ class Plate(_BaseModel):
         description="Optional name for the plate.",
     )
 
+    @classmethod
+    def from_standard_wells(cls, num_wells_or_shape: int | tuple[int, int]) -> Self:
+        """Convenience constructor to create a plate from standard well counts or shape.
+
+        Parameters
+        ----------
+        num_wells_or_shape : int | tuple[int, int]
+            If an integer is provided, it is interpreted as a "standard" n-well plate
+            with common dimensions (e.g. 24 -> 4x6, 96 -> 8x12, 384 -> 16x24).
+            If a tuple of (rows, columns) is provided, it is used directly.
+        """
+        if not isinstance(num_wells_or_shape, tuple):
+            standard_shapes = {
+                6: (2, 3),
+                12: (3, 4),
+                24: (4, 6),
+                48: (6, 8),
+                96: (8, 12),
+                384: (16, 24),
+                1536: (32, 48),
+            }
+            if num_wells_or_shape not in standard_shapes:
+                raise ValueError(
+                    f"Unrecognized standard plate size: {num_wells_or_shape}. "
+                    f"Supported sizes: {list(standard_shapes.keys())}"
+                )
+            n_rows, n_cols = standard_shapes[num_wells_or_shape]
+        else:
+            if not len(num_wells_or_shape) == 2 or not all(
+                int(x) > 0 for x in num_wells_or_shape
+            ):
+                raise ValueError(
+                    "If providing a tuple for plate shape, it must be "
+                    "(n_rows, n_columns) with positive integers."
+                )
+            n_rows, n_cols = num_wells_or_shape
+
+        # Generate row names: A, B, ..., Z, AA, BB, ..., ZZ, AAA, BBB, ...
+        def _row_name(i: int) -> str:
+            letter = chr(ord("A") + (i % 26))
+            repeat = (i // 26) + 1
+            return letter * repeat
+
+        row_names = [_row_name(i) for i in range(n_rows)]
+        column_names = [str(i + 1) for i in range(n_cols)]
+        return cls(row_names=row_names, column_names=column_names)
+
 
 class AcquisitionSettings(_BaseModel):
     """Top-level acquisition settings.

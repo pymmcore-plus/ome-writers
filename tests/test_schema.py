@@ -686,3 +686,26 @@ def test_empty_position_coords_raises_not_implemented() -> None:
         match=r"Empty coords for position dimensions.*not yet implemented",
     ):
         Dimension(name="p", type="position", coords=[])
+
+
+def test_plate_num_wells_or_shape_parameter() -> None:
+    """Test Plate num_wells_or_shape parameter."""
+    # Standard 96-well plate
+    plate1 = Plate.from_standard_wells(96)
+    assert plate1.row_names == ["A", "B", "C", "D", "E", "F", "G", "H"]
+    assert plate1.column_names == [str(i) for i in range(1, 13)]
+
+    # Custom 5x4 plate
+    plate2 = Plate.from_standard_wells((5, 4))
+    assert plate2.row_names == ["A", "B", "C", "D", "E"]
+    assert plate2.column_names == [str(i) for i in range(1, 5)]
+
+    # Invalid standard size
+    with pytest.raises(ValueError, match="Unrecognized standard plate size"):
+        Plate.from_standard_wells(50)
+
+    # Invalid shape tuple
+    with pytest.raises(ValueError, match=r"it must be \(n_rows, n_columns\)"):
+        Plate.from_standard_wells((0, 4, 2))
+    with pytest.raises(ValueError, match=r"with positive integers"):
+        Plate.from_standard_wells((0, 4))
