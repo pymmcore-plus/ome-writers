@@ -518,11 +518,15 @@ def _build_yaozarrs_image_model(dims: list[Dimension]) -> v05.Image:
         for c in channel_dim.coords:
             # Default color to white if not specified
             color = (
-                c.color.as_hex(format="long").lstrip("#").upper() if c.color else "FFFFFF"
+                c.color.as_hex(format="long").lstrip("#").upper()
+                if c.color
+                else "FFFFFF"
             )
             # Default to 16-bit, full range window
             window = v05.OmeroWindow(min=0, max=65535, start=0, end=65535)
-            omero_channels.append(v05.OmeroChannel(label=c.name, color=color, window=window))
+            omero_channels.append(
+                v05.OmeroChannel(label=c.name, color=color, window=window)
+            )
 
         omero = v05.Omero(channels=omero_channels)
     else:
