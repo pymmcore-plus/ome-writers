@@ -119,7 +119,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         # this single image model is reused for all positions
         # (the underlying assumption is that we currently don't support inhomogeneous
         # shapes/dtypes across positions)
-        image = _build_yaozarrs_image_model(storage_dims)
+        image = _build_yaozarrs_image_model(storage_dims, dtype)
 
         compression = cast("CompressionName", settings.compression or "none")
 
@@ -499,7 +499,7 @@ def _get_chunks_and_shards(
     return tuple(chunks), tuple(shards) if has_shards else None
 
 
-def _build_yaozarrs_image_model(dims: list[Dimension]) -> v05.Image:
+def _build_yaozarrs_image_model(dims: list[Dimension], dtype: str) -> v05.Image:
     """Build yaozarrs v05 Image metadata from Dimensions."""
     dim_specs = [
         DimSpec(
@@ -522,8 +522,12 @@ def _build_yaozarrs_image_model(dims: list[Dimension]) -> v05.Image:
                 if c.color
                 else "FFFFFF"
             )
-            # Default to 16-bit, full range window
-            window = v05.OmeroWindow(min=0, max=65535, start=0, end=65535)
+            # Default to full range window for the given dtype
+            dtype_min = np.iinfo(dtype).min
+            dtype_max = np.iinfo(dtype).max
+            window = v05.OmeroWindow(
+                min=dtype_min, max=dtype_max, start=dtype_min, end=dtype_max
+            )
             omero_channels.append(
                 v05.OmeroChannel(label=c.name, color=color, window=window)
             )
