@@ -11,6 +11,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
 
+import numpy as np
+
 from ome_writers import __version__
 from ome_writers._backends._backend import ArrayBackend
 from ome_writers._backends._chunk_buffer import ChunkBuffer
@@ -30,7 +32,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from typing import Protocol
 
-    import numpy as np
     from yaozarrs.write.v05._write import CompressionName
 
     from ome_writers._router import FrameRouter
