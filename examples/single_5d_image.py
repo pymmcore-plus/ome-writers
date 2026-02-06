@@ -21,7 +21,7 @@ settings = AcquisitionSettings(
     # declare dimensions in order of acquisition (slowest to fastest)
     dimensions=[
         Dimension(name="t", count=2, chunk_size=1, type="time"),
-        Dimension(name="c", count=3, chunk_size=1, type="channel", coords=channels),
+        Dimension(name="c", chunk_size=1, type="channel", coords=channels),
         Dimension(name="z", count=4, chunk_size=1, type="space", scale=5, unit=UM),
         Dimension(name="y", count=256, chunk_size=64, type="space", scale=2, unit=UM),
         Dimension(name="x", count=256, chunk_size=64, type="space", scale=2, unit=UM),
