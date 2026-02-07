@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Literal, cast
 import numpy as np
 
 from ome_writers._backends._backend import ArrayBackend
-from ome_writers._backends._live_tiff_store import LiveTiffStore
 from ome_writers._backends._ome_xml import prepare_metadata
 
 if TYPE_CHECKING:
@@ -317,6 +316,8 @@ class TiffBackend(ArrayBackend):
         """
         try:
             import zarr
+
+            from ome_writers._backends._live_tiff_store import LiveTiffStore
         except ImportError as e:
             raise ImportError(
                 f"{self.__class__.__name__}.get_arrays() requires zarr: "
