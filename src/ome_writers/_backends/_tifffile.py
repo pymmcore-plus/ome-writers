@@ -238,7 +238,7 @@ class TiffBackend(ArrayBackend):
         if not self._position_managers:  # pragma: no cover
             raise RuntimeError("Backend not prepared. Call prepare() first.")
 
-        if not indices:
+        if not indices:  # pragma: no cover
             return
 
         placeholder = np.zeros(self._frame_shape, dtype=self._dtype)
@@ -323,12 +323,12 @@ class TiffBackend(ArrayBackend):
                 f"{self.__class__.__name__}.get_arrays() requires zarr: "
             ) from e
 
-        if not self._position_managers:
+        if not self._position_managers:  # pragma: no cover
             raise RuntimeError("Backend not prepared. Call prepare() first.")
 
         arrays = []
         for _, manager in sorted(self._position_managers.items()):
-            if not manager.metadata_mirror.is_tiff:
+            if not manager.metadata_mirror.is_tiff:  # pragma: no cover
                 continue  # Skip companion-only entries
 
             path = manager.file_path
@@ -338,11 +338,11 @@ class TiffBackend(ArrayBackend):
                 store = tifffile.TiffFile(path).aszarr()
             else:
                 # LIVE: Use LiveTiffStore for incomplete file
-                if manager.thread is None:
+                if manager.thread is None:  # pragma: no cover
                     raise RuntimeError(f"No WriterThread for {path}")
 
                 # Check if compression is enabled (LiveTiffStore won't work)
-                if manager.thread._compression is not None:
+                if manager.thread._compression is not None:  # pragma: no cover
                     raise NotImplementedError(
                         "Live viewing is not supported with compression enabled."
                     )

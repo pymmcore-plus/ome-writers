@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from ome_writers import AcquisitionSettings, Dimension, create_stream
-from ome_writers._array_view import create_array_view
+from ome_writers._array_view import AcquisitionView
 
 try:
     from ome_writers._backends._live_tiff_store import LiveTiffStore, _compute_strides
@@ -70,7 +70,7 @@ def test_live_tiff_viewing_basic(tmp_path: Path) -> None:
         _wait_for_frames(stream._backend, expected_count=10)
 
         # Get live view BEFORE closing stream
-        view = create_array_view(stream._backend, settings)
+        view = AcquisitionView.from_stream(stream)
 
         # Should be able to read written frames
         assert view.shape == (5, 2, 32, 32)
@@ -106,7 +106,7 @@ def test_live_viewing_returns_zeros_for_unwritten(tmp_path: Path) -> None:
         _wait_for_frames(stream._backend, expected_count=3)
 
         # Get live view
-        view = create_array_view(stream._backend, settings)
+        view = AcquisitionView.from_stream(stream)
 
         # First 3 frames should have data
         assert np.all(view[0] == 100)
@@ -171,7 +171,7 @@ def test_live_viewing_with_compression_raises_error(tmp_path: Path) -> None:
             RuntimeError,
             match="Live viewing is not supported with compression enabled",
         ):
-            create_array_view(stream._backend, settings)
+            AcquisitionView.from_stream(stream)
 
 
 def test_live_viewing_unbounded_dimension(tmp_path: Path) -> None:
@@ -198,7 +198,7 @@ def test_live_viewing_unbounded_dimension(tmp_path: Path) -> None:
         _wait_for_frames(stream._backend, expected_count=5)
 
         # Get live view
-        view = create_array_view(stream._backend, settings)
+        view = AcquisitionView.from_stream(stream)
 
         # Shape should use placeholder for unbounded dimension
         assert view.shape[0] >= 5  # At least 5 frames
