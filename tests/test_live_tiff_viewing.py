@@ -13,6 +13,8 @@ from ome_writers import AcquisitionSettings, Dimension, create_stream
 from ome_writers._array_view import AcquisitionView
 
 try:
+    import zarr
+
     from ome_writers._backends._live_tiff_store import LiveTiffStore, _compute_strides
     from ome_writers._backends._tifffile import TiffBackend
 except ImportError:
@@ -61,6 +63,12 @@ def test_live_tiff_viewing_basic(tmp_path: Path) -> None:
     )
 
     with create_stream(settings) as stream:
+        view = AcquisitionView.from_stream(stream)
+        # exercising some implementation details of the LiveTiffStore
+        array0 = view._arrays[0]
+        assert isinstance(array0, zarr.Array)
+        start_bytes = array0.nbytes_stored()
+
         # Write all frames (5 time points * 2 channels = 10 frames)
         for i in range(10):
             frame = np.full((32, 32), i, dtype=np.uint16)
@@ -68,9 +76,6 @@ def test_live_tiff_viewing_basic(tmp_path: Path) -> None:
 
         # Wait for frames to be written by WriterThread
         _wait_for_frames(stream._backend, expected_count=10)
-
-        # Get live view BEFORE closing stream
-        view = AcquisitionView.from_stream(stream)
 
         # Should be able to read written frames
         assert view.shape == (5, 2, 32, 32)
@@ -80,6 +85,10 @@ def test_live_tiff_viewing_basic(tmp_path: Path) -> None:
 
         data = view[2, 1]
         assert np.all(data == 5)  # Frame at t=2, c=1 (6th frame: t*2 + c = 2*2 + 1)
+
+        # Data should have been written to store
+        # this also exercises the `list_prefix` method of the store...
+        assert array0.nbytes_stored() > start_bytes
 
 
 def test_live_viewing_returns_zeros_for_unwritten(tmp_path: Path) -> None:
