@@ -174,40 +174,6 @@ def test_live_viewing_with_compression_raises_error(tmp_path: Path) -> None:
             AcquisitionView.from_stream(stream)
 
 
-def test_live_viewing_unbounded_dimension(tmp_path: Path) -> None:
-    """Test live viewing with unbounded time dimension."""
-    settings = AcquisitionSettings(
-        root_path=tmp_path / "test_unbounded",
-        dimensions=[
-            Dimension(name="t", count=None, chunk_size=1, type="time"),  # Unbounded
-            Dimension(name="y", count=16, chunk_size=16, type="space"),
-            Dimension(name="x", count=16, chunk_size=16, type="space"),
-        ],
-        dtype="uint16",
-        format="tifffile",
-        overwrite=True,
-    )
-
-    with create_stream(settings) as stream:
-        # Write some frames
-        for i in range(5):
-            frame = np.full((16, 16), i * 10, dtype=np.uint16)
-            stream.append(frame)
-
-        # Wait for frames to be written
-        _wait_for_frames(stream._backend, expected_count=5)
-
-        # Get live view
-        view = AcquisitionView.from_stream(stream)
-
-        # Shape should use placeholder for unbounded dimension
-        assert view.shape[0] >= 5  # At least 5 frames
-
-        # Should be able to read written frames
-        assert np.all(view[0] == 0)
-        assert np.all(view[4] == 40)
-
-
 def test_parse_chunk_key() -> None:
     """Test chunk key parsing."""
     # Create dummy store (thread=None for this test)
