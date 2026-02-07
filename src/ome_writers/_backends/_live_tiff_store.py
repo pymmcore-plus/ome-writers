@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import math
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -51,6 +52,16 @@ class LiveTiffStore(Store):
     - Only works with contiguous=True writes (sequential frame layout)
     """
 
+    __slots__ = (
+        "_chunks",
+        "_dtype",
+        "_fill_value",
+        "_frame_size_bytes",
+        "_path",
+        "_shape",
+        "_thread",
+    )
+
     def __init__(
         self,
         writer_thread: WriterThread,
@@ -69,12 +80,8 @@ class LiveTiffStore(Store):
         self._fill_value = fill_value
 
         # Calculate frame geometry
-        self._frame_shape = shape[-2:]  # (Y, X)
-
-        self._dtype_obj = np.dtype(dtype)
-        self._frame_size_bytes = (
-            self._frame_shape[0] * self._frame_shape[1] * self._dtype_obj.itemsize
-        )
+        frame_size = math.prod(shape[-2:])  # (Y, X)
+        self._frame_size_bytes = frame_size * np.dtype(dtype).itemsize
 
     # Properties required by zarr Store protocol
     @property
@@ -119,7 +126,7 @@ class LiveTiffStore(Store):
         except (ValueError, IndexError):
             return None
 
-        with self._thread._state_lock:
+        with self._thread.state_lock:
             if frame_idx >= self._thread.frames_written:
                 return None
             data_offset = self._thread.data_offset
@@ -153,7 +160,7 @@ class LiveTiffStore(Store):
 
         try:
             frame_idx = self._parse_chunk_key(key)
-            with self._thread._state_lock:
+            with self._thread.state_lock:
                 return frame_idx < self._thread.frames_written
         except (ValueError, IndexError):
             return False
@@ -170,7 +177,7 @@ class LiveTiffStore(Store):
         """List all keys in store."""
         yield "zarr.json"
 
-        with self._thread._state_lock:
+        with self._thread.state_lock:
             n_frames = self._thread.frames_written
 
         dims = self._shape[:-2]

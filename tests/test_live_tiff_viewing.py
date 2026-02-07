@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import time
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -11,6 +10,7 @@ import pytest
 
 from ome_writers import AcquisitionSettings, Dimension, create_stream
 from ome_writers._array_view import AcquisitionView
+from tests._utils import wait_for_frames
 
 try:
     import zarr
@@ -25,26 +25,6 @@ except ImportError:
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-
-def _wait_for_frames(
-    backend: TiffBackend,
-    position_idx: int = 0,
-    expected_count: int | None = None,
-    timeout: float = 5.0,
-) -> None:
-    """Wait for WriterThread to write frames."""
-    start = time.time()
-    while time.time() - start < timeout:
-        thread = backend._position_managers[position_idx].thread
-        if thread is None:
-            break
-        with thread._state_lock:
-            written = thread.frames_written
-        if expected_count is None or written >= expected_count:
-            if written > 0:
-                break
-        time.sleep(0.01)  # Small sleep to avoid busy-waiting
 
 
 def test_live_tiff_viewing_basic(tmp_path: Path) -> None:
@@ -75,7 +55,7 @@ def test_live_tiff_viewing_basic(tmp_path: Path) -> None:
             stream.append(frame)
 
         # Wait for frames to be written by WriterThread
-        _wait_for_frames(stream._backend, expected_count=10)
+        wait_for_frames(stream._backend, expected_count=10)
 
         # Should be able to read written frames
         assert view.shape == (5, 2, 32, 32)
@@ -112,7 +92,7 @@ def test_live_viewing_returns_zeros_for_unwritten(tmp_path: Path) -> None:
             stream.append(frame)
 
         # Wait for frames to be written
-        _wait_for_frames(stream._backend, expected_count=3)
+        wait_for_frames(stream._backend, expected_count=3)
 
         # Get live view
         view = AcquisitionView.from_stream(stream)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import os
 import threading
 import warnings
 from contextlib import suppress
@@ -483,7 +484,7 @@ class WriterThread(threading.Thread):
         self._has_unbounded = has_unbounded
         self._compression = compression
         self.frames_written = 0  # Track actual frames written for unbounded dims
-        self._state_lock = threading.Lock()  # Synchronize with readers
+        self.state_lock = threading.Lock()  # Synchronize with readers
         self.data_offset: int | None = None  # Byte offset where frame data starts
 
     def run(self) -> None:
@@ -514,7 +515,7 @@ class WriterThread(threading.Thread):
             use_contiguous = self._compression is None
             for i, frame in enumerate(_queue_iterator()):
                 # Wrap write in lock and ensure flush for live viewing
-                with self._state_lock:
+                with self.state_lock:
                     self._writer.write(
                         frame,
                         contiguous=use_contiguous,
@@ -530,6 +531,7 @@ class WriterThread(threading.Thread):
                         self.data_offset = self._writer._dataoffset
                     # Flush to ensure data hits disk for readers
                     self._writer._fh.flush()
+                    os.fsync(self._writer._fh.fileno())
                     # Increment counter AFTER write and flush to ensure readers
                     # only see frames that are fully written
                     self.frames_written += 1

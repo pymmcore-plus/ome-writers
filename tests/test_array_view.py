@@ -12,6 +12,7 @@ from ome_writers import AcquisitionSettings, Dimension, Position
 from ome_writers._array_view import AcquisitionView
 from ome_writers._frame_encoder import frame_generator, validate_encoded_frame_values
 from ome_writers._stream import create_stream
+from tests._utils import wait_for_frames
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -76,6 +77,7 @@ def test_array_view(tmp_path: Path, dim_order: str, any_backend: str) -> None:
             # halfway through...
             if expected_frames > 20 and i == (expected_frames // 2):
                 # we should be able to see early frames,
+                wait_for_frames(stream._backend, expected_count=1)
                 first_idx = (0,) * (view.ndim - 2)
                 first_frame = view[first_idx]
                 assert not np.allclose(first_frame, 0)
