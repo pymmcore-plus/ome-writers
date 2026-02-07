@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import math
 from itertools import islice
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
+from ome_writers._array_view import create_array_view
 from ome_writers._router import FrameRouter
 from ome_writers._stream import create_stream
 
@@ -138,14 +139,17 @@ def write_encoded_data(
     *,
     real_unbounded_count: int = 2,
     mode: EncodeMode = "random-corner",
-) -> None:
+    return_view: bool = False,
+) -> Any:
     """Write data using the provided writer and settings."""
     frames = frame_generator(
         settings, real_unbounded_count=real_unbounded_count, mode=mode
     )
     with create_stream(settings) as stream:
+        view = create_array_view(stream._backend, settings) if return_view else None
         for frame in frames:
             stream.append(frame)
+    return view
 
 
 def validate_encoded_frame_values(
