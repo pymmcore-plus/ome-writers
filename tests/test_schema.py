@@ -526,7 +526,7 @@ def test_storage_order_acquisition() -> None:
     assert [d.name for d in settings.storage_index_dimensions] == ["z", "c", "t"]
 
 
-def test_storage_order_ome_with_tiff(tiff_backend: str) -> None:
+def test_storage_order_ome(any_backend: str) -> None:
     """Test storage_order='ome' with tiff backend."""
     settings = AcquisitionSettings(
         root_path="test.ome.tiff",
@@ -538,12 +538,14 @@ def test_storage_order_ome_with_tiff(tiff_backend: str) -> None:
         ],
         dtype="uint16",
         storage_order="ome",
-        format={"name": "ome-tiff", "backend": tiff_backend},
+        format=any_backend,
     )
     # For TIFF, the sort key should use _ome_tiff_sort_key
-    assert settings.format.name == "ome-tiff"
     assert len(settings.storage_index_dimensions) == 2
-    assert not settings.storage_index_permutation  # CTYX is already correct
+    if settings.format.name == "ome-tiff":
+        assert not settings.storage_index_permutation  # CTYX is already correct
+    else:
+        assert settings.storage_index_permutation == (1, 0)  # CTYX -> TCYX
 
 
 def test_storage_order_valid_list() -> None:

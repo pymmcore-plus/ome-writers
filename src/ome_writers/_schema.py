@@ -959,7 +959,11 @@ class AcquisitionSettings(_BaseModel):
 
     @property
     def storage_index_permutation(self) -> tuple[int, ...] | None:
-        """Permutation to convert acquisition index to storage index, if different."""
+        """Permutation to convert acquisition index to storage index, if different.
+
+        If storage order is the same as acquisition order for index dimensions, returns
+        `None`.
+        """
         storage_dims = self.storage_index_dimensions
         perm = _compute_permutation(self.index_dimensions, storage_dims)
         return perm if perm != tuple(range(len(perm))) else None

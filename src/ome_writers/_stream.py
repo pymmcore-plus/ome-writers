@@ -6,8 +6,9 @@ import sys
 import warnings
 import weakref
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import TYPE_CHECKING, Any, Literal, NoReturn
 
+from ome_writers._coord_tracker import CoordUpdate, StreamEvent
 from ome_writers._router import FrameRouter
 
 if TYPE_CHECKING:
@@ -16,7 +17,10 @@ if TYPE_CHECKING:
     import numpy as np
 
     from ome_writers._backends._backend import ArrayBackend
+    from ome_writers._coord_tracker import _CoordTracker
     from ome_writers._schema import AcquisitionSettings, FileFormat
+
+    EventName = Literal["coords_expanded", "coords_changed"]
 
 __all__ = ["OMEStream", "create_stream"]
 
@@ -53,33 +57,43 @@ class OMEStream:
 
     """
 
+    __slots__ = (
+        "__weakref__",
+        "_backend",
+        "_coord_tracker",
+        "_event_handlers",
+        "_expected_frames",
+        "_finalizer",
+        "_frames_written",
+        "_iterator",
+        "_router",
+        "_settings",
+        "_state",
+    )
+
     def __init__(
-        self, backend: ArrayBackend, router: FrameRouter, expected_frames: int | None
+        self, backend: ArrayBackend, router: FrameRouter, settings: AcquisitionSettings
     ) -> None:
         self._backend = backend
         self._router = router
         self._iterator = iter(router)
-        self._expected_frames = expected_frames
+        self._expected_frames = settings.num_frames
+        self._settings = settings
+
+        # Track frame count for mid-acquisition tracker initialization
+        self._frames_written = 0
+
+        # Lazy coordinate tracking - only created when first event handler registered
+        self._coord_tracker: _CoordTracker | None = None
+        self._event_handlers: dict[EventName, list[Callable[[CoordUpdate], None]]] = {}
 
         # Mutable state container shared with finalizer
         self._state = {"has_appended": False}
 
         # Register cleanup that runs on garbage collection if not explicitly closed
         self._finalizer = weakref.finalize(
-            self, self._warn_and_finalize, backend, self._state
+            self, _finalize_backend, backend, self._state
         )
-
-    @staticmethod
-    def _warn_and_finalize(backend: ArrayBackend, state: dict) -> None:
-        """Cleanup function called on garbage collection if not explicitly closed."""
-        if state["has_appended"]:
-            warnings.warn(
-                "OMEStream was not closed before garbage collection. Please "
-                "use `with create_stream(...):` in a context manager or call "
-                "`stream.close()` before deletion.",
-                stacklevel=2,
-            )
-        backend.finalize()
 
     def _handle_stop_iteration(self, operation: str, frame_count: int = 1) -> NoReturn:
         """Convert StopIteration to ValueError with helpful message."""
@@ -133,6 +147,12 @@ class OMEStream:
         self._backend.write(pos_idx, idx, frame, frame_metadata=frame_metadata)
         self._state["has_appended"] = True
 
+        # Update frame count and emit events
+        self._frames_written += 1
+        if self._coord_tracker is not None:
+            if update := self._coord_tracker.update():
+                self._emit_coord_events(update)
+
     def skip(self, *, frames: int = 1) -> None:
         """Skip N frames in acquisition order without writing data.
 
@@ -183,6 +203,12 @@ class OMEStream:
             self._handle_stop_iteration("skip frames", frames)
         self._backend.advance(indices)
 
+        # Update frame count and emit events if high water mark crossed
+        self._frames_written += frames
+        if self._coord_tracker is not None:
+            if update := self._coord_tracker.skip(frames):
+                self._emit_coord_events(update)
+
     def get_metadata(self) -> Any:
         """Retrieve metadata from the backend.  Meaning is format-dependent."""
         return self._backend.get_metadata()
@@ -204,6 +230,40 @@ class OMEStream:
         # Detach returns the callback args if finalizer was still alive, None otherwise
         if self._finalizer.detach():
             self._backend.finalize()
+
+    @property
+    def closed(self) -> bool:
+        """Return True if the stream has been closed."""
+        return not self._finalizer.alive
+
+    def on(self, event: EventName, callback: Callable[[CoordUpdate], None]) -> None:
+        """Register event handler (COORDS_EXPANDED or COORDS_CHANGED)."""
+        if event not in (StreamEvent.COORDS_EXPANDED, StreamEvent.COORDS_CHANGED):
+            raise ValueError(f"Unknown event: {event!r}")
+
+        if self._coord_tracker is None:
+            # Lazy init - only create when first handler registered
+            from ome_writers._coord_tracker import _CoordTracker
+
+            self._coord_tracker = _CoordTracker(self._settings, self._frames_written)
+        self._event_handlers.setdefault(event, []).append(callback)
+
+        # Configure tracker optimization based on event type
+        if event == StreamEvent.COORDS_CHANGED:
+            self._coord_tracker.set_needs_current_indices(True)
+
+    def _emit_coord_events(self, update: CoordUpdate) -> None:
+        """Emit coordinate events to registered handlers."""
+        # Emit coords_changed on every update
+        if StreamEvent.COORDS_CHANGED in self._event_handlers:
+            for handler in self._event_handlers[StreamEvent.COORDS_CHANGED]:
+                handler(update)
+
+        # Emit coords_expanded only on high water marks
+        if update.is_high_water_mark:
+            if StreamEvent.COORDS_EXPANDED in self._event_handlers:
+                for handler in self._event_handlers[StreamEvent.COORDS_EXPANDED]:
+                    handler(update)
 
 
 def get_format_for_backend(backend: str) -> FileFormat:
@@ -352,7 +412,7 @@ def create_stream(settings: AcquisitionSettings) -> OMEStream:
     except FileExistsError:
         backend.finalize()
         raise
-    return OMEStream(backend, router, settings.num_frames)
+    return OMEStream(backend, router, settings)
 
 
 def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:
@@ -455,3 +515,15 @@ def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:
         "pip install ome-writers[<backend>], where <backend> is one of "
         f"{VALID_BACKEND_NAMES}"
     )
+
+
+def _finalize_backend(backend: ArrayBackend, state: dict) -> None:
+    """Cleanup function called on garbage collection if not explicitly closed."""
+    if state["has_appended"]:
+        warnings.warn(
+            "OMEStream was not closed before garbage collection. Please "
+            "use `with create_stream(...):` in a context manager or call "
+            "`stream.close()` before deletion.",
+            stacklevel=2,
+        )
+    backend.finalize()
