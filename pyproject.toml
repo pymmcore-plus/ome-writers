@@ -115,6 +115,10 @@ docs = [
     "mkdocstrings-python>=2.0.1",
     "zensical>=0.0.18",
 ]
+pymmcore = [
+    "ndv[pyqt,vispy]>=0.4.1",
+    "pymmcore-plus>=0.17.1",
+]
 
 [project.urls]
 homepage = "https://github.com/pymmcore-plus/ome-writers"
