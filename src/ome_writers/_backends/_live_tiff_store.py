@@ -135,7 +135,8 @@ class LiveTiffStore(Store):
 
         return prototype.buffer.from_bytes(data)
 
-    async def get_partial_values(
+    # another mandatory abstract method that seems to almost never be called by zarr
+    async def get_partial_values(  # pragma: no cover
         self,
         prototype: BufferPrototype,
         key_ranges: Iterable[tuple[str, ByteRequest | None]],

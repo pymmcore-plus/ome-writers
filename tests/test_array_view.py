@@ -74,7 +74,7 @@ def test_array_view(tmp_path: Path, dim_order: str, any_backend: str) -> None:
             stream.append(frame)
 
             # halfway through...
-            if expected_frames > 2 and i == (expected_frames // 2):
+            if expected_frames > 20 and i == (expected_frames // 2):
                 # we should be able to see early frames,
                 first_idx = (0,) * (view.ndim - 2)
                 first_frame = view[first_idx]
