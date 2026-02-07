@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import os
 import threading
 import warnings
 from contextlib import suppress
@@ -528,10 +527,17 @@ class WriterThread(threading.Thread):
                     )
                     # Capture data offset after first frame (where frames start in file)
                     if i == 0 and self.data_offset is None:
-                        self.data_offset = self._writer._dataoffset
-                    # Flush to ensure data hits disk for readers
-                    self._writer._fh.flush()
-                    os.fsync(self._writer._fh.fileno())
+                        try:
+                            # ! private attribute access - relies on tifffile internals
+                            self.data_offset = self._writer._dataoffset
+                        except AttributeError:  # pragma: no cover
+                            raise RuntimeError(
+                                "tifffile.TiffWriter has no _dataoffset attribute. "
+                                "Cannot determine frame data offset for live viewing."
+                                "Please report this issue with the version of tifffile "
+                                "you're using."
+                            ) from None
+
                     # Increment counter AFTER write and flush to ensure readers
                     # only see frames that are fully written
                     self.frames_written += 1
