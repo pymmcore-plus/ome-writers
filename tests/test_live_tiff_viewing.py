@@ -11,7 +11,14 @@ import pytest
 
 from ome_writers import AcquisitionSettings, Dimension
 from ome_writers._array_view import create_array_view
-from ome_writers._backends._live_tiff_store import LiveTiffStore, _compute_strides
+
+try:
+    from ome_writers._backends._live_tiff_store import LiveTiffStore, _compute_strides
+except ImportError:
+    pytest.skip(
+        "LiveTiffStore tests require tifffile AND zarr dependency",
+        allow_module_level=True,
+    )
 from ome_writers._backends._tifffile import TiffBackend
 from ome_writers._stream import create_stream
 
