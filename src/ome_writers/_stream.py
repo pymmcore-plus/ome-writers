@@ -53,33 +53,33 @@ class OMEStream:
 
     """
 
+    __slots__ = (
+        "__weakref__",
+        "_backend",
+        "_expected_frames",
+        "_finalizer",
+        "_iterator",
+        "_router",
+        "_settings",
+        "_state",
+    )
+
     def __init__(
-        self, backend: ArrayBackend, router: FrameRouter, expected_frames: int | None
+        self, backend: ArrayBackend, router: FrameRouter, settings: AcquisitionSettings
     ) -> None:
         self._backend = backend
         self._router = router
         self._iterator = iter(router)
-        self._expected_frames = expected_frames
+        self._expected_frames = settings.num_frames
+        self._settings = settings
 
         # Mutable state container shared with finalizer
         self._state = {"has_appended": False}
 
         # Register cleanup that runs on garbage collection if not explicitly closed
         self._finalizer = weakref.finalize(
-            self, self._warn_and_finalize, backend, self._state
+            self, _finalize_backend, backend, self._state
         )
-
-    @staticmethod
-    def _warn_and_finalize(backend: ArrayBackend, state: dict) -> None:
-        """Cleanup function called on garbage collection if not explicitly closed."""
-        if state["has_appended"]:
-            warnings.warn(
-                "OMEStream was not closed before garbage collection. Please "
-                "use `with create_stream(...):` in a context manager or call "
-                "`stream.close()` before deletion.",
-                stacklevel=2,
-            )
-        backend.finalize()
 
     def _handle_stop_iteration(self, operation: str, frame_count: int = 1) -> NoReturn:
         """Convert StopIteration to ValueError with helpful message."""
@@ -204,6 +204,11 @@ class OMEStream:
         # Detach returns the callback args if finalizer was still alive, None otherwise
         if self._finalizer.detach():
             self._backend.finalize()
+
+    @property
+    def closed(self) -> bool:
+        """Return True if the stream has been closed."""
+        return not self._finalizer.alive
 
 
 def get_format_for_backend(backend: str) -> FileFormat:
@@ -352,7 +357,7 @@ def create_stream(settings: AcquisitionSettings) -> OMEStream:
     except FileExistsError:
         backend.finalize()
         raise
-    return OMEStream(backend, router, settings.num_frames)
+    return OMEStream(backend, router, settings)
 
 
 def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:
@@ -455,3 +460,15 @@ def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:
         "pip install ome-writers[<backend>], where <backend> is one of "
         f"{VALID_BACKEND_NAMES}"
     )
+
+
+def _finalize_backend(backend: ArrayBackend, state: dict) -> None:
+    """Cleanup function called on garbage collection if not explicitly closed."""
+    if state["has_appended"]:
+        warnings.warn(
+            "OMEStream was not closed before garbage collection. Please "
+            "use `with create_stream(...):` in a context manager or call "
+            "`stream.close()` before deletion.",
+            stacklevel=2,
+        )
+    backend.finalize()
