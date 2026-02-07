@@ -119,7 +119,7 @@ def _make_frames(settings: AcquisitionSettings) -> list[np.ndarray]:
     ]
 
 
-@pytest.mark.parametrize("backend", conftest.ZARR_BACKENDS)
+@pytest.mark.parametrize("backend", conftest.AVAILABLE_BACKENDS)
 @pytest.mark.parametrize("case", BENCHMARK_CASES)
 def test_bench_append(
     backend: str,
