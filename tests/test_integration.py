@@ -503,14 +503,15 @@ def _assert_valid_ome_tiff(case: AcquisitionSettings) -> None:
         pytest.skip("ome-types and tifffile are required for OME-TIFF validation")
 
     num_pos = len(case.positions)
-    paths = (
-        [Path(case.output_path)]
-        if num_pos == 1
-        else [
-            Path(case.output_path.replace(".ome.tiff", f"_p{i:03d}.ome.tiff"))
+    if num_pos == 1:
+        paths = [Path(case.output_path)]
+    else:
+        # Multi-position: output_path is a directory, files are inside it
+        output_dir = Path(case.output_path)
+        paths = [
+            output_dir / f"{output_dir.name}_p{i:03d}{case.format.suffix}"
             for i in range(num_pos)
         ]
-    )
 
     dims = case.array_storage_dimensions
     for i, path in enumerate(paths):

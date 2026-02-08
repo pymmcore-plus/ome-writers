@@ -81,12 +81,12 @@ if settings.format.name == "ome-zarr":
     print("✓ Zarr store is valid")
 
 if settings.format.name == "ome-tiff":
+    from pathlib import Path
+
     from ome_types import from_tiff
 
-    if len(seq.stage_positions) == 0:
-        files = [settings.root_path]
-    else:
-        files = [f"{settings.root_path[:-9]}_p{pos:03d}.ome.tiff" for pos in range(2)]
-    for idx, file in enumerate(files):
-        from_tiff(file)
-        print(f"✓ TIFF file {idx} is valid")
+    output_path = Path(settings.output_path)
+    files = [output_path] if output_path.is_file() else output_path.glob("*.tiff")
+    for file in files:
+        from_tiff(str(file))
+        print(f"✓ TIFF file {file.name} is valid")

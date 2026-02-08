@@ -12,25 +12,26 @@ import ome_types
 import ome_types.model as ome
 import tifffile
 
+from ome_writers._schema import OmeTiffFormat
 from ome_writers._units import ngff_to_ome_unit
 
 if TYPE_CHECKING:
     from ome_writers._schema import AcquisitionSettings, Channel, Dimension, Position
 
 BinaryOnly = ome.OME.BinaryOnly
-COMPANION_IDX = -1  # special index for .companion.ome files
+COMPANION_IDX = -1  # special index for companion.ome files
 
 
-class MetadataMode(Enum):
+class TiffStructure(Enum):
     """TIFF structure modes."""
 
-    SINGLE_FILE = "single_file"
+    SINGLE_FILE = "single-file"
     """All series in a single TIFF file with full OME-XML metadata."""
-    MULTI_REDUNDANT = "multi_redundant"
+    MULTI_REDUNDANT = "multi-redundant"
     """TIFF file per series; each with full OME-XML metadata."""
-    MULTI_MASTER_TIFF = "multi_master_tiff"
+    MULTI_MASTER_TIFF = "multi-master-tiff"
     """TIFF file per series; full OME-XML in master TIFF, BinData in rest."""
-    MULTI_MASTER_COMPANION = "multi_master_companion"
+    MULTI_MASTER_COMPANION = "multi-master-companion"
     """TIFF file per series with only BinData, full OME-XML in companion file."""
 
 
@@ -86,23 +87,22 @@ class OmeXMLMirror:
         self._dirty = False
 
 
-def prepare_metadata(
-    settings: AcquisitionSettings, mode: MetadataMode = MetadataMode.MULTI_REDUNDANT
-) -> dict[str, OmeXMLMirror]:
-    """Create OME-XML mirrors based on the acquisition settings and metadata mode.
+def prepare_metadata(settings: AcquisitionSettings) -> dict[str, OmeXMLMirror]:
+    """Create OME-XML mirrors based on the acquisition settings.
 
     Parameters
     ----------
     settings : AcquisitionSettings
-        The acquisition settings containing file paths.
-    mode : MetadataMode
-        The metadata mode to use.
+        The acquisition settings containing file paths and format configuration.
 
     Returns
     -------
     dict[str, OmeXMLMirror]
         Mapping of file paths to their OME-XML mirrors.
     """
+    if not isinstance(settings.format, OmeTiffFormat):
+        raise ValueError("Expected settings.format to be an OmeTiffFormat instance.")
+
     if any(
         dim.name.lower() not in "tczyx"
         for dim in settings.dimensions
@@ -110,12 +110,14 @@ def prepare_metadata(
     ):  # pragma: no cover
         raise ValueError("Dimension names must be one of 't', 'c', 'z', 'y', 'x'")
 
-    root = Path(settings.output_path).expanduser().resolve()
+    mode = TiffStructure(settings.format.structure)
+
+    # Force single file for single position acquisitions
     if len(settings.positions) <= 1:
-        mode = MetadataMode.SINGLE_FILE
+        mode = TiffStructure.SINGLE_FILE
 
     # Generate file info (path + UUID) for each position
-    file_infos = _generate_file_infos(root, settings.positions, mode)
+    file_infos = _generate_file_infos(settings, mode)
     for info in file_infos:
         # Handle overwrite
         path = Path(info.path)
@@ -135,14 +137,14 @@ def prepare_metadata(
     # Create mirrors based on mode
     mirrors: dict[str, OmeXMLMirror] = {}
 
-    if mode == MetadataMode.SINGLE_FILE:
+    if mode == TiffStructure.SINGLE_FILE:
         # Single file contains everything
         info = file_infos[0]
         mirrors[info.path] = OmeXMLMirror(
             path=info.path, pos_idx=info.pos_idx, model=full_model
         )
 
-    elif mode == MetadataMode.MULTI_REDUNDANT:
+    elif mode == TiffStructure.MULTI_REDUNDANT:
         # Each file gets a full copy, differing only in root UUID
         for info in file_infos:
             mirrors[info.path] = OmeXMLMirror(
@@ -151,7 +153,7 @@ def prepare_metadata(
                 model=full_model.model_copy(deep=True, update={"uuid": info.uuid}),
             )
 
-    elif mode == MetadataMode.MULTI_MASTER_TIFF:
+    elif mode == TiffStructure.MULTI_MASTER_TIFF:
         # First file is master with full metadata
         master_info = file_infos[0]
         full_model.uuid = master_info.uuid
@@ -175,15 +177,18 @@ def prepare_metadata(
                 ),
             )
 
-    elif mode == MetadataMode.MULTI_MASTER_COMPANION:
-        companion_path = str(root.with_suffix(".companion.ome"))
+    elif mode == TiffStructure.MULTI_MASTER_COMPANION:
+        # Companion file goes in the output directory alongside TIFF files
+        output_path = Path(settings.output_path)
+        companion_filename = settings.format.companion_file
+        companion_path = str(output_path / companion_filename)
         companion_uuid = _make_uuid()
 
         # Companion file gets full metadata
         full_model.uuid = companion_uuid
         mirrors[companion_path] = OmeXMLMirror(
             path=companion_path,
-            pos_idx=None,
+            pos_idx=COMPANION_IDX,
             model=full_model,
         )
 
@@ -223,13 +228,29 @@ def _make_uuid() -> str:
 
 
 def _generate_file_infos(
-    root: Path, positions: list[Position], mode: MetadataMode
+    settings: AcquisitionSettings, mode: TiffStructure
 ) -> list[FileInfo]:
-    """Generate file paths and UUIDs for each position."""
+    """Generate file paths and UUIDs for each position.
 
-    if mode == MetadataMode.SINGLE_FILE:
+    Parameters
+    ----------
+    settings : AcquisitionSettings
+        Acquisition settings containing output path and format info.
+    mode : TiffStructure
+        The TIFF structure mode to use.
+
+    Returns
+    -------
+    list[FileInfo]
+        File information for each position.
+    """
+
+    output_path = Path(settings.output_path).expanduser().resolve()
+    positions = settings.positions
+
+    if mode == TiffStructure.SINGLE_FILE:
         # Single file for all positions
-        return [FileInfo(path=str(root), uuid=_make_uuid(), pos_idx=0)]
+        return [FileInfo(path=str(output_path), uuid=_make_uuid(), pos_idx=0)]
 
     # XXX: if we switch to using pos.name directly, we need to sanitize it
     # def _safename(name: str) -> str:
@@ -238,21 +259,27 @@ def _generate_file_infos(
     #         return f"p{name:04}"
     #     return name.replace("/", "_").replace("\\", "_")
 
-    # Multi-file: one file per position
-    extension = "".join(root.suffixes)
-    stem = root.stem.removesuffix(".ome")
+    # Multi-file: one file per position inside output_path directory
+    # output_path is now a directory for multi-file modes
+    output_dir = output_path
+    stem = output_dir.name
+    extension = settings.format.suffix
+
+    # Create output directory if it doesn't exist
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     return [
         FileInfo(
-            path=str(root.parent / f"{stem}_p{idx:03}{extension}"),
+            path=str(output_dir / f"{stem}_p{idx:03}{extension}"),
             uuid=_make_uuid(),
             pos_idx=idx,
         )
-        for idx, pos in enumerate(positions)
+        for idx, _pos in enumerate(positions)
     ]
 
 
 def _build_full_model(
-    settings: AcquisitionSettings, file_infos: list[FileInfo], mode: MetadataMode
+    settings: AcquisitionSettings, file_infos: list[FileInfo], mode: TiffStructure
 ) -> ome_types.OME:
     """Build complete OME model with all series/images."""
     dims = [d for d in settings.dimensions if d.type != "position"]
@@ -266,7 +293,7 @@ def _build_full_model(
     size_c = pixel_sizes["c"]
     size_z = pixel_sizes["z"]
 
-    single_file = mode == MetadataMode.SINGLE_FILE
+    single_file = mode == TiffStructure.SINGLE_FILE
 
     # Track cumulative IFD offset for single-file mode
     ifd_offset = 0

@@ -90,5 +90,5 @@ with create_stream(settings) as stream:
 if settings.format == "tiff":
     from ome_types import from_tiff
 
-    ome_obj = from_tiff(settings.root_path)
+    ome_obj = from_tiff(settings.output_path)
     print(ome_obj.to_xml())
