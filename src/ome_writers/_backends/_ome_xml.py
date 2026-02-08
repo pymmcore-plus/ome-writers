@@ -244,20 +244,7 @@ def _make_uuid() -> str:
 def _generate_file_infos(
     settings: AcquisitionSettings, single_file: bool
 ) -> list[FileInfo]:
-    """Generate file paths and UUIDs for each position.
-
-    Parameters
-    ----------
-    settings : AcquisitionSettings
-        Acquisition settings containing output path and format info.
-    single_file : bool
-        Whether to use single-file structure (True) or multi-file (False).
-
-    Returns
-    -------
-    list[FileInfo]
-        File information for each position.
-    """
+    """Generate file paths and UUIDs for each position."""
 
     output_path = Path(settings.output_path).expanduser().resolve()
     positions = settings.positions
@@ -295,22 +282,7 @@ def _generate_file_infos(
 def _build_full_model(
     settings: AcquisitionSettings, file_infos: list[FileInfo], single_file: bool
 ) -> ome_types.OME:
-    """Build complete OME model with all series/images.
-
-    Parameters
-    ----------
-    settings : AcquisitionSettings
-        Acquisition settings.
-    file_infos : list[FileInfo]
-        File information for each position.
-    single_file : bool
-        Whether using single-file structure.
-
-    Returns
-    -------
-    ome_types.OME
-        Complete OME model with all images.
-    """
+    """Build complete OME model with all series/images."""
     dims = [d for d in settings.dimensions if d.type != "position"]
     dimension_order = _get_dimension_order(dims)
     channel_dim = next(
