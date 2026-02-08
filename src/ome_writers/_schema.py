@@ -1011,21 +1011,6 @@ class AcquisitionSettings(_BaseModel):
     # --------- Validators ---------
 
     @model_validator(mode="after")
-    def _validate_tiff_structure(self) -> AcquisitionSettings:
-        """Validate and adjust TIFF structure for single-position acquisitions."""
-        if isinstance(self.format, OmeTiffFormat) and len(self.positions) <= 1:
-            # Single-position acquisitions must use single-file structure
-            if self.format.structure != "single-file":
-                # Create a new format object with corrected structure
-                self.format = OmeTiffFormat(
-                    name=self.format.name,
-                    backend=self.format.backend,
-                    suffix=self.format.suffix,
-                    structure="single-file",
-                )
-        return self
-
-    @model_validator(mode="after")
     def _validate_format_compression(self) -> AcquisitionSettings:
         """Validate compression is supported for selected format."""
         if self.compression is None:

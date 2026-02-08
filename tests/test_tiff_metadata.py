@@ -508,7 +508,7 @@ def _write_with_mode(
     dimensions: list[Dimension],
     mode: TiffStructure,
     plate: Plate | None = None,
-) -> None:
+) -> AcquisitionSettings:
     """Write test data with specified structure mode."""
     settings = AcquisitionSettings(
         root_path=tmp_path / "test.ome.tiff",
@@ -527,26 +527,29 @@ def _write_with_mode(
             frame = np.full(frame_shape, fill_value=i, dtype=settings.dtype)
             stream.append(frame)
 
+    return settings
 
-def _get_full_ome(tmp_path: Path, mode: TiffStructure) -> ome_types.OME | None:
+
+def _get_full_ome(settings: AcquisitionSettings) -> ome_types.OME:
     """Get OME model with full metadata for the given mode."""
-    # Multi-file modes now create a subdirectory
-    if mode == TiffStructure.MULTI_MASTER_COMPANION:
-        # Find the output directory (should be the only subdirectory)
-        output_dir = next(d for d in tmp_path.iterdir() if d.is_dir())
-        # Find companion file: non-.tiff file with .ome or .xml suffix
-        companion = next(
-            f
-            for f in output_dir.iterdir()
-            if f.is_file() and f.suffix in (".ome", ".xml") and ".tiff" not in f.name
-        )
-        with open(companion, encoding="utf-8") as f:
+    mode = TiffStructure(settings.format.structure)
+    output_path = Path(settings.output_path)
+
+    if mode == TiffStructure.SINGLE_FILE:
+        # Single file: output_path is the TIFF file
+        return from_tiff(str(output_path))
+    elif mode == TiffStructure.MULTI_MASTER_COMPANION:
+        # Use exact companion filename from settings
+        companion_path = output_path / settings.format.companion_file
+        with open(companion_path, encoding="utf-8") as f:
             return from_xml(f.read())
     elif mode == TiffStructure.MULTI_MASTER_TIFF:
-        master = next(f for f in tmp_path.rglob("*.ome.tiff") if "_p000" in f.name)
+        # First TIFF file is the master
+        master = next(f for f in output_path.glob("*_p000.ome.tiff"))
         return from_tiff(str(master))
-    elif mode == TiffStructure.MULTI_REDUNDANT:
-        any_file = next(tmp_path.rglob("*.ome.tiff"))
+    else:  # mode == TiffStructure.MULTI_REDUNDANT
+        # Any TIFF file has full metadata
+        any_file = next(output_path.glob("*.ome.tiff"))
         return from_tiff(str(any_file))
 
 
@@ -560,14 +563,14 @@ def test_basic_multiposition(tmp_path: Path, mode: TiffStructure) -> None:
         Dimension(name="x", count=32, type="space"),
     ]
 
-    _write_with_mode(tmp_path, dimensions, mode)
+    settings = _write_with_mode(tmp_path, dimensions, mode)
 
     # Verify file structure (multi-file modes create subdirectory)
     tiff_files = list(tmp_path.rglob("*.ome.tiff"))
     assert len(tiff_files) == 2
 
     # Get full metadata
-    ome = _get_full_ome(tmp_path, mode)
+    ome = _get_full_ome(settings)
     assert len(ome.images) == 2
     assert [img.name for img in ome.images] == ["Pos0", "Pos1"]
 
@@ -592,9 +595,9 @@ def test_5d_with_physical_sizes(tmp_path: Path, mode: TiffStructure) -> None:
         Dimension(name="x", count=64, type="space", scale=0.5, unit="micrometer"),
     ]
 
-    _write_with_mode(tmp_path, dimensions, mode)
+    settings = _write_with_mode(tmp_path, dimensions, mode)
 
-    ome = _get_full_ome(tmp_path, mode)
+    ome = _get_full_ome(settings)
     assert len(ome.images) == 2
 
     for img in ome.images:
@@ -627,9 +630,9 @@ def test_plate_basic(tmp_path: Path, mode: TiffStructure) -> None:
     ]
     plate = Plate(name="Test Plate", row_names=["A", "B"], column_names=["1", "2"])
 
-    _write_with_mode(tmp_path, dimensions, mode, plate=plate)
+    settings = _write_with_mode(tmp_path, dimensions, mode, plate=plate)
 
-    ome = _get_full_ome(tmp_path, mode)
+    ome = _get_full_ome(settings)
     assert len(ome.images) == 3
     assert len(ome.plates) == 1
 
@@ -658,9 +661,9 @@ def test_plate_multiple_fields(tmp_path: Path, mode: TiffStructure) -> None:
     ]
     plate = Plate(name="Multi-Field", row_names=["A"], column_names=["1", "2"])
 
-    _write_with_mode(tmp_path, dimensions, mode, plate=plate)
+    settings = _write_with_mode(tmp_path, dimensions, mode, plate=plate)
 
-    ome = _get_full_ome(tmp_path, mode)
+    ome = _get_full_ome(settings)
     plate_obj = ome.plates[0]
 
     # Find well A1 - should have 2 fields
