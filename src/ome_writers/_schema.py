@@ -24,6 +24,7 @@ from pydantic import (
     Field,
     PositiveInt,
     TypeAdapter,
+    field_validator,
     model_validator,
 )
 from pydantic_extra_types.color import Color  # noqa TC002
@@ -687,36 +688,57 @@ class OmeTiffFormat(_BaseModel):
         description="File suffix/extension to use for OME-TIFF files. Default is "
         "'.ome.tiff'.",
     )
+    prefer_single_file: Literal["auto", "always", "never"] = Field(
+        default="auto",
+        description="When to use single-file structure (all series in a single TIFF "
+        "file), vs multi-file directory (one TIFF file per position):\n"
+        "\n- `'auto'`: Single file for single-position acquisitions, "
+        "multi-file for multiple positions (default)."
+        "\n- `'always'`: Always use single file, even for multiple positions "
+        "(not yet supported - will raise `NotImplementedError` when num_positions > 1)."
+        "\n- `'never'`: Always use multi-file structure, even for single position.",
+    )
+    multi_file_metadata: Literal["redundant", "master-tiff", "companion-file"] = Field(
+        default="redundant",
+        description=(
+            "Controls how metadata is arranged for multi-position acquisitions. "
+            "In each case, there is one TIFF file per position, where:\n"
+            "\n- `'redundant'`: Each file has complete OME-XML metadata."
+            "\n- `'master-tiff'`: The first file has full OME-XML, others have `BinData` references."  # noqa TC501
+            "\n- `'companion-file'`: All TIFFs have `BinData` only, full OME-XML in separate companion file."  # noqa TC501
+        ),
+    )
     companion_file: str = Field(
         default="companion.ome",
         description="Filename to use for OME-XML companion file when using "
-        "`'multi-master-companion'` structure. ",
-    )
-    structure: Literal[
-        "single-file", "multi-redundant", "multi-master-tiff", "multi-master-companion"
-    ] = Field(
-        default="multi-redundant",
-        description="TIFF file structure for multi-series datasets.\n"
-        "\n- `'single-file'`: All series in one TIFF file with full OME-XML metadata. "
-        "\n- `'multi-redundant'`: One TIFF per series, each with complete OME-XML metadata. "  # noqa
-        "\n- `'multi-master-tiff'`: One TIFF per series, full OME-XML in first file only, `BinData` references in others. "  # noqa
-        "\n- `'multi-master-companion'`: One TIFF per series with `BinData` only, full OME-XML "  # noqa
-        "in separate file named by `companion_file` field.\n"
-        "Single-position acquisitions always use `'single-file'` regardless of this "
-        "setting.",
+        "`'companion-file'` structure. ",
     )
 
-    def get_output_path(self, root_path: str) -> str:
-        """Compute output path based on root_path and structure setting.
+    def get_output_path(self, root_path: str, *, num_positions: int = 1) -> str:
+        """Compute output path based on root_path and position count.
 
         For single-file structure: returns file path with suffix.
         For multi-file structures: returns directory path (suffix stripped).
         """
         ome_stem, _ = _ome_stem_suffix(root_path)
-        if self.structure == "single-file":
+
+        use_single = self.prefer_single_file == "always" or (
+            self.prefer_single_file == "auto" and num_positions <= 1
+        )
+
+        if use_single:
             return ome_stem + self.suffix
         # Multi-file modes: return directory path without suffix
         return ome_stem
+
+    @field_validator("prefer_single_file", mode="before")
+    @classmethod
+    def _validate_prefer_single_file(cls, value: Any) -> Any:
+        if value is True:
+            return "always"
+        if value is False:
+            return "never"
+        return value
 
 
 class OmeZarrFormat(_BaseModel):
@@ -740,7 +762,7 @@ class OmeZarrFormat(_BaseModel):
         "Default is '.ome.zarr'.",
     )
 
-    def get_output_path(self, root_path: str) -> str:
+    def get_output_path(self, root_path: str, *, num_positions: int = 1) -> str:
         """Compute output path based on root_path.
 
         OME-Zarr always uses directory structure.
@@ -932,7 +954,10 @@ class AcquisitionSettings(_BaseModel):
         For multi-file TIFF: returns a directory path (suffix stripped).
         For Zarr: returns a directory path with suffix.
         """
-        return self.format.get_output_path(self.root_path)
+        return self.format.get_output_path(
+            self.root_path,
+            num_positions=len(self.positions),
+        )
 
     @property
     def shape(self) -> tuple[int | None, ...]:

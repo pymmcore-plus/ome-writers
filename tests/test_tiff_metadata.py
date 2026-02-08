@@ -24,7 +24,7 @@ except ImportError:
 
 from pathlib import Path
 
-from ome_writers._backends._ome_xml import TiffStructure, prepare_metadata
+from ome_writers._backends._ome_xml import MultiFileMetadata, prepare_metadata
 
 
 def test_update_metadata_single_file(tmp_path: Path, tiff_backend: str) -> None:
@@ -292,17 +292,31 @@ def test_tiff_multiposition_detailed_metadata(
                 assert f"multipos_p{img_idx:03}.ome.tiff" in (td.uuid.file_name or "")
 
 
+def test_single_file_multi_position_not_supported(tmp_path: Path) -> None:
+    """Test that single-file mode with multiple positions raises NotImplementedError."""
+    settings = AcquisitionSettings(
+        root_path=tmp_path / "test.ome.tiff",
+        dimensions=[
+            Dimension(name="p", type="position", coords=["Pos0", "Pos1"]),
+            Dimension(name="y", count=32, type="space"),
+            Dimension(name="x", count=32, type="space"),
+        ],
+        dtype="uint16",
+        format={"name": "ome-tiff", "prefer_single_file": "always"},
+    )
+
+    with pytest.raises(
+        NotImplementedError, match="Single-file structure with multiple"
+    ):
+        prepare_metadata(settings)
+
+
 @pytest.mark.parametrize(
-    "structure",
-    [
-        "single-file",
-        "multi-redundant",
-        "multi-master-tiff",
-        "multi-master-companion",
-    ],
+    "multi_file_metadata",
+    ["redundant", "master-tiff", "companion-file"],
 )
-def test_prepare_meta(tmp_path: Path, structure: str) -> None:
-    """Test prepare_metadata function with different structure modes."""
+def test_prepare_meta(tmp_path: Path, multi_file_metadata: str) -> None:
+    """Test prepare_metadata function with different multi-file structure modes."""
     settings = AcquisitionSettings(
         root_path=tmp_path / "test.ome.tiff",
         dimensions=[
@@ -313,7 +327,11 @@ def test_prepare_meta(tmp_path: Path, structure: str) -> None:
             Dimension(name="x", count=32, type="space"),
         ],
         dtype="uint16",
-        format={"name": "ome-tiff", "structure": structure},
+        format={
+            "name": "ome-tiff",
+            "multi_file_metadata": multi_file_metadata,
+            "prefer_single_file": "never",  # Force multi-file even for single position
+        },
     )
 
     meta = prepare_metadata(settings)
@@ -321,9 +339,9 @@ def test_prepare_meta(tmp_path: Path, structure: str) -> None:
     assert all(str(tmp_path) in key for key in meta.keys())
 
     # Check for companion file in metadata based on structure mode
-    mode = TiffStructure(structure)
+    metadata_mode = MultiFileMetadata(multi_file_metadata)
     companion_path = str(Path(settings.output_path) / settings.format.companion_file)
-    assert (companion_path in meta) == (mode == TiffStructure.MULTI_MASTER_COMPANION)
+    assert (companion_path in meta) == (metadata_mode == MultiFileMetadata.COMPANION)
 
 
 def test_channel_metadata_in_tiff(tmp_path: Path, tiff_backend: str) -> None:
@@ -495,27 +513,32 @@ def test_frame_metadata_multiposition(tmp_path: Path, tiff_backend: str) -> None
 
 
 MULTI_FILE_MODES = [
-    TiffStructure.MULTI_REDUNDANT,
-    TiffStructure.MULTI_MASTER_TIFF,
-    TiffStructure.MULTI_MASTER_COMPANION,
-    # TODO: multi-position single file still has to be implemented
-    # TiffStructure.SINGLE_FILE
+    MultiFileMetadata.REDUNDANT,
+    MultiFileMetadata.MASTER_TIFF,
+    MultiFileMetadata.COMPANION,
 ]
 
 
 def _write_with_mode(
     tmp_path: Path,
     dimensions: list[Dimension],
-    mode: TiffStructure,
+    mode: MultiFileMetadata,
     plate: Plate | None = None,
 ) -> AcquisitionSettings:
-    """Write test data with specified structure mode."""
+    """Write test data with specified multi-file metadata mode."""
+    # Enum values match field values, so direct use works
+    format_dict = {
+        "name": "ome-tiff",
+        "multi_file_metadata": mode.value,
+        "prefer_single_file": "never",  # Force multi-file for testing
+    }
+
     settings = AcquisitionSettings(
         root_path=tmp_path / "test.ome.tiff",
         dimensions=dimensions,
         dtype="uint16",
         overwrite=True,
-        format={"name": "ome-tiff", "structure": mode.value},
+        format=format_dict,
         plate=plate,
     )
 
@@ -531,30 +554,38 @@ def _write_with_mode(
 
 
 def _get_full_ome(settings: AcquisitionSettings) -> ome_types.OME:
-    """Get OME model with full metadata for the given mode."""
-    mode = TiffStructure(settings.format.structure)
+    """Get OME model with full metadata."""
+    # Determine file structure from settings
+    prefer = settings.format.prefer_single_file
+    num_pos = len(settings.positions)
+    single_file = prefer == "always" or (prefer == "auto" and num_pos <= 1)
+
     output_path = Path(settings.output_path)
 
-    if mode == TiffStructure.SINGLE_FILE:
+    if single_file:
         # Single file: output_path is the TIFF file
         return from_tiff(str(output_path))
-    elif mode == TiffStructure.MULTI_MASTER_COMPANION:
+
+    # Multi-file mode - determine metadata arrangement
+    metadata_mode = MultiFileMetadata(settings.format.multi_file_metadata)
+
+    if metadata_mode == MultiFileMetadata.COMPANION:
         # Use exact companion filename from settings
         companion_path = output_path / settings.format.companion_file
         with open(companion_path, encoding="utf-8") as f:
             return from_xml(f.read())
-    elif mode == TiffStructure.MULTI_MASTER_TIFF:
+    elif metadata_mode == MultiFileMetadata.MASTER_TIFF:
         # First TIFF file is the master
         master = next(f for f in output_path.glob("*_p000.ome.tiff"))
         return from_tiff(str(master))
-    else:  # mode == TiffStructure.MULTI_REDUNDANT
+    else:  # metadata_mode == MultiFileMetadata.REDUNDANT
         # Any TIFF file has full metadata
         any_file = next(output_path.glob("*.ome.tiff"))
         return from_tiff(str(any_file))
 
 
 @pytest.mark.parametrize("mode", MULTI_FILE_MODES)
-def test_basic_multiposition(tmp_path: Path, mode: TiffStructure) -> None:
+def test_basic_multiposition(tmp_path: Path, mode: MultiFileMetadata) -> None:
     """Test basic multi-position without plate."""
     dimensions = [
         Dimension(name="p", type="position", coords=["Pos0", "Pos1"]),
@@ -584,7 +615,7 @@ def test_basic_multiposition(tmp_path: Path, mode: TiffStructure) -> None:
 
 
 @pytest.mark.parametrize("mode", MULTI_FILE_MODES)
-def test_5d_with_physical_sizes(tmp_path: Path, mode: TiffStructure) -> None:
+def test_5d_with_physical_sizes(tmp_path: Path, mode: MultiFileMetadata) -> None:
     """Test full 5D acquisition with physical pixel sizes."""
     dimensions = [
         Dimension(name="t", count=2, type="time"),
@@ -613,7 +644,7 @@ def test_5d_with_physical_sizes(tmp_path: Path, mode: TiffStructure) -> None:
 
 
 @pytest.mark.parametrize("mode", MULTI_FILE_MODES)
-def test_plate_basic(tmp_path: Path, mode: TiffStructure) -> None:
+def test_plate_basic(tmp_path: Path, mode: MultiFileMetadata) -> None:
     """Test plate with one field per well."""
     dimensions = [
         Dimension(
@@ -644,7 +675,7 @@ def test_plate_basic(tmp_path: Path, mode: TiffStructure) -> None:
 
 
 @pytest.mark.parametrize("mode", MULTI_FILE_MODES)
-def test_plate_multiple_fields(tmp_path: Path, mode: TiffStructure) -> None:
+def test_plate_multiple_fields(tmp_path: Path, mode: MultiFileMetadata) -> None:
     """Test plate with multiple fields per well."""
     dimensions = [
         Dimension(
@@ -676,7 +707,7 @@ def test_plate_multiple_fields(tmp_path: Path, mode: TiffStructure) -> None:
 
 
 @pytest.mark.parametrize("mode", MULTI_FILE_MODES)
-def test_file_structure_by_mode(tmp_path: Path, mode: TiffStructure) -> None:
+def test_file_structure_by_mode(tmp_path: Path, mode: MultiFileMetadata) -> None:
     """Verify correct file structure for each metadata mode."""
     dimensions = [
         Dimension(name="p", type="position", coords=["Pos0", "Pos1"]),
@@ -697,7 +728,7 @@ def test_file_structure_by_mode(tmp_path: Path, mode: TiffStructure) -> None:
 
     assert len(tiff_files) == 2
 
-    if mode == TiffStructure.MULTI_REDUNDANT:
+    if mode == MultiFileMetadata.REDUNDANT:
         # Each TIFF has full metadata, no companion
         assert len(companion_files) == 0
         root_uuids = set()
@@ -716,7 +747,7 @@ def test_file_structure_by_mode(tmp_path: Path, mode: TiffStructure) -> None:
         # Each file has unique UUID
         assert len(root_uuids) == 2
 
-    elif mode == TiffStructure.MULTI_MASTER_TIFF:
+    elif mode == MultiFileMetadata.MASTER_TIFF:
         # First TIFF is master, others have BinaryOnly, no companion
         assert len(companion_files) == 0
         master = next(f for f in tiff_files if "_p000" in f.name)
@@ -736,7 +767,7 @@ def test_file_structure_by_mode(tmp_path: Path, mode: TiffStructure) -> None:
                 assert ome.binary_only.uuid == master_ome.uuid
                 assert PathlibPath(ome.binary_only.metadata_file).name == master.name
 
-    elif mode == TiffStructure.MULTI_MASTER_COMPANION:
+    elif mode == MultiFileMetadata.COMPANION:
         # Companion has full metadata, all TIFFs have BinaryOnly
         assert len(companion_files) == 1
         with open(companion_files[0], encoding="utf-8") as f:
@@ -760,7 +791,7 @@ def test_file_structure_by_mode(tmp_path: Path, mode: TiffStructure) -> None:
 
 
 @pytest.mark.parametrize("mode", MULTI_FILE_MODES)
-def test_pixel_data_integrity(tmp_path: Path, mode: TiffStructure) -> None:
+def test_pixel_data_integrity(tmp_path: Path, mode: MultiFileMetadata) -> None:
     """Verify pixel data can be read back correctly."""
     import tifffile
 
