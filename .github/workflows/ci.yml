@@ -146,7 +146,7 @@ jobs:
           include-hidden-files: true
 
   upload_coverage:
-    if: always()
+    if: always() && github.repository == 'pymmcore-plus/ome-writers'
     needs: [test]
     uses: pyapp-kit/workflows/.github/workflows/upload-coverage.yml@v2
     secrets:
