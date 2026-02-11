@@ -99,7 +99,9 @@ console = Console()
 
 
 def run_benchmark_iteration(
-    settings: AcquisitionSettings, frames: list[np.ndarray], benchmark_drive: Path | None = None
+    settings: AcquisitionSettings,
+    frames: list[np.ndarray],
+    benchmark_drive: Path | None = None,
 ) -> TimingDict:
     """Run a single benchmark iteration and return phase timings."""
     if benchmark_drive is not None:
@@ -145,7 +147,7 @@ def run_benchmark(
     format: str,
     warmups: int,
     iterations: int,
-    benchmark_drive: Path | None = None
+    benchmark_drive: Path | None = None,
 ) -> ResultsDict:
     """Run benchmark for a single backend with multiple iterations."""
     settings = settings.model_copy(deep=True)
@@ -182,7 +184,11 @@ def run_benchmark(
 
 
 def run_all_benchmarks(
-    settings: AcquisitionSettings, backends: list[str], warmups: int, iterations: int, benchmark_drive: Path | None = None
+    settings: AcquisitionSettings,
+    backends: list[str],
+    warmups: int,
+    iterations: int,
+    benchmark_drive: Path | None = None,
 ) -> tuple[dict[str, ResultsDict | str], list[np.ndarray]]:
     # Run benchmarks
     frames = generate_frames(settings)
@@ -197,7 +203,7 @@ def run_all_benchmarks(
                 format=b,
                 warmups=warmups,
                 iterations=iterations,
-                benchmark_drive=benchmark_drive
+                benchmark_drive=benchmark_drive,
             )
             console.print(f"[green]✓ {b} complete[/green]\n")
         except Exception as e:
@@ -486,7 +492,7 @@ def main(
         backends=backends,
         warmups=warmups,
         iterations=iterations,
-        benchmark_drive=benchmark_drive
+        benchmark_drive=benchmark_drive,
     )
 
     print_results(results, settings, frames)
