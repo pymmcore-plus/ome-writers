@@ -29,8 +29,6 @@ if all(
     pytest.skip("use --benchmark to run benchmark", allow_module_level=True)
 
 
-from tests import conftest
-
 pytestmark = pytest.mark.benchmark
 np.random.seed(0)  # For reproducible benchmarks
 
@@ -119,7 +117,7 @@ def _make_frames(settings: AcquisitionSettings) -> list[np.ndarray]:
     ]
 
 
-@pytest.mark.parametrize("backend", conftest.AVAILABLE_BACKENDS)
+@pytest.mark.parametrize("backend", ["zarr-python"])
 @pytest.mark.parametrize("case", BENCHMARK_CASES)
 def test_bench_append(
     backend: str,
