@@ -8,6 +8,7 @@ or use `pytest --benchmark-only` or `--codspeed` with pytest-codspeed.
 
 from __future__ import annotations
 
+import gc
 import sys
 from typing import TYPE_CHECKING
 
@@ -18,6 +19,7 @@ from ome_writers import AcquisitionSettings, Dimension, create_stream
 from tests import conftest
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
     from pathlib import Path
 
     from pytest_benchmark.fixture import BenchmarkFixture
@@ -34,6 +36,23 @@ pytestmark = pytest.mark.benchmark
 np.random.seed(0)  # For reproducible benchmarks
 
 D = Dimension
+
+
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_finalizers() -> Generator[None, None, None]:
+    """Force GC after tests to avoid segfault during pytest shutdown.
+
+    There's a known Python 3.12+ issue with weakref.finalize() cleanup
+    during interpreter shutdown that can cause segfaults. By forcing GC
+    here while Python is still in a good state, we can trigger finalizers
+    before the problematic shutdown phase.
+
+    See: https://github.com/python/cpython/issues/108295
+    """
+    yield
+    # Run after all tests complete
+    gc.collect()
+    gc.collect()  # Second collect to ensure all finalizers are triggered
 
 
 # Benchmark cases: subset of integration test cases focused on common patterns
