@@ -541,6 +541,18 @@ class WriterThread(threading.Thread):
                     # Increment counter AFTER write and flush to ensure readers
                     # only see frames that are fully written
                     self.frames_written += 1
+
+                    # Note: If viewers using AcquisitionView start seeing blank frames
+                    # (especially in extremely fast viewing scenarios), we may need to
+                    # add explicit write-completion signaling here. The issue is that
+                    # TiffWriter.write() calls flush(), which pushes data from Python's
+                    # buffer to the OS, but doesn't guarantee immediate readability by
+                    # other file handles. Solution would be to add:
+                    #   - self._write_complete = threading.Condition() in __init__
+                    #   - self._write_complete.notify_all() here after frames_written++
+                    #   - LiveTiffStore.get waits on this condition before reading
+                    # This adds ~150ns overhead per write but guarantees coordination.
+                    # See PR #95 discussion for full implementation details.
         except Exception as e:  # pragma: no cover
             # Unexpected errors - log and continue
             warnings.warn(
