@@ -99,13 +99,13 @@ console = Console()
 
 
 def run_benchmark_iteration(
-    settings: AcquisitionSettings, frames: list[np.ndarray], benchmark_drive: Path = None
+    settings: AcquisitionSettings, frames: list[np.ndarray], benchmark_drive: Path | None = None
 ) -> TimingDict:
     """Run a single benchmark iteration and return phase timings."""
-    if benchmark_drive:
+    if benchmark_drive is not None:
         tmp_path = Path(tempfile.mkdtemp(dir=benchmark_drive))
     else:
-        tmp_path = Path(tempfile.mkdtemp()
+        tmp_path = Path(tempfile.mkdtemp())
     settings = settings.model_copy(
         update={"root_path": str(tmp_path / settings.root_path)}
     )
@@ -145,7 +145,7 @@ def run_benchmark(
     format: str,
     warmups: int,
     iterations: int,
-    benchmark_drive: Path = None
+    benchmark_drive: Path | None = None
 ) -> ResultsDict:
     """Run benchmark for a single backend with multiple iterations."""
     settings = settings.model_copy(deep=True)
@@ -156,7 +156,7 @@ def run_benchmark(
     if warmups > 0:
         console.print(f"  [dim]Running {warmups} warmup(s)...[/dim]")
         for _ in range(warmups):
-            run_benchmark_iteration(settings, frames)
+            run_benchmark_iteration(settings, frames, benchmark_drive)
             # Clean up warmup data
 
     # Actual benchmark iterations
@@ -182,7 +182,7 @@ def run_benchmark(
 
 
 def run_all_benchmarks(
-    settings: AcquisitionSettings, backends: list[str], warmups: int, iterations: int, benchmark_drive: Path | None
+    settings: AcquisitionSettings, backends: list[str], warmups: int, iterations: int, benchmark_drive: Path | None = None
 ) -> tuple[dict[str, ResultsDict | str], list[np.ndarray]]:
     # Run benchmarks
     frames = generate_frames(settings)
@@ -387,11 +387,12 @@ def main(
             "--benchmark-drive",
             "-r",
             exists=True,
-            file_okay=True,
-            dir_okay=False,
-            help=(
-                "Path to benchmark drive. "
-            ),
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+            writable=True,
+            resolve_path=True,
+            help=("Path to save directory (default is system temporary folder)."),
         ),
     ] = None,
     dtype: Annotated[
