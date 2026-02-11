@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import gc
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 import acquire_zarr as az
@@ -162,7 +161,10 @@ class AcquireZarrBackend(YaozarrsBackend):
         if not self._finalized and self._stream is not None:
             self._stream.close()
             self._stream = None
-            gc.collect()
+            # NOTE: gc.collect() was previously called here to ensure acquire-zarr
+            # C extension releases resources, but it can cause segfaults during
+            # pytest-codspeed cleanup when finalizers trigger in unpredictable order.
+            # Relying on Python's normal GC is sufficient.
 
             # Restore yaozarrs metadata that acquire-zarr may have overwritten
             for path, content in self._zarr_json_backup.items():

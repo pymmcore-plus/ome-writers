@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 
 from ome_writers import AcquisitionSettings, Dimension, create_stream
+from tests import conftest
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -117,7 +118,7 @@ def _make_frames(settings: AcquisitionSettings) -> list[np.ndarray]:
     ]
 
 
-@pytest.mark.parametrize("backend", ["zarr-python"])
+@pytest.mark.parametrize("backend", conftest.AVAILABLE_BACKENDS)
 @pytest.mark.parametrize("case", BENCHMARK_CASES)
 def test_bench_append(
     backend: str,
