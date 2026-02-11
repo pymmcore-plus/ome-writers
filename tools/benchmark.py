@@ -99,10 +99,13 @@ console = Console()
 
 
 def run_benchmark_iteration(
-    settings: AcquisitionSettings, frames: list[np.ndarray]
+    settings: AcquisitionSettings, frames: list[np.ndarray], benchmark_drive: Path = None
 ) -> TimingDict:
     """Run a single benchmark iteration and return phase timings."""
-    tmp_path = Path(tempfile.mkdtemp())
+    if benchmark_drive:
+        tmp_path = Path(tempfile.mkdtemp(dir=benchmark_drive))
+    else:
+        tmp_path = Path(tempfile.mkdtemp()
     settings = settings.model_copy(
         update={"root_path": str(tmp_path / settings.root_path)}
     )
@@ -142,6 +145,7 @@ def run_benchmark(
     format: str,
     warmups: int,
     iterations: int,
+    benchmark_drive: Path = None
 ) -> ResultsDict:
     """Run benchmark for a single backend with multiple iterations."""
     settings = settings.model_copy(deep=True)
@@ -158,7 +162,7 @@ def run_benchmark(
     # Actual benchmark iterations
     console.print(f"  [dim]Running {iterations} iteration(s)...[/dim]")
     all_timings = [
-        run_benchmark_iteration(settings, frames)
+        run_benchmark_iteration(settings, frames, benchmark_drive)
         for _ in track(range(iterations), description="  Progress", console=console)
     ]
 
@@ -178,7 +182,7 @@ def run_benchmark(
 
 
 def run_all_benchmarks(
-    settings: AcquisitionSettings, backends: list[str], warmups: int, iterations: int
+    settings: AcquisitionSettings, backends: list[str], warmups: int, iterations: int, benchmark_drive: Path | None
 ) -> tuple[dict[str, ResultsDict | str], list[np.ndarray]]:
     # Run benchmarks
     frames = generate_frames(settings)
@@ -193,6 +197,7 @@ def run_all_benchmarks(
                 format=b,
                 warmups=warmups,
                 iterations=iterations,
+                benchmark_drive=benchmark_drive
             )
             console.print(f"[green]✓ {b} complete[/green]\n")
         except Exception as e:
@@ -376,6 +381,19 @@ def main(
             ),
         ),
     ] = None,
+    benchmark_drive: Annotated[
+        Path | None,
+        typer.Option(
+            "--benchmark-drive",
+            "-r",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            help=(
+                "Path to benchmark drive. "
+            ),
+        ),
+    ] = None,
     dtype: Annotated[
         str,
         typer.Option("--dtype", help="Data type (overridden by settings file)"),
@@ -467,6 +485,7 @@ def main(
         backends=backends,
         warmups=warmups,
         iterations=iterations,
+        benchmark_drive=benchmark_drive
     )
 
     print_results(results, settings, frames)
