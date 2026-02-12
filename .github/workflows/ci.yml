@@ -71,7 +71,7 @@ jobs:
         uses: CodSpeedHQ/action@v4
         with:
           mode: walltime
-          run: pytest tests/test_bench.py --codspeed -v -W ignore
+          run: python -X faulthandler -m pytest tests/test_bench.py --codspeed -v -W ignore -p no:faulthandler
 
   test:
     name: ${{ matrix.platform }} py${{ matrix.python-version }} ${{ matrix.group }} ${{ matrix.resolution }}
