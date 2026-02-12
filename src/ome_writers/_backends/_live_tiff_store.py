@@ -131,6 +131,12 @@ class LiveTiffStore(Store):
                 return None
             data_offset = self._thread.data_offset
 
+        # Note: There's a potential race condition here where frame_idx <
+        # frames_written (frame "should" exist), but the read returns zeros due to
+        # OS buffering delays. If blank frames are reported in fast viewing scenarios,
+        # we should add wait-on-condition logic here to coordinate with WriterThread.
+        # See WriterThread.run() for details on the write-side coordination.
+
         if data_offset is None:
             return None  # pragma: no cover
 

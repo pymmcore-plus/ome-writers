@@ -513,18 +513,20 @@ class WriterThread(threading.Thread):
             # use it when compression is disabled
             use_contiguous = self._compression is None
             for i, frame in enumerate(_queue_iterator()):
-                # Wrap write in lock and ensure flush for live viewing
+                # Write frame without holding lock - only this thread writes
+                self._writer.write(
+                    frame,
+                    contiguous=use_contiguous,
+                    dtype=self._dtype,
+                    resolution=(self._res, self._res),
+                    resolutionunit=tifffile.RESUNIT.MICROMETER,
+                    photometric=tifffile.PHOTOMETRIC.MINISBLACK,
+                    description=self._ome_xml_bytes if i == 0 else None,
+                    compression=self._compression,
+                )
+
+                # Only hold lock when updating shared state
                 with self.state_lock:
-                    self._writer.write(
-                        frame,
-                        contiguous=use_contiguous,
-                        dtype=self._dtype,
-                        resolution=(self._res, self._res),
-                        resolutionunit=tifffile.RESUNIT.MICROMETER,
-                        photometric=tifffile.PHOTOMETRIC.MINISBLACK,
-                        description=self._ome_xml_bytes if i == 0 else None,
-                        compression=self._compression,
-                    )
                     # Capture data offset after first frame (where frames start in file)
                     if i == 0 and self.data_offset is None:
                         try:
@@ -541,6 +543,18 @@ class WriterThread(threading.Thread):
                     # Increment counter AFTER write and flush to ensure readers
                     # only see frames that are fully written
                     self.frames_written += 1
+
+                    # Note: If viewers using AcquisitionView start seeing blank frames
+                    # (especially in extremely fast viewing scenarios), we may need to
+                    # add explicit write-completion signaling here. The issue is that
+                    # TiffWriter.write() calls flush(), which pushes data from Python's
+                    # buffer to the OS, but doesn't guarantee immediate readability by
+                    # other file handles. Solution would be to add:
+                    #   - self._write_complete = threading.Condition() in __init__
+                    #   - self._write_complete.notify_all() here after frames_written++
+                    #   - LiveTiffStore.get waits on this condition before reading
+                    # This adds ~150ns overhead per write but guarantees coordination.
+                    # See PR #95 discussion for full implementation details.
         except Exception as e:  # pragma: no cover
             # Unexpected errors - log and continue
             warnings.warn(
