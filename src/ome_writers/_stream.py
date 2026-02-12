@@ -4,6 +4,7 @@ import importlib
 import importlib.util
 import sys
 import warnings
+import weakref
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, NoReturn
 
@@ -64,14 +65,9 @@ class OMEStream:
         self._state = {"has_appended": False}
 
         # Register cleanup that runs on garbage collection if not explicitly closed
-        # WORKAROUND: Disable finalizer to avoid Python 3.12+ weakref cleanup
-        # segfault during GC (https://github.com/python/cpython/issues/108295).
-        # TODO: Re-enable once Python fixes the issue or we find a better workaround.
-        # For now, users must explicitly call close() or use context manager.
-        self._finalizer = None
-        # self._finalizer = weakref.finalize(
-        #     self, self._warn_and_finalize, backend, self._state
-        # )
+        self._finalizer = weakref.finalize(
+            self, self._warn_and_finalize, backend, self._state
+        )
 
     @staticmethod
     def _warn_and_finalize(backend: ArrayBackend, state: dict) -> None:
@@ -206,10 +202,7 @@ class OMEStream:
     def close(self) -> None:
         """Finalize the backend, flush any pending writes, and release resources."""
         # Detach returns the callback args if finalizer was still alive, None otherwise
-        # If no finalizer (disabled for tests), always finalize
-        if self._finalizer is None:
-            self._backend.finalize()
-        elif self._finalizer.detach():
+        if self._finalizer.detach():
             self._backend.finalize()
 
 
