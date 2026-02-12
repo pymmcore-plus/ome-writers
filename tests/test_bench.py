@@ -174,5 +174,8 @@ def test_bench_append(
         for frame in frames:
             stream.append(frame)
         stream.close()  # flush async writes
+        # Force cleanup immediately to avoid GC issues at shutdown
+        del stream
+        gc.collect()
 
     benchmark.pedantic(append_all_frames, setup=setup, rounds=3)  # Minimal: 3 rounds
