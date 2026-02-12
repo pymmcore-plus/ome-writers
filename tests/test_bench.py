@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 
 from ome_writers import AcquisitionSettings, Dimension, create_stream
+from tests import conftest
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -23,13 +24,12 @@ if TYPE_CHECKING:
 
     from ome_writers import OMEStream
 
+
 if all(
     x not in {"--codspeed", "--benchmark-only", "tests/test_bench.py"} for x in sys.argv
 ):
     pytest.skip("use --benchmark to run benchmark", allow_module_level=True)
 
-
-from tests import conftest
 
 pytestmark = pytest.mark.benchmark
 np.random.seed(0)  # For reproducible benchmarks
