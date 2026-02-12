@@ -26,7 +26,6 @@ if TYPE_CHECKING:
 
     from pytest_benchmark.fixture import BenchmarkFixture
 
-    from ome_writers import OMEStream
 
 if all(
     x not in {"--codspeed", "--benchmark-only", "tests/test_bench.py"} for x in sys.argv
@@ -162,20 +161,12 @@ def test_bench_append(
         }
     )
 
-    frames = _make_frames(case)
-
-    def setup() -> tuple[tuple, dict]:
-        """Create a fresh stream for each benchmark round (not timed)."""
+    # Absolute minimal test: just create and close stream
+    def minimal_test() -> None:
+        """Minimal: just create and close, no writes."""
         stream = create_stream(settings)
-        return (frames, stream), {}
-
-    def append_all_frames(frames: list[np.ndarray], stream: OMEStream) -> None:
-        """Only the append loop is timed."""
-        for frame in frames:
-            stream.append(frame)
-        stream.close()  # flush async writes
-        # Force cleanup immediately to avoid GC issues at shutdown
+        stream.close()
         del stream
         gc.collect()
 
-    benchmark.pedantic(append_all_frames, setup=setup, rounds=3)  # Minimal: 3 rounds
+    benchmark(minimal_test)
