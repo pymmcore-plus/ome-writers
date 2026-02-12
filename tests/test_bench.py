@@ -4,9 +4,6 @@ To run this file, explicitly run:
 pytest tests/test_bench.py
 
 or use `pytest --benchmark-only` or `--codspeed` with pytest-codspeed.
-
-Note: weakref.finalize has been disabled in OMEStream to avoid Python 3.12+
-GC segfault. Users must explicitly call close() or use context manager.
 """
 
 from __future__ import annotations
@@ -19,12 +16,15 @@ import numpy as np
 import pytest
 
 from ome_writers import AcquisitionSettings, Dimension, create_stream
+from tests import conftest
 
 if TYPE_CHECKING:
     from collections.abc import Generator
     from pathlib import Path
 
     from pytest_benchmark.fixture import BenchmarkFixture
+
+    from ome_writers import OMEStream
 
 
 if all(
@@ -138,8 +138,8 @@ def _make_frames(settings: AcquisitionSettings) -> list[np.ndarray]:
     ]
 
 
-@pytest.mark.parametrize("backend", ["tifffile"])  # Try tifffile instead of zarr
-@pytest.mark.parametrize("case", [BENCHMARK_CASES[0]])  # Minimal: just one case
+@pytest.mark.parametrize("backend", conftest.AVAILABLE_BACKENDS)
+@pytest.mark.parametrize("case", BENCHMARK_CASES)
 def test_bench_append(
     backend: str,
     case: AcquisitionSettings,
@@ -161,12 +161,17 @@ def test_bench_append(
         }
     )
 
-    # Absolute minimal test: just create and close stream
-    def minimal_test() -> None:
-        """Minimal: just create and close, no writes."""
-        stream = create_stream(settings)
-        stream.close()
-        del stream
-        gc.collect()
+    frames = _make_frames(case)
 
-    benchmark(minimal_test)
+    def setup() -> tuple[tuple, dict]:
+        """Create a fresh stream for each benchmark round (not timed)."""
+        stream = create_stream(settings)
+        return (frames, stream), {}
+
+    def append_all_frames(frames: list[np.ndarray], stream: OMEStream) -> None:
+        """Only the append loop is timed."""
+        for frame in frames:
+            stream.append(frame)
+        stream.close()  # flush async writes
+
+    benchmark.pedantic(append_all_frames, setup=setup, rounds=15)
