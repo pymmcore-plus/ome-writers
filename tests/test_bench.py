@@ -4,6 +4,9 @@ To run this file, explicitly run:
 pytest tests/test_bench.py
 
 or use `pytest --benchmark-only` or `--codspeed` with pytest-codspeed.
+
+Note: weakref.finalize has been disabled in OMEStream to avoid Python 3.12+
+GC segfault. Users must explicitly call close() or use context manager.
 """
 
 from __future__ import annotations
