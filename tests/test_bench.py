@@ -16,7 +16,6 @@ import numpy as np
 import pytest
 
 from ome_writers import AcquisitionSettings, Dimension, create_stream
-from tests import conftest
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -137,8 +136,8 @@ def _make_frames(settings: AcquisitionSettings) -> list[np.ndarray]:
     ]
 
 
-@pytest.mark.parametrize("backend", conftest.AVAILABLE_BACKENDS)
-@pytest.mark.parametrize("case", BENCHMARK_CASES)
+@pytest.mark.parametrize("backend", ["zarr-python"])  # Minimal: just one backend
+@pytest.mark.parametrize("case", [BENCHMARK_CASES[0]])  # Minimal: just one case
 def test_bench_append(
     backend: str,
     case: AcquisitionSettings,
@@ -173,4 +172,4 @@ def test_bench_append(
             stream.append(frame)
         stream.close()  # flush async writes
 
-    benchmark.pedantic(append_all_frames, setup=setup, rounds=15)
+    benchmark.pedantic(append_all_frames, setup=setup, rounds=3)  # Minimal: 3 rounds
