@@ -139,7 +139,7 @@ def _make_frames(settings: AcquisitionSettings) -> list[np.ndarray]:
     ]
 
 
-@pytest.mark.parametrize("backend", ["zarr-python"])  # Minimal: just one backend
+@pytest.mark.parametrize("backend", ["tifffile"])  # Try tifffile instead of zarr
 @pytest.mark.parametrize("case", [BENCHMARK_CASES[0]])  # Minimal: just one case
 def test_bench_append(
     backend: str,
