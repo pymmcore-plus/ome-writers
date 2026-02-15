@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 
@@ -63,5 +64,5 @@ def generate_frames(settings: AcquisitionSettings) -> list[np.ndarray]:
     """Generate random frames based on acquisition settings."""
     dtype = np.dtype(settings.dtype)
     iinfo = np.iinfo(dtype)
-    size = (settings.num_frames or 1, *settings.shape[-2:])
+    size = cast("tuple[int, ...]", (settings.num_frames or 1, *settings.shape[-2:]))
     return list(np.random.randint(iinfo.min, iinfo.max, size=size, dtype=dtype))

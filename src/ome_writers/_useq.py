@@ -49,7 +49,27 @@ def dims_from_useq(
         DeprecationWarning,
         stacklevel=2,
     )
+    return _dims_from_useq(
+        seq=seq,
+        image_width=image_width,
+        image_height=image_height,
+        units=units,
+        pixel_size_um=pixel_size_um,
+        chunk_shapes=chunk_shapes,
+        shard_shapes=shard_shapes,
+    )
 
+
+def _dims_from_useq(
+    seq: useq.MDASequence,
+    image_width: int,
+    image_height: int,
+    *,
+    units: Mapping[str, UnitTuple | None] | None = None,
+    pixel_size_um: float | None = None,
+    chunk_shapes: Mapping[str, int] | None = None,
+    shard_shapes: Mapping[str, int] | None = None,
+) -> list[Dimension]:
     try:
         from useq import Axis, MDASequence
     except ImportError:
@@ -104,7 +124,7 @@ def dims_from_useq(
             if std_axis == StandardAxis.TIME and seq.time_plan:
                 # MultiPhaseTimePlan doesn't have interval attribute
                 if hasattr(seq.time_plan, "interval"):
-                    dim.scale = seq.time_plan.interval.total_seconds()  # ty: ignore
+                    dim.scale = seq.time_plan.interval.total_seconds()
                     dim.unit = "second"
             elif std_axis == StandardAxis.Z and seq.z_plan:
                 # ZAbsolutePositions/ZRelativePositions don't have step
@@ -227,7 +247,7 @@ def useq_to_acquisition_settings(
     """  # noqa: E501
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        dims = dims_from_useq(
+        dims = _dims_from_useq(
             seq=seq,
             image_width=image_width,
             image_height=image_height,
@@ -441,7 +461,7 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
                 # if this line ever raises an exception,
                 # break it into two parts:
                 # 1. create position, 2. try to add coords, suppressing errors.
-                pos_sum = pos + gp  # type: ignore [operator]
+                pos_sum = pos + gp  # pyright: ignore[reportOperatorIssue]
                 positions.append(
                     Position(
                         name=name,

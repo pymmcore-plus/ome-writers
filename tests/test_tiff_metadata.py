@@ -184,8 +184,8 @@ def test_update_metadata_with_plates(tmp_path: Path, tiff_backend: str) -> None:
     assert plate.columns == 2
     assert len(plate.wells) == 2
     # Verify naming conventions are inferred correctly
-    assert plate.row_naming_convention.value == "letter"
-    assert plate.column_naming_convention.value == "number"
+    assert plate.row_naming_convention == ome_types.model.NamingConvention.LETTER
+    assert plate.column_naming_convention == ome_types.model.NamingConvention.NUMBER
 
     # Verify wells and well samples link to images
     well_sample_refs = {}
@@ -519,7 +519,7 @@ def _write_with_mode(
                 stream.append(frame)
 
 
-def _get_full_ome(tmp_path: Path, mode: MetadataMode) -> ome_types.OME | None:
+def _get_full_ome(tmp_path: Path, mode: MetadataMode) -> ome_types.OME:
     """Get OME model with full metadata for the given mode."""
     if mode == MetadataMode.MULTI_MASTER_COMPANION:
         companion = next(tmp_path.glob("*.companion.ome"))
@@ -531,6 +531,7 @@ def _get_full_ome(tmp_path: Path, mode: MetadataMode) -> ome_types.OME | None:
     elif mode == MetadataMode.MULTI_REDUNDANT:
         any_file = next(tmp_path.glob("*.ome.tiff"))
         return from_tiff(str(any_file))
+    raise ValueError(f"Unsupported mode: {mode}")
 
 
 @pytest.mark.parametrize("mode", MULTI_FILE_MODES)

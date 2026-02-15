@@ -114,7 +114,7 @@ def extract_profile_items(profiler: cProfile.Profile, sort: str) -> list[Profile
     stats = pstats.Stats(profiler)
 
     items: list[ProfileItem] = []
-    for (filename, lineno, funcname), (cc, nc, tt, ct, _) in stats.stats.items():  # type: ignore
+    for (filename, lineno, funcname), (cc, nc, tt, ct, _) in stats.stats.items():
         items.append(
             {
                 "filename": filename,
