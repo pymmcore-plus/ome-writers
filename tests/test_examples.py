@@ -39,6 +39,6 @@ def test_example_runs(example_path: Path, tmp_path: Path, any_backend: str) -> N
                 pytest.xfail(f"Example {example_path.name} uses unsupported settings.")
             raise
 
-    # Validate that example created output files
-    output_files = list(tmp_path.glob("*.ome.*")) + list(tmp_path.glob("*.ome.tiff"))
+    # Validate that example created output files (use rglob for subdirectories)
+    output_files = list(tmp_path.rglob("*.ome.*"))
     assert output_files, f"Example {example_path.name} did not create output files"

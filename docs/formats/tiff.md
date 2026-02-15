@@ -48,10 +48,11 @@ files in the output directory**
     position dimension (type='position'), the output will be:
 
     ```
-    dest/my_file_position_p000.ome.tiff
-    dest/my_file_position_p001.ome.tiff
-    dest/my_file_position_p002.ome.tiff
-    dest/my_file_position_p003.ome.tiff
+    dest/my_file/                   # directory
+        my_file_p000.ome.tiff
+        my_file_p001.ome.tiff
+        my_file_p002.ome.tiff
+        my_file_p003.ome.tiff
     ```
 
     !!! example "Example Code"

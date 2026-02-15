@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from functools import partial
 from pathlib import Path as PathlibPath
-from typing import TYPE_CHECKING
-from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -25,10 +22,9 @@ try:
 except ImportError:
     pytest.skip("ome_types not installed", allow_module_level=True)
 
-from ome_writers._backends._ome_xml import MetadataMode, prepare_metadata
+from pathlib import Path
 
-if TYPE_CHECKING:
-    from pathlib import Path
+from ome_writers._backends._ome_xml import MultiFileMetadata, prepare_metadata
 
 
 def test_update_metadata_single_file(tmp_path: Path, tiff_backend: str) -> None:
@@ -83,8 +79,10 @@ def test_update_metadata_multiposition(tmp_path: Path, tiff_backend: str) -> Non
     # Verify default names are position names
     # Note: Each file contains companion OME-XML with ALL positions,
     # but the actual image data in each file corresponds to its position index
+    # Multi-position TIFFs are now stored in a subdirectory
+    multipos_dir = tmp_path / "multipos"
     for pos_idx, pos in enumerate(settings.positions):
-        pos_file = tmp_path / f"multipos_p{pos_idx:03d}.ome.tiff"
+        pos_file = multipos_dir / f"multipos_p{pos_idx:03d}.ome.tiff"
         ome_obj = from_tiff(str(pos_file))
         # All files have all positions in metadata, check the one that matches this file
         assert len(ome_obj.images) == 2
@@ -101,7 +99,7 @@ def test_update_metadata_multiposition(tmp_path: Path, tiff_backend: str) -> Non
 
     # Verify each position file has the updated metadata
     for pos_idx in range(2):
-        pos_file = tmp_path / f"multipos_p{pos_idx:03d}.ome.tiff"
+        pos_file = multipos_dir / f"multipos_p{pos_idx:03d}.ome.tiff"
         ome_obj = from_tiff(str(pos_file))
         assert ome_obj.images[0].name == "Position 0 Updated"
         assert ome_obj.images[1].name == "Position 1 Updated"
@@ -167,15 +165,17 @@ def test_update_metadata_with_plates(tmp_path: Path, tiff_backend: str) -> None:
     # Verify default names are position names
     # Note: Each file contains companion OME-XML with ALL positions,
     # but the actual image data in each file corresponds to its position index
+    # Multi-position TIFFs are now stored in a subdirectory
+    plate_dir = tmp_path / "plate"
     for pos_idx, expected_name in enumerate(["Well_A01", "Well_A02"]):
-        pos_file = tmp_path / f"plate_p{pos_idx:03d}.ome.tiff"
+        pos_file = plate_dir / f"plate_p{pos_idx:03d}.ome.tiff"
         ome_obj = from_tiff(str(pos_file))
         # All files have all positions in metadata, check the one that matches this file
         assert len(ome_obj.images) == 2
         assert ome_obj.images[pos_idx].name == expected_name
 
     # Verify plate structure
-    ome_obj = from_tiff(str(tmp_path / "plate_p000.ome.tiff"))
+    ome_obj = from_tiff(str(plate_dir / "plate_p000.ome.tiff"))
     assert len(ome_obj.plates) == 1
     plate = ome_obj.plates[0]
     assert plate.id == "Plate:0"
@@ -205,7 +205,7 @@ def test_update_metadata_with_plates(tmp_path: Path, tiff_backend: str) -> None:
 
     # Verify each well file has updated names
     for pos_idx in range(2):
-        pos_file = tmp_path / f"plate_p{pos_idx:03d}.ome.tiff"
+        pos_file = plate_dir / f"plate_p{pos_idx:03d}.ome.tiff"
         ome_obj = from_tiff(str(pos_file))
         assert ome_obj.images[0].name == "Well A01"
         assert ome_obj.images[1].name == "Well A02"
@@ -274,8 +274,10 @@ def test_tiff_multiposition_detailed_metadata(
             stream.append(np.random.randint(0, 1000, (32, 32), dtype=np.uint16))
 
     # Check all position files contain the same detailed metadata
+    # Multi-position TIFFs are now in subdirectory
+    multipos_dir = tmp_path / "multipos"
     for p_idx in range(len(settings.positions)):
-        ome_obj = from_tiff(tmp_path / f"multipos_p{p_idx:03}.ome.tiff")
+        ome_obj = from_tiff(multipos_dir / f"multipos_p{p_idx:03}.ome.tiff")
 
         # Should contain metadata for both positions (companion OME-XML)
         assert len(ome_obj.images) == 2
@@ -290,10 +292,31 @@ def test_tiff_multiposition_detailed_metadata(
                 assert f"multipos_p{img_idx:03}.ome.tiff" in (td.uuid.file_name or "")
 
 
-def test_prepare_meta(tmp_path: Path) -> None:
-    """Test _prepare_meta function for TIFF backend."""
-    from ome_writers._backends._ome_xml import MetadataMode, prepare_metadata
+def test_single_file_multi_position_not_supported(tmp_path: Path) -> None:
+    """Test that single-file mode with multiple positions raises NotImplementedError."""
+    settings = AcquisitionSettings(
+        root_path=tmp_path / "test.ome.tiff",
+        dimensions=[
+            Dimension(name="p", type="position", coords=["Pos0", "Pos1"]),
+            Dimension(name="y", count=32, type="space"),
+            Dimension(name="x", count=32, type="space"),
+        ],
+        dtype="uint16",
+        format={"name": "ome-tiff", "prefer_single_file": "always"},
+    )
 
+    with pytest.raises(
+        NotImplementedError, match="Single-file structure with multiple"
+    ):
+        prepare_metadata(settings)
+
+
+@pytest.mark.parametrize(
+    "multi_file_metadata",
+    ["redundant", "master-tiff", "companion-file"],
+)
+def test_prepare_meta(tmp_path: Path, multi_file_metadata: str) -> None:
+    """Test prepare_metadata function with different multi-file structure modes."""
     settings = AcquisitionSettings(
         root_path=tmp_path / "test.ome.tiff",
         dimensions=[
@@ -304,14 +327,21 @@ def test_prepare_meta(tmp_path: Path) -> None:
             Dimension(name="x", count=32, type="space"),
         ],
         dtype="uint16",
-        format="tifffile",
+        format={
+            "name": "ome-tiff",
+            "multi_file_metadata": multi_file_metadata,
+            "prefer_single_file": "never",  # Force multi-file even for single position
+        },
     )
-    for mode in MetadataMode:
-        meta = prepare_metadata(settings, mode)
-        assert isinstance(meta, dict)
-        assert all(str(tmp_path) in key for key in meta.keys())
-        companion = mode == MetadataMode.MULTI_MASTER_COMPANION
-        assert sum(key.endswith("companion.ome") for key in meta) == companion
+
+    meta = prepare_metadata(settings)
+    assert isinstance(meta, dict)
+    assert all(str(tmp_path) in key for key in meta.keys())
+
+    # Check for companion file in metadata based on structure mode
+    metadata_mode = MultiFileMetadata(multi_file_metadata)
+    companion_path = str(Path(settings.output_path) / settings.format.companion_file)
+    assert (companion_path in meta) == (metadata_mode == MultiFileMetadata.COMPANION)
 
 
 def test_channel_metadata_in_tiff(tmp_path: Path, tiff_backend: str) -> None:
@@ -435,8 +465,10 @@ def test_frame_metadata_multiposition(tmp_path: Path, tiff_backend: str) -> None
                 stream.append(frame, frame_metadata=metadata)
 
     # Verify each position file has its own frame_metadata
+    # Multi-position TIFFs are now in subdirectory
+    multipos_dir = tmp_path / "multipos"
     for pos_idx, pos_name in enumerate(["Pos0", "Pos1"]):
-        pos_file = tmp_path / f"multipos_p{pos_idx:03d}.ome.tiff"
+        pos_file = multipos_dir / f"multipos_p{pos_idx:03d}.ome.tiff"
         ome_obj = from_tiff(str(pos_file))
 
         # Get this position's image
@@ -481,61 +513,79 @@ def test_frame_metadata_multiposition(tmp_path: Path, tiff_backend: str) -> None
 
 
 MULTI_FILE_MODES = [
-    MetadataMode.MULTI_REDUNDANT,
-    MetadataMode.MULTI_MASTER_TIFF,
-    MetadataMode.MULTI_MASTER_COMPANION,
-    # TODO: multi-position single file still has to be implemented
-    # MetadataMode.SINGLE_FILE
+    MultiFileMetadata.REDUNDANT,
+    MultiFileMetadata.MASTER_TIFF,
+    MultiFileMetadata.COMPANION,
 ]
 
 
-# this will be removed once we expose the modes via the public API
 def _write_with_mode(
     tmp_path: Path,
     dimensions: list[Dimension],
-    mode: MetadataMode,
+    mode: MultiFileMetadata,
     plate: Plate | None = None,
-) -> None:
-    """Write test data with specified mode."""
+) -> AcquisitionSettings:
+    """Write test data with specified multi-file metadata mode."""
+    # Enum values match field values, so direct use works
+    format_dict = {
+        "name": "ome-tiff",
+        "multi_file_metadata": mode.value,
+        "prefer_single_file": "never",  # Force multi-file for testing
+    }
+
     settings = AcquisitionSettings(
         root_path=tmp_path / "test.ome.tiff",
         dimensions=dimensions,
         dtype="uint16",
         overwrite=True,
-        format="tifffile",
+        format=format_dict,
         plate=plate,
     )
 
     num_frames = int(np.prod(settings.shape[:-2]))
     frame_shape = settings.shape[-2:]
 
-    with patch(
-        "ome_writers._backends._tifffile.prepare_metadata",
-        side_effect=partial(prepare_metadata, mode=mode),
-    ):
-        with create_stream(settings) as stream:
-            for i in range(num_frames):
-                frame = np.full(frame_shape, fill_value=i, dtype=settings.dtype)
-                stream.append(frame)
+    with create_stream(settings) as stream:
+        for i in range(num_frames):
+            frame = np.full(frame_shape, fill_value=i, dtype=settings.dtype)
+            stream.append(frame)
+
+    return settings
 
 
-def _get_full_ome(tmp_path: Path, mode: MetadataMode) -> ome_types.OME:
-    """Get OME model with full metadata for the given mode."""
-    if mode == MetadataMode.MULTI_MASTER_COMPANION:
-        companion = next(tmp_path.glob("*.companion.ome"))
-        with open(companion, encoding="utf-8") as f:
+def _get_full_ome(settings: AcquisitionSettings) -> ome_types.OME:
+    """Get OME model with full metadata."""
+    # Determine file structure from settings
+    prefer = settings.format.prefer_single_file
+    num_pos = len(settings.positions)
+    single_file = prefer == "always" or (prefer == "auto" and num_pos <= 1)
+
+    output_path = Path(settings.output_path)
+
+    if single_file:
+        # Single file: output_path is the TIFF file
+        return from_tiff(str(output_path))
+
+    # Multi-file mode - determine metadata arrangement
+    metadata_mode = MultiFileMetadata(settings.format.multi_file_metadata)
+
+    if metadata_mode == MultiFileMetadata.COMPANION:
+        # Use exact companion filename from settings
+        companion_path = output_path / settings.format.companion_file
+        with open(companion_path, encoding="utf-8") as f:
             return from_xml(f.read())
-    elif mode == MetadataMode.MULTI_MASTER_TIFF:
-        master = next(f for f in tmp_path.glob("*.ome.tiff") if "_p000" in f.name)
+    elif metadata_mode == MultiFileMetadata.MASTER_TIFF:
+        # First TIFF file is the master
+        master = next(f for f in output_path.glob("*_p000.ome.tiff"))
         return from_tiff(str(master))
-    elif mode == MetadataMode.MULTI_REDUNDANT:
-        any_file = next(tmp_path.glob("*.ome.tiff"))
+    else:  # metadata_mode == MultiFileMetadata.REDUNDANT
+        # Any TIFF file has full metadata
+        any_file = next(output_path.glob("*.ome.tiff"))
         return from_tiff(str(any_file))
-    raise ValueError(f"Unsupported mode: {mode}")
 
 
 @pytest.mark.parametrize("mode", MULTI_FILE_MODES)
-def test_basic_multiposition(tmp_path: Path, mode: MetadataMode) -> None:
+def test_basic_multiposition(tmp_path: Path, mode: MultiFileMetadata) -> None:
     """Test basic multi-position without plate."""
     dimensions = [
         Dimension(name="p", type="position", coords=["Pos0", "Pos1"]),
@@ -544,14 +594,14 @@ def test_basic_multiposition(tmp_path: Path, mode: MetadataMode) -> None:
         Dimension(name="x", count=32, type="space"),
     ]
 
-    _write_with_mode(tmp_path, dimensions, mode)
+    settings = _write_with_mode(tmp_path, dimensions, mode)
 
-    # Verify file structure
-    tiff_files = list(tmp_path.glob("*.ome.tiff"))
+    # Verify file structure (multi-file modes create subdirectory)
+    tiff_files = list(tmp_path.rglob("*.ome.tiff"))
     assert len(tiff_files) == 2
 
     # Get full metadata
-    ome = _get_full_ome(tmp_path, mode)
+    ome = _get_full_ome(settings)
     assert len(ome.images) == 2
     assert [img.name for img in ome.images] == ["Pos0", "Pos1"]
 
@@ -565,7 +615,7 @@ def test_basic_multiposition(tmp_path: Path, mode: MetadataMode) -> None:
 
 
 @pytest.mark.parametrize("mode", MULTI_FILE_MODES)
-def test_5d_with_physical_sizes(tmp_path: Path, mode: MetadataMode) -> None:
+def test_5d_with_physical_sizes(tmp_path: Path, mode: MultiFileMetadata) -> None:
     """Test full 5D acquisition with physical pixel sizes."""
     dimensions = [
         Dimension(name="t", count=2, type="time"),
@@ -576,9 +626,9 @@ def test_5d_with_physical_sizes(tmp_path: Path, mode: MetadataMode) -> None:
         Dimension(name="x", count=64, type="space", scale=0.5, unit="micrometer"),
     ]
 
-    _write_with_mode(tmp_path, dimensions, mode)
+    settings = _write_with_mode(tmp_path, dimensions, mode)
 
-    ome = _get_full_ome(tmp_path, mode)
+    ome = _get_full_ome(settings)
     assert len(ome.images) == 2
 
     for img in ome.images:
@@ -594,7 +644,7 @@ def test_5d_with_physical_sizes(tmp_path: Path, mode: MetadataMode) -> None:
 
 
 @pytest.mark.parametrize("mode", MULTI_FILE_MODES)
-def test_plate_basic(tmp_path: Path, mode: MetadataMode) -> None:
+def test_plate_basic(tmp_path: Path, mode: MultiFileMetadata) -> None:
     """Test plate with one field per well."""
     dimensions = [
         Dimension(
@@ -611,9 +661,9 @@ def test_plate_basic(tmp_path: Path, mode: MetadataMode) -> None:
     ]
     plate = Plate(name="Test Plate", row_names=["A", "B"], column_names=["1", "2"])
 
-    _write_with_mode(tmp_path, dimensions, mode, plate=plate)
+    settings = _write_with_mode(tmp_path, dimensions, mode, plate=plate)
 
-    ome = _get_full_ome(tmp_path, mode)
+    ome = _get_full_ome(settings)
     assert len(ome.images) == 3
     assert len(ome.plates) == 1
 
@@ -625,7 +675,7 @@ def test_plate_basic(tmp_path: Path, mode: MetadataMode) -> None:
 
 
 @pytest.mark.parametrize("mode", MULTI_FILE_MODES)
-def test_plate_multiple_fields(tmp_path: Path, mode: MetadataMode) -> None:
+def test_plate_multiple_fields(tmp_path: Path, mode: MultiFileMetadata) -> None:
     """Test plate with multiple fields per well."""
     dimensions = [
         Dimension(
@@ -642,9 +692,9 @@ def test_plate_multiple_fields(tmp_path: Path, mode: MetadataMode) -> None:
     ]
     plate = Plate(name="Multi-Field", row_names=["A"], column_names=["1", "2"])
 
-    _write_with_mode(tmp_path, dimensions, mode, plate=plate)
+    settings = _write_with_mode(tmp_path, dimensions, mode, plate=plate)
 
-    ome = _get_full_ome(tmp_path, mode)
+    ome = _get_full_ome(settings)
     plate_obj = ome.plates[0]
 
     # Find well A1 - should have 2 fields
@@ -657,7 +707,7 @@ def test_plate_multiple_fields(tmp_path: Path, mode: MetadataMode) -> None:
 
 
 @pytest.mark.parametrize("mode", MULTI_FILE_MODES)
-def test_file_structure_by_mode(tmp_path: Path, mode: MetadataMode) -> None:
+def test_file_structure_by_mode(tmp_path: Path, mode: MultiFileMetadata) -> None:
     """Verify correct file structure for each metadata mode."""
     dimensions = [
         Dimension(name="p", type="position", coords=["Pos0", "Pos1"]),
@@ -667,12 +717,18 @@ def test_file_structure_by_mode(tmp_path: Path, mode: MetadataMode) -> None:
 
     _write_with_mode(tmp_path, dimensions, mode)
 
-    tiff_files = sorted(tmp_path.glob("*.ome.tiff"))
-    companion_files = list(tmp_path.glob("*.companion.ome"))
+    # Multi-file modes now create files in a subdirectory
+    tiff_files = sorted(tmp_path.rglob("*.ome.tiff"))
+    # Find companion files (not .tiff, and has .ome or .xml suffix)
+    companion_files = [
+        f
+        for f in tmp_path.rglob("*")
+        if f.is_file() and f.suffix in (".ome", ".xml") and ".tiff" not in f.name
+    ]
 
     assert len(tiff_files) == 2
 
-    if mode == MetadataMode.MULTI_REDUNDANT:
+    if mode == MultiFileMetadata.REDUNDANT:
         # Each TIFF has full metadata, no companion
         assert len(companion_files) == 0
         root_uuids = set()
@@ -691,7 +747,7 @@ def test_file_structure_by_mode(tmp_path: Path, mode: MetadataMode) -> None:
         # Each file has unique UUID
         assert len(root_uuids) == 2
 
-    elif mode == MetadataMode.MULTI_MASTER_TIFF:
+    elif mode == MultiFileMetadata.MASTER_TIFF:
         # First TIFF is master, others have BinaryOnly, no companion
         assert len(companion_files) == 0
         master = next(f for f in tiff_files if "_p000" in f.name)
@@ -711,7 +767,7 @@ def test_file_structure_by_mode(tmp_path: Path, mode: MetadataMode) -> None:
                 assert ome.binary_only.uuid == master_ome.uuid
                 assert PathlibPath(ome.binary_only.metadata_file).name == master.name
 
-    elif mode == MetadataMode.MULTI_MASTER_COMPANION:
+    elif mode == MultiFileMetadata.COMPANION:
         # Companion has full metadata, all TIFFs have BinaryOnly
         assert len(companion_files) == 1
         with open(companion_files[0], encoding="utf-8") as f:
@@ -735,7 +791,7 @@ def test_file_structure_by_mode(tmp_path: Path, mode: MetadataMode) -> None:
 
 
 @pytest.mark.parametrize("mode", MULTI_FILE_MODES)
-def test_pixel_data_integrity(tmp_path: Path, mode: MetadataMode) -> None:
+def test_pixel_data_integrity(tmp_path: Path, mode: MultiFileMetadata) -> None:
     """Verify pixel data can be read back correctly."""
     import tifffile
 
