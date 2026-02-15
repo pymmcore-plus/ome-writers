@@ -180,6 +180,7 @@ pythonVersion = "3.10"
 enableExperimentalFeatures = true
 reportArgumentType = false         # tough with pydantic type casting.
 reportAttributeAccessIssue = false # tough with pydantic 
+venv = ".venv"
 
 # https://docs.pytest.org/
 [tool.pytest.ini_options]
@@ -221,3 +222,4 @@ python = "./.venv"
 invalid-argument-type = "ignore"
 unresolved-import = "ignore"
 possibly-missing-attribute = "ignore"
+unresolved-attribute = "ignore"  # Dimension casting by type... hard for ty

@@ -249,7 +249,7 @@ def test_useq_to_dims(case: Case) -> None:
             # MultiPhaseTimePlan doesn't have .interval attribute
             if hasattr(seq.time_plan, "interval"):
                 assert dim.unit == "second"
-                assert dim.scale == seq.time_plan.interval.total_seconds()  # ty: ignore
+                assert dim.scale == seq.time_plan.interval.total_seconds()
         elif dim.name == "z" and seq.z_plan:
             # ZAbsolutePositions/ZRelativePositions don't have .step attribute
             assert dim.unit == "micrometer"

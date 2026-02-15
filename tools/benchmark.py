@@ -132,7 +132,7 @@ def run_benchmark_iteration(
     finally:
         shutil.rmtree(tmp_path, ignore_errors=True)
 
-    return {  # ty: ignore
+    return {
         "create_stream": t1 - t0,
         "append": t2 - t1,
         "finalize": t3 - t2,
@@ -171,7 +171,7 @@ def run_benchmark(
     # Compute statistics for each phase
     results = {}
     for phase in list(all_timings[0]):
-        values = [t[phase] for t in all_timings]  # ty: ignore
+        values = [t[phase] for t in all_timings]
         results[phase] = {
             "mean": np.mean(values),
             "std": np.std(values),
@@ -180,7 +180,7 @@ def run_benchmark(
             "median": np.median(values),
         }
 
-    return results  # ty: ignore
+    return ResultsDict(results)
 
 
 def run_all_benchmarks(
