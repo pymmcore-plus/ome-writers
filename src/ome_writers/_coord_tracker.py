@@ -13,24 +13,18 @@ if TYPE_CHECKING:
     from ome_writers._schema import AcquisitionSettings
 
 
-class StreamEvent:
-    """Event types emitted by OMEStream during acquisition."""
-
-    COORDS_EXPANDED = "coords_expanded"
-    """Emitted when high water marks reached (less frequent)."""
-
-    COORDS_CHANGED = "coords_changed"
-    """Emitted on every frame write (more frequent)."""
-
-
-@dataclass
+@dataclass(frozen=True, slots=True)
 class CoordUpdate:
     """Coordinate state information passed to event handlers."""
 
-    max_coords: Mapping[Hashable, Sequence]  # Maximum coords seen (for sliders)
-    current_indices: Mapping[Hashable, int]  # Current write position
-    frame_index: int  # Linear frame index
-    is_high_water_mark: bool  # True if new high water mark
+    max_coords: Mapping[str, Sequence]
+    """Mapping of dimension names to maximum visited coordinate ranges."""
+    current_indices: Mapping[str, int]
+    """Mapping of dimension names to last written position."""
+    frame_number: int
+    """Global frame number."""
+    is_high_water_mark: bool
+    """True if this frame is a new "high water mark" (e.g. `max_coords` has expanded)."""  # noqa: E501
 
 
 def high_water_marks(shape: tuple[range | int, ...]) -> dict[int, list[int]]:
@@ -99,9 +93,9 @@ class _CoordTracker:
         self._current_max_indices = [-1] * len(non_frame_shape)
         if initial_frame_count > 0:
             # Find the highest water mark we've already passed
-            for frame_idx in sorted(self._high_water_marks.keys()):
-                if frame_idx < initial_frame_count:
-                    self._current_max_indices = self._high_water_marks[frame_idx]
+            for frame_num in sorted(self._high_water_marks.keys()):
+                if frame_num < initial_frame_count:
+                    self._current_max_indices = self._high_water_marks[frame_num]
                 else:
                     break
 
@@ -109,10 +103,10 @@ class _CoordTracker:
         self._base_coords = {d.name: range(1) for d in dims[:-2]}
         self._base_coords.update({d.name: range(d.count) for d in dims[-2:]})
 
-    def _frame_to_indices(self, frame_idx: int) -> list[int]:
+    def _frame_to_indices(self, frame_num: int) -> list[int]:
         """Convert linear frame index to multi-dimensional indices."""
         indices = []
-        remaining = frame_idx
+        remaining = frame_num
         # Iterate in reverse order (last dimension varies fastest)
         for dim in reversed(self._non_frame_dims):
             size = dim.count or 10000
@@ -141,24 +135,24 @@ class _CoordTracker:
         Returns None on non-HWM frames if needs_current_indices=False
         (optimization for COORDS_EXPANDED-only listeners).
         """
-        frame_idx = self._frames_written
+        frame_num = self._frames_written
         self._frames_written += 1
 
         # Check for high water mark
-        is_hwm = frame_idx in self._high_water_marks
+        is_hwm = frame_num in self._high_water_marks
         if is_hwm:
-            self._current_max_indices = self._high_water_marks[frame_idx]
+            self._current_max_indices = self._high_water_marks[frame_num]
 
         # Skip computation if not needed (only COORDS_EXPANDED and not HWM)
         if not self._needs_current_indices and not is_hwm:
             return None
 
         # Compute full update (only when needed)
-        current_indices = self._frame_to_indices(frame_idx)
+        current_indices = self._frame_to_indices(frame_num)
         return CoordUpdate(
             max_coords=self.get_coords(),
             current_indices=self._indices_to_dict(current_indices),
-            frame_index=frame_idx,
+            frame_number=frame_num,
             is_high_water_mark=is_hwm,
         )
 
@@ -185,7 +179,7 @@ class _CoordTracker:
             return CoordUpdate(
                 max_coords=self.get_coords(),
                 current_indices=self._indices_to_dict(current_indices),
-                frame_index=end_idx - 1,
+                frame_number=end_idx - 1,
                 is_high_water_mark=True,
             )
         return None
