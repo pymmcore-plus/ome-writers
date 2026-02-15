@@ -3,9 +3,9 @@ from functools import cache
 from typing import Any
 
 import numpy as np
-import scyjava
-import scyjava.config
-from scyjava import jimport
+import scyjava  # pyright: ignore
+import scyjava.config  # pyright: ignore
+from scyjava import jimport  # pyright: ignore
 
 scyjava.config.endpoints.append("ome:formats-gpl:RELEASE")
 # suppress slf4j logging output
