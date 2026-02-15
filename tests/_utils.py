@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import time
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -49,3 +50,31 @@ def read_array_data(path: Path | str) -> np.ndarray:
         import zarr
 
         return np.asarray(zarr.open_array(path))
+
+
+def wait_for_frames(
+    backend: Any,
+    position_idx: int = 0,
+    expected_count: int | None = None,
+    timeout: float = 5.0,
+) -> None:
+    """Wait for WriterThread to write frames."""
+    try:
+        from ome_writers._backends._tifffile import TiffBackend
+
+        if not isinstance(backend, TiffBackend):
+            return
+    except ImportError:
+        return
+
+    start = time.time()
+    while time.time() - start < timeout:
+        thread = backend._position_managers[position_idx].thread
+        if thread is None:
+            break
+        with thread.state_lock:
+            written = thread.frames_written
+        if expected_count is None or written >= expected_count:
+            if written > 0:
+                break
+        time.sleep(0.01)  # Small sleep to avoid busy-waiting

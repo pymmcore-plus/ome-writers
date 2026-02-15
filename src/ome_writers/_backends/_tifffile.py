@@ -5,10 +5,11 @@ from __future__ import annotations
 import math
 import threading
 import warnings
+from contextlib import suppress
 from dataclasses import dataclass
 from itertools import count
 from queue import Queue
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 import numpy as np
 
@@ -19,6 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
     from typing import Any
 
+    from ome_writers._backends._backend import ArrayLike
     from ome_writers._backends._ome_xml import OmeXMLMirror
     from ome_writers._router import FrameRouter
     from ome_writers._schema import AcquisitionSettings, Dimension
@@ -49,6 +51,7 @@ class PositionManager:
     thread: WriterThread | None
     queue: Queue[np.ndarray | None]
     metadata_mirror: OmeXMLMirror
+    writer: tifffile.TiffWriter | None
 
     def __post_init__(self) -> None:
         self._lock = threading.Lock()
@@ -173,11 +176,16 @@ class TiffBackend(ArrayBackend):
 
         # Create writer thread for each position
         for fname, meta_mirror in metas.items():
-            thread = q = None
+            thread = q = writer = None
             if meta_mirror.is_tiff:
+                # Create TiffWriter immediately - file exists with valid header
+                writer = tifffile.TiffWriter(
+                    fname, bigtiff=True, ome=False, shaped=False
+                )
+
                 q = Queue()
                 thread = WriterThread(
-                    path=fname,
+                    writer=writer,
                     shape=shape,
                     dtype=self._dtype,
                     image_queue=q,
@@ -191,6 +199,7 @@ class TiffBackend(ArrayBackend):
                 thread=thread,
                 queue=q,
                 metadata_mirror=meta_mirror,
+                writer=writer,
             )
 
     def write(
@@ -229,7 +238,7 @@ class TiffBackend(ArrayBackend):
         if not self._position_managers:  # pragma: no cover
             raise RuntimeError("Backend not prepared. Call prepare() first.")
 
-        if not indices:
+        if not indices:  # pragma: no cover
             return
 
         placeholder = np.zeros(self._frame_shape, dtype=self._dtype)
@@ -293,6 +302,72 @@ class TiffBackend(ArrayBackend):
                 manager.finalize(index_dims)
 
             self._finalized = True
+
+    def get_arrays(self) -> list[ArrayLike]:
+        """Return zarr arrays backed by TIFF files or LiveTiffStore.
+
+        If finalized: Returns arrays backed by complete TIFF files (via aszarr).
+        If not finalized: Returns arrays backed by LiveTiffStore (live viewing).
+
+        Returns
+        -------
+        list[ArrayLike]
+            List of zarr arrays (one per TIFF file)
+        """
+        try:
+            import zarr
+
+            from ome_writers._backends._live_tiff_store import LiveTiffStore
+        except ImportError as e:
+            raise ImportError(
+                f"{self.__class__.__name__}.get_arrays() requires zarr: "
+            ) from e
+
+        if not self._position_managers:  # pragma: no cover
+            raise RuntimeError("Backend not prepared. Call prepare() first.")
+
+        arrays = []
+        for _, manager in sorted(self._position_managers.items()):
+            if not manager.metadata_mirror.is_tiff:  # pragma: no cover
+                continue  # Skip companion-only entries
+
+            path = manager.file_path
+            # Choose Store based on finalization state
+            if self._finalized:
+                # FINALIZED: Use complete TIFF file via aszarr
+                store = tifffile.TiffFile(path).aszarr()
+            else:
+                # LIVE: Use LiveTiffStore for incomplete file
+                if manager.thread is None:  # pragma: no cover
+                    raise RuntimeError(f"No WriterThread for {path}")
+
+                # Check if compression is enabled (LiveTiffStore won't work)
+                if manager.thread._compression is not None:  # pragma: no cover
+                    raise NotImplementedError(
+                        "Live viewing is not supported with compression enabled."
+                    )
+
+                storage_dims = cast("tuple[Dimension]", self._storage_dims)
+                # Calculate full shape from storage dimensions
+                # Use large default for unbounded
+                shape = tuple(d.count or 1000 for d in storage_dims)
+
+                # Chunks are single frames (1 for each non-spatial dim, full Y,X)
+                # (regardless of the settings used during for tiff writing, currently)
+                chunks = tuple(1 for _ in storage_dims[:-2]) + self._frame_shape
+
+                store = LiveTiffStore(
+                    writer_thread=manager.thread,
+                    file_path=path,
+                    shape=shape,
+                    dtype=self._dtype,
+                    chunks=chunks,
+                    fill_value=0,
+                )
+
+            arrays.append(zarr.open(store, mode="r"))
+
+        return arrays
 
     def get_metadata(self) -> dict[int, ome.OME]:
         """Get the base OME metadata generated from acquisition settings.
@@ -383,7 +458,7 @@ class WriterThread(threading.Thread):
 
     def __init__(
         self,
-        path: str,
+        writer: tifffile.TiffWriter,
         shape: tuple[int, ...],
         dtype: str,
         image_queue: Queue[np.ndarray | None],
@@ -393,7 +468,7 @@ class WriterThread(threading.Thread):
         compression: tifffile.COMPRESSION | None = None,
     ) -> None:
         super().__init__(daemon=True, name=f"TiffWriterThread-{next(_thread_counter)}")
-        self._path = path
+        self._writer = writer
         self._shape = shape
         self._dtype = dtype
         self._image_queue = image_queue
@@ -408,49 +483,67 @@ class WriterThread(threading.Thread):
         self._has_unbounded = has_unbounded
         self._compression = compression
         self.frames_written = 0  # Track actual frames written for unbounded dims
+        self.state_lock = threading.Lock()  # Synchronize with readers
+        self.data_offset: int | None = None  # Byte offset where frame data starts
 
     def run(self) -> None:
         """Write frames from queue to TIFF file sequentially."""
-        # Wait for first frame before opening file - if close is called before
-        # any frames are written, we get None and can return early
+        # Wait for first frame - if None, close writer and return
         first_frame = self._image_queue.get()
         if first_frame is None:
+            self._writer.close()
             return
 
         def _queue_iterator() -> Iterator[np.ndarray]:
             """Yield first frame, then frames from queue until None."""
-            self.frames_written += 1
             yield first_frame
             while True:
                 frame = self._image_queue.get()
                 if frame is None:
                     break
-                self.frames_written += 1
                 yield frame
 
         try:
-            with tifffile.TiffWriter(
-                self._path, bigtiff=True, ome=False, shaped=False
-            ) as writer:
-                # Write frames individually for both bounded and unbounded dimensions.
-                # This approach:
-                # - Doesn't promise a frame count upfront (no shape parameter)
-                # - Handles incomplete writes gracefully (iterator can end early)
-                # - Lets tifffile discover the actual count as frames arrive
-                # Note: contiguous=True is incompatible with compression, so we only
-                # use it when compression is disabled
-                use_contiguous = self._compression is None
-                for i, frame in enumerate(_queue_iterator()):
-                    writer.write(
-                        frame,
-                        contiguous=use_contiguous,
-                        dtype=self._dtype,
-                        resolution=(self._res, self._res),
-                        resolutionunit=tifffile.RESUNIT.MICROMETER,
-                        photometric=tifffile.PHOTOMETRIC.MINISBLACK,
-                        description=self._ome_xml_bytes if i == 0 else None,
-                        compression=self._compression,
-                    )
+            # Write frames individually for both bounded and unbounded dimensions.
+            # This approach:
+            # - Doesn't promise a frame count upfront (no shape parameter)
+            # - Handles incomplete writes gracefully (iterator can end early)
+            # - Lets tifffile discover the actual count as frames arrive
+            # Note: contiguous=True is incompatible with compression, so we only
+            # use it when compression is disabled
+            use_contiguous = self._compression is None
+            for i, frame in enumerate(_queue_iterator()):
+                # Write frame without holding lock - only this thread writes
+                self._writer.write(
+                    frame,
+                    contiguous=use_contiguous,
+                    dtype=self._dtype,
+                    resolution=(self._res, self._res),
+                    resolutionunit=tifffile.RESUNIT.MICROMETER,
+                    photometric=tifffile.PHOTOMETRIC.MINISBLACK,
+                    description=self._ome_xml_bytes if i == 0 else None,
+                    compression=self._compression,
+                )
+
+                # Only hold lock when updating shared state
+                with self.state_lock:
+                    # Capture data offset after first frame (where frames start in file)
+                    if i == 0 and self.data_offset is None:
+                        try:
+                            # ! private attribute access - relies on tifffile internals
+                            self.data_offset = self._writer._dataoffset
+                        except AttributeError:  # pragma: no cover
+                            raise RuntimeError(
+                                "tifffile.TiffWriter has no _dataoffset attribute. "
+                                "Cannot determine frame data offset for live viewing."
+                                "Please report this issue with the version of tifffile "
+                                "you're using."
+                            ) from None
+
+                    # Increment counter AFTER write and flush to ensure readers
+                    # only see frames that are fully written
+                    self.frames_written += 1
+
         except Exception as e:  # pragma: no cover
             # Unexpected errors - log and continue
             warnings.warn(
@@ -458,6 +551,9 @@ class WriterThread(threading.Thread):
                 RuntimeWarning,
                 stacklevel=2,
             )
+        finally:
+            with suppress(Exception):
+                self._writer.close()
 
 
 _thread_counter = count()
