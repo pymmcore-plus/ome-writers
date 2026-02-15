@@ -711,7 +711,7 @@ class OmeTiffFormat(_BaseModel):
     companion_file: str = Field(
         default="companion.ome",
         description="Filename to use for OME-XML companion file when using "
-        "`'companion-file'` structure. ",
+        "`'companion-file'` structure.",
     )
 
     def get_output_path(self, root_path: str, *, num_positions: int = 1) -> str:

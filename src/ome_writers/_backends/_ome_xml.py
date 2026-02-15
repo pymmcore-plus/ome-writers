@@ -84,7 +84,6 @@ class OmeXMLMirror:
             # companion file
             with open(self.path, mode="wb") as f:
                 f.write(xml_bytes)
-                print("✓ Wrote OME-XML to", self.path)
 
         self._dirty = False
 
