@@ -21,7 +21,7 @@ Example metadata output for OME-TIFF and OME-Zarr are shown below:
     metadata (in this case `"temperature"` and `"laser_power"`) will be written
     as MapAnnotations referenced by each Plane:
 
-    ```xml title="OME-XML (in Tiff Header or .companion.ome file)"
+    ```xml title="OME-XML (in Tiff Header or companion.ome file)"
     <OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://www.openmicroscopy.org/Schemas/OME/2016-06
