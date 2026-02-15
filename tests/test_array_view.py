@@ -79,12 +79,12 @@ def test_array_view(tmp_path: Path, dim_order: str, any_backend: str) -> None:
                 # we should be able to see early frames,
                 wait_for_frames(stream._backend, expected_count=1)
                 first_idx = (0,) * (view.ndim - 2)
-                first_frame = view[first_idx].result()
+                first_frame = view[first_idx]
                 assert not np.allclose(first_frame, 0)
 
                 # while later frames should still be zero (but not an error)
                 last_idx = (-1,) * (view.ndim - 2)  # exercise negative indexing
-                last_frame = view[last_idx].result()
+                last_frame = view[last_idx]
                 assert np.allclose(last_frame, 0)
 
     assert view.dims == list(dim_order)
@@ -93,11 +93,11 @@ def test_array_view(tmp_path: Path, dim_order: str, any_backend: str) -> None:
 
     # Test basic indexing works
     non_xy_dims = len(view.shape) - 2  # All except y, x
-    result = view[(0,) * non_xy_dims].result()
+    result = view[(0,) * non_xy_dims]
     assert result.shape == (NY, NX)
 
     # Test slicing works - get first slice of non-spatial dims
-    result = view[(slice(0, 1),) * non_xy_dims].result()
+    result = view[(slice(0, 1),) * non_xy_dims]
     assert result.shape == (1,) * (non_xy_dims) + (NY, NX)
 
     arr = np.asarray(view)
@@ -112,7 +112,7 @@ def test_array_view(tmp_path: Path, dim_order: str, any_backend: str) -> None:
     if (pos_ax := settings.position_dimension_index) is not None:
         # Take first index of all non-xy dims, except slice all positions
         index = tuple(slice(None) if i == pos_ax else 0 for i in range(non_xy_dims))
-        result = view[index].result()
+        result = view[index]
         assert result.shape == (NP, NY, NX)
 
         for pos_idx in range(NP):
