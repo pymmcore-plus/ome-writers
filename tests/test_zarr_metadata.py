@@ -64,8 +64,8 @@ def test_get_metadata_single_position(tmp_path: Path) -> None:
     # Verify by reading back
     import zarr
 
-    store = zarr.open(str(tmp_path / "test.zarr"))
-    root_attrs = dict(store.attrs)
+    store = zarr.open_group(str(tmp_path / "test.zarr"))
+    root_attrs: dict = dict(store.attrs)
 
     assert "custom_timestamps" in root_attrs
     assert root_attrs["custom_timestamps"] == [0.0, 0.1]
@@ -115,13 +115,13 @@ def test_get_metadata_multiposition(tmp_path: Path) -> None:
     # Verify
     import zarr
 
-    store = zarr.open(str(tmp_path / "multipos.zarr"))
+    store = zarr.open_group(str(tmp_path / "multipos.zarr"))
 
-    pos0_attrs = dict(store["Pos0"].attrs)
+    pos0_attrs: dict = dict(store["Pos0"].attrs)
     assert pos0_attrs["position_name"] == "Control"
     assert pos0_attrs["stage_position"]["x"] == 0.0
 
-    pos1_attrs = dict(store["Pos1"].attrs)
+    pos1_attrs: dict = dict(store["Pos1"].attrs)
     assert pos1_attrs["position_name"] == "Treatment"
     assert pos1_attrs["stage_position"]["x"] == 100.0
 
@@ -208,7 +208,7 @@ def test_zarr_metadata_workflow_example(tmp_path: Path) -> None:
     import zarr
 
     store = zarr.open(str(tmp_path / "example.zarr"))
-    attrs = dict(store.attrs)
+    attrs: dict = dict(store.attrs)
 
     assert "acquisition" in attrs
     assert attrs["acquisition"]["microscope"] == "Nikon Ti2"

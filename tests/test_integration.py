@@ -647,3 +647,23 @@ def test_append_too_many_frames(tmp_path: Path, any_backend: str) -> None:
 
         with pytest.raises(IndexError, match="Cannot append frame: would exceed total"):
             stream.append(empty_frame)
+
+
+def test_empty_stream(tiff_backend: str, tmp_path: Path) -> None:
+    """Make sure we can create and finalize a stream without appending any frames."""
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "empty_stream"),
+        dimensions=[
+            D(name="t", count=5, type="time"),
+            D(name="c", count=2, type="channel"),
+            D(name="y", count=32, chunk_size=32, type="space"),
+            D(name="x", count=32, chunk_size=32, type="space"),
+        ],
+        dtype="uint16",
+        format=tiff_backend,
+    )
+
+    with create_stream(settings):
+        pass
+    # TODO: establish "expected" behavior for empty streams...
+    # should there be no effect on disk? (cleanup all prepared files?)

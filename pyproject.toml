@@ -79,7 +79,11 @@ acquire-zarr = [
     "ome-writers[acquire-zarr]",
     "tensorstore>=0.1.78",       # just for read validation in tests
 ]
-tifffile = [{ include-group = 'test' }, "ome-writers[tifffile]"]
+tifffile = [
+    { include-group = 'test' },
+    "ome-writers[tifffile]",
+    "zarr>=3.1.5; python_version >= '3.11'", # for live array-preview tests
+]
 bioformats = [{ include-group = "tifffile" }, "scyjava>=1.12.1"]
 test-codspeed = [
     { include-group = "test" },
@@ -176,6 +180,7 @@ pythonVersion = "3.10"
 enableExperimentalFeatures = true
 reportArgumentType = false         # tough with pydantic type casting.
 reportAttributeAccessIssue = false # tough with pydantic 
+venv = ".venv"
 
 # https://docs.pytest.org/
 [tool.pytest.ini_options]
@@ -217,3 +222,4 @@ python = "./.venv"
 invalid-argument-type = "ignore"
 unresolved-import = "ignore"
 possibly-missing-attribute = "ignore"
+unresolved-attribute = "ignore"  # Dimension casting by type... hard for ty

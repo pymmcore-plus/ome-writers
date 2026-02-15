@@ -15,7 +15,7 @@ repos:
     rev: v1.7.10
     hooks:
       - id: actionlint
-        args: ['-ignore', 'label ".+" is unknown']
+        args: ["-ignore", 'label ".+" is unknown']
 
   - repo: https://github.com/adhtruong/mirrors-typos
     rev: v1.42.3
@@ -36,3 +36,12 @@ repos:
         entry: uv run ty check --project .
         language: python
         pass_filenames: false
+
+      - id: pyright
+        stages: [manual]
+        exclude: "^docs/|^tests/|^examples/"
+        name: pyright
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+        entry: uv run pyright

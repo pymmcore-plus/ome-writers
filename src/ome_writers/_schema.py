@@ -617,8 +617,8 @@ class PositionDimension(Dimension):
     """Deprecated: use Dimension(type='position', ...) instead."""
 
     name: str = "p"
-    type: Literal["position"] = "position"  # type: ignore
-    coords: list[Position] | None = None  # type: ignore
+    type: Literal["position"] = "position"  # pyright: ignore
+    coords: list[Position] | None = None  # pyright: ignore
 
     def model_post_init(self, __context: Any) -> None:
         warnings.warn(
@@ -642,12 +642,12 @@ class PositionDimension(Dimension):
 if TYPE_CHECKING:
 
     class ChannelDimension(Dimension):
-        type: Literal["channel"] = "channel"  # type: ignore
-        coords: list[Channel] | None = None  # type: ignore
+        type: Literal["channel"] = "channel"  # pyright: ignore
+        coords: list[Channel] | None = None  # pyright: ignore
 
     class SpatialDimension(Dimension):
-        type: Literal["space"] = "space"  # type: ignore
-        coords: list[float] | None = None  # type: ignore
+        type: Literal["space"] = "space"  # pyright: ignore
+        coords: list[float] | None = None  # pyright: ignore
 
 
 def is_channel_dim(dim: Dimension) -> TypeIs[ChannelDimension]:
@@ -1023,7 +1023,11 @@ class AcquisitionSettings(_BaseModel):
 
     @property
     def storage_index_permutation(self) -> tuple[int, ...] | None:
-        """Permutation to convert acquisition index to storage index, if different."""
+        """Permutation to convert acquisition index to storage index, if different.
+
+        If storage order is the same as acquisition order for index dimensions, returns
+        `None`.
+        """
         storage_dims = self.storage_index_dimensions
         perm = _compute_permutation(self.index_dimensions, storage_dims)
         return perm if perm != tuple(range(len(perm))) else None
