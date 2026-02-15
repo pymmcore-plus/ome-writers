@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from concurrent.futures import Executor, Future
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
@@ -19,42 +18,21 @@ if TYPE_CHECKING:
 class AcquisitionView:
     """Read-only view presenting multiple position arrays as a single array.
 
-    This class provides an async, read-only view onto an ongoing
-    acquisition stream. It combines all underlying arrays back into a single
-    higher-dimensional array with the same shape *and order* as the original
-    `AcquisitionSettings.dimensions`. Use it as you would a normal numpy array,
-    but note that it only supports:
+    This class provides a read-only view onto an ongoing acquisition stream.  It
+    combines all underlying arrays back into a single higher-dimensional array with the
+    same shape *and order* as the original `AcquisitionSettings.dimensions`.  Use it as
+    you would a normal numpy array, but note that it only supports:
 
-    - `__getitem__` with integer and slice indexing (returns `Future[np.ndarray]`,
-      call `.result()` to block and retrieve data)
-    - `__array__` for conversion to a numpy array (blocks internally)
+    - `__getitem__` with integer and slice indexing (no advanced indexing)
+    - `__array__` for conversion to a numpy array (with optional dtype conversion)
     - `shape`, `dtype`, and `ndim` properties
-
-    NOTE:
-    - Caller provides and manages the `Executor` (e.g., `ThreadPoolExecutor`)
-    - If no executor provided, requests are synchronous (wrapped futures)
 
     Accessing not-yet-written positions or frames should return zeros (or the
     fill-value of the underlying arrays, if specified).
 
-    Parameters
-    ----------
-    arrays : Sequence[ArrayLike]
-        Sequence of array-like objects to view.
-    position_axis : int | None
-        Axis index for the position dimension. None means no position dimension.
-    acquisition_order_perm : tuple[int, ...] | None
-        Permutation to convert storage order to acquisition order.
-    dimension_labels : tuple[str, ...]
-        Labels for each dimension.
-    executor : Executor | None
-        Optional executor for async reads. If None, reads are synchronous
-        (wrapped in completed futures). Caller is responsible for executor
-        lifecycle management.
-
     !!! warning
         It is *strongly discouraged* to materialize the entire view as a single array
-        (e.g., via `view[:]` or `np.asarray(view)`).  It is intended as a preview
+        (e.g., via  `view[:]` or `np.asarray(view)`).  It is intended as a preview
         onto individual frames at a time.
     """
 
@@ -62,26 +40,14 @@ class AcquisitionView:
         "_acq_perm",
         "_arrays",
         "_dims",
-        "_executor",
         "_inv_perm",
         "_n_perm",
         "_position_axis",
     )
 
     @classmethod
-    def from_stream(
-        cls, stream: OMEStream, *, executor: Executor | None = None
-    ) -> Self:
-        """Create view directly from OMEStream.
-
-        Parameters
-        ----------
-        stream : OMEStream
-            The stream to create a view from.
-        executor : Executor | None
-            Optional executor for async reads. If None, reads are synchronous
-            (wrapped in completed futures). Caller manages executor lifecycle.
-        """
+    def from_stream(cls, stream: OMEStream) -> Self:
+        """Create view directly from OMEStream."""
         if stream.closed:
             raise NotImplementedError(
                 "Creating a view on a closed stream is not currently supported."
@@ -106,7 +72,6 @@ class AcquisitionView:
             position_axis=settings.position_dimension_index,
             acquisition_order_perm=acquisition_perm,
             dimension_labels=[d.name for d in settings.dimensions],
-            executor=executor,
         )
 
     def __init__(
@@ -116,7 +81,6 @@ class AcquisitionView:
         position_axis: int | None = 0,
         acquisition_order_perm: tuple[int, ...] | None = None,
         dimension_labels: tuple[str, ...] = (),
-        executor: Executor | None = None,
     ) -> None:
         if not arrays:  # pragma: no cover
             raise ValueError("Arrays list cannot be empty")
@@ -128,7 +92,6 @@ class AcquisitionView:
         self._arrays = list(arrays)
         self._acq_perm = acquisition_order_perm
         self._dims = dimension_labels
-        self._executor = executor
 
         # Validate shapes match
         first, *others = self._arrays
@@ -176,35 +139,7 @@ class AcquisitionView:
     def ndim(self) -> int:
         return len(self.shape)
 
-    def __getitem__(self, key: Any) -> Future[np.ndarray]:
-        """Get array slice asynchronously.
-
-        Returns a Future that will contain the requested array slice. Call
-        `.result()` to block and retrieve the data, or `.cancel()` to cancel
-        the request before it completes.
-
-        Parameters
-        ----------
-        key : Any
-            Index or slice specification.
-
-        Returns
-        -------
-        Future[np.ndarray]
-            Future containing the requested array slice.
-        """
-        if self._executor is None:
-            # Synchronous fallback: execute immediately and wrap in completed future
-            result = self._getitem_sync(key)
-            future: Future[np.ndarray] = Future()
-            future.set_result(result)
-            return future
-
-        # Async: submit to executor
-        return self._executor.submit(self._getitem_sync, key)
-
-    def _getitem_sync(self, key: Any) -> np.ndarray:
-        """Synchronous implementation of array slicing."""
+    def __getitem__(self, key: Any) -> np.ndarray:
         # Normalize key to full tuple with slices
         if not isinstance(key, tuple):
             key = (key,)
@@ -288,15 +223,11 @@ class AcquisitionView:
         return self.shape[0]
 
     def __array__(self, dtype: Any = None, copy: bool | None = None) -> np.ndarray:
-        """Present this object as a numpy array, with optional dtype conversion.
-
-        This method blocks until the entire array is loaded. Use with caution on
-        large datasets.
-        """
+        """Present this object as a numpy array, with optional dtype conversion."""
         if copy is False:  # pragma: no cover
             raise ValueError("Zero-copy array conversion is not supported.")
 
-        result = self[:].result()  # Block for the future
+        result = self[:]
         return result.astype(dtype) if dtype else result
 
 

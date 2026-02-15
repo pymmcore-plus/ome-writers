@@ -59,11 +59,11 @@ def test_live_tiff_viewing_basic(tmp_path: Path) -> None:
 
         # Should be able to read written frames
         assert view.shape == (5, 2, 32, 32)
-        data = view[0, 0].result()
+        data = view[0, 0]
         assert data.shape == (32, 32)
         assert np.all(data == 0)  # First frame (t=0, c=0)
 
-        data = view[2, 1].result()
+        data = view[2, 1]
         assert np.all(data == 5)  # Frame at t=2, c=1 (6th frame: t*2 + c = 2*2 + 1)
 
         # Data should have been written to store
@@ -98,13 +98,13 @@ def test_live_viewing_returns_zeros_for_unwritten(tmp_path: Path) -> None:
         view = AcquisitionView.from_stream(stream)
 
         # First 3 frames should have data
-        assert np.all(view[0].result() == 100)
-        assert np.all(view[1].result() == 101)
-        assert np.all(view[2].result() == 102)
+        assert np.all(view[0] == 100)
+        assert np.all(view[1] == 101)
+        assert np.all(view[2] == 102)
 
         # Remaining frames should be zeros (unwritten)
-        assert np.all(view[3].result() == 0)
-        assert np.all(view[9].result() == 0)
+        assert np.all(view[3] == 0)
+        assert np.all(view[9] == 0)
 
 
 def test_finalized_tiff_uses_aszarr(tmp_path: Path) -> None:
