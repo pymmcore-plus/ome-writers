@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
+    from typing import Any
 
     from typing_extensions import Self
 
@@ -168,29 +169,29 @@ class AcquisitionView:
 
         # Single position: return directly
         if isinstance(pos_idx, int):
-            return self._get(pos_idx, storage_idx, kept_dims)
+            return self._get_from_position(pos_idx, storage_idx, kept_dims)
 
         # Multiple positions: stack results at adjusted position axis
         # Axis adjusts for collapsed dims (e.g., pos at 1 but dim 0 collapsed)
+        results = [
+            self._get_from_position(int(i), storage_idx, kept_dims)
+            for i in self._resolve_position_indices(pos_idx)
+        ]
         pos_axis = cast("int", pos_axis)
-        position_range = self._resolve_position_indices(pos_idx)
-        results = [self._get(int(i), storage_idx, kept_dims) for i in position_range]
         stack_ax = pos_axis - sum(1 for i in range(pos_axis) if isinstance(key[i], int))
         return np.stack(results, axis=stack_ax)
 
-    def _get(self, pos: int, key: tuple, kept: tuple[bool, ...]) -> np.ndarray:
+    def _get_from_position(
+        self, pos: int, key: tuple, kept: tuple[bool, ...]
+    ) -> np.ndarray:
         # Normalize negative indices for backends like TensorStore
         arr = self._arrays[pos]
-        normed_key = tuple(
-            _norm_index(idx, dim_size)
-            for idx, dim_size in zip(key, arr.shape, strict=False)
-        )
+        normed_key = tuple(_norm_index(*x) for x in zip(key, arr.shape, strict=False))
         result = np.asarray(arr[normed_key] if normed_key else arr[:])
 
         if (acq_perm := self._acq_perm) and any(kept):
             # Build permutation for kept dims only
-            kept_idx = [i for i, k in enumerate(kept) if k]
-            kept_acq = tuple(acq_perm[i] for i in kept_idx)
+            kept_acq = tuple(acq_perm[i] for i, k in enumerate(kept) if k)
             perm = kept_acq + tuple(range(len(kept_acq), result.ndim))
             if perm != tuple(range(result.ndim)):
                 result = np.transpose(result, perm)
