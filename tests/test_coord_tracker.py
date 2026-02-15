@@ -19,11 +19,12 @@ def _wait_for_pending_callbacks(stream: OMEStream, timeout: float = 1.0) -> None
     """Wait for all pending async callbacks to complete (for testing).
 
     Submits barrier tasks serially to ensure all prior work completes.
-    Testing shows 5 barriers is good for 2 workers... but increase if we see flaky
     tests.
     """
     if executor := stream._callback_executor:
-        for _ in range(5):
+        # Testing shows 5 barriers is good for 2 workers...  using 10 for CI
+        # but increase if CI is flaky
+        for _ in range(10):
             executor.submit(lambda: None).result(timeout=timeout)
 
 
