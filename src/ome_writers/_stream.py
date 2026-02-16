@@ -5,9 +5,11 @@ import importlib.util
 import sys
 import warnings
 import weakref
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import TYPE_CHECKING, Any, Final, Literal, NoReturn, TypeAlias
 
+from ome_writers._coord_tracker import CoordUpdate
 from ome_writers._router import FrameRouter
 
 if TYPE_CHECKING:
@@ -16,9 +18,15 @@ if TYPE_CHECKING:
     import numpy as np
 
     from ome_writers._backends._backend import ArrayBackend
+    from ome_writers._coord_tracker import _CoordTracker
     from ome_writers._schema import AcquisitionSettings, FileFormat
 
-__all__ = ["OMEStream", "create_stream"]
+    EventName: TypeAlias = Literal["coords_expanded", "coords_changed"]
+
+__all__ = ["CoordUpdate", "OMEStream", "create_stream"]
+
+COORDS_EXPANDED: Final = "coords_expanded"  # Emitted when high water marks reached
+COORDS_CHANGED: Final = "coords_changed"  # Emitted on every frame write
 
 
 class OMEStream:
@@ -56,8 +64,12 @@ class OMEStream:
     __slots__ = (
         "__weakref__",
         "_backend",
+        "_callback_executor",
+        "_coord_tracker",
+        "_event_handlers",
         "_expected_frames",
         "_finalizer",
+        "_frames_written",
         "_iterator",
         "_router",
         "_settings",
@@ -72,6 +84,14 @@ class OMEStream:
         self._iterator = iter(router)
         self._expected_frames = settings.num_frames
         self._settings = settings
+
+        # Track frame count for mid-acquisition tracker initialization
+        self._frames_written = 0
+
+        # Lazy coordinate tracking - only created when first event handler registered
+        self._coord_tracker: _CoordTracker | None = None
+        self._event_handlers: dict[EventName, list[Callable[[CoordUpdate], None]]] = {}
+        self._callback_executor: ThreadPoolExecutor | None = None
 
         # Mutable state container shared with finalizer
         self._state = {"has_appended": False}
@@ -133,6 +153,12 @@ class OMEStream:
         self._backend.write(pos_idx, idx, frame, frame_metadata=frame_metadata)
         self._state["has_appended"] = True
 
+        # Update frame count and emit events
+        self._frames_written += 1
+        if self._coord_tracker is not None:
+            if update := self._coord_tracker.update():
+                self._emit_coord_events(update)
+
     def skip(self, *, frames: int = 1) -> None:
         """Skip N frames in acquisition order without writing data.
 
@@ -183,6 +209,12 @@ class OMEStream:
             self._handle_stop_iteration("skip frames", frames)
         self._backend.advance(indices)
 
+        # Update frame count and emit events if high water mark crossed
+        self._frames_written += frames
+        if self._coord_tracker is not None:
+            if update := self._coord_tracker.skip(frames):
+                self._emit_coord_events(update)
+
     def get_metadata(self) -> Any:
         """Retrieve metadata from the backend.  Meaning is format-dependent."""
         return self._backend.get_metadata()
@@ -204,11 +236,90 @@ class OMEStream:
         # Detach returns the callback args if finalizer was still alive, None otherwise
         if self._finalizer.detach():
             self._backend.finalize()
+        # Shutdown callback executor if it exists
+        if self._callback_executor is not None:
+            self._callback_executor.shutdown(wait=False)
+            self._callback_executor = None
 
     @property
     def closed(self) -> bool:
         """Return True if the stream has been closed."""
         return not self._finalizer.alive
+
+    def on(
+        self,
+        event: Literal["coords_expanded", "coords_changed"],
+        callback: Callable[[CoordUpdate], None],
+    ) -> None:
+        """Register a callback for various update events.
+
+        !!! important
+            Because our main priority is acquisition performance, event callbacks
+            are invoked asynchronously in a background thread pool to avoid blocking the
+            main acquisition thread.  This means that:
+
+            - Callbacks are not run in the thread that called `append()` or `skip()`
+            - Multiple callbacks may run concurrently
+            - Callbacks should be thread-safe
+            - **If your callback updates a UI, use your framework's thread-safe
+              mechanisms to communicate updates from the callback thread back to the
+              main thread.**
+
+        Parameters
+        ----------
+        event : Literal["coords_expanded", "coords_changed"]
+            Name of the event to listen for. Supported events names:
+
+            - `"coords_changed"`: Called on *every* frame
+            - `"coords_expanded"`: Called only when a new "high water mark" is reached
+              (i.e. when the stream writes a frame that exceeds the maximum index seen
+              so far in any dimension).
+        callback : Callable[[CoordUpdate], None]
+            Function to call when the event occurs. Should accept a single positional
+            argument of type `CoordUpdate`.
+
+        Examples
+        --------
+        >>> def on_new_frame(update: CoordUpdate) -> None:
+        ...     print(f"Frame {update.frame_number}: {update.max_coords}")
+        >>> stream.on("coords_expanded", on_new_frame)
+        """
+        if event not in ("coords_expanded", "coords_changed"):
+            raise ValueError(f"Unknown event: {event!r}")
+
+        if self._coord_tracker is None:
+            # Lazy init - only create when first handler registered
+            from ome_writers._coord_tracker import _CoordTracker
+
+            self._coord_tracker = _CoordTracker(self._settings, self._frames_written)
+
+        if self._callback_executor is None:
+            self._callback_executor = ThreadPoolExecutor(
+                max_workers=2,
+                thread_name_prefix="ome-stream-events",
+            )
+
+        self._event_handlers.setdefault(event, []).append(callback)
+
+        # Coords-changed need more "activate" tracking. update tracker accordingly
+        if event == COORDS_CHANGED:
+            self._coord_tracker.set_needs_current_indices(True)
+
+    def _emit_coord_events(self, update: CoordUpdate) -> None:
+        """Emit coordinate events to registered handlers asynchronously."""
+        if self._callback_executor is None:
+            return  # No handlers registered yet
+
+        # Emit coords_changed on every update
+        if COORDS_CHANGED in self._event_handlers:
+            for handler in self._event_handlers[COORDS_CHANGED]:
+                self._callback_executor.submit(handler, update)
+
+        # Emit coords_expanded only on high water marks
+        if update.is_high_water_mark:
+            if COORDS_EXPANDED in self._event_handlers:
+                for handler in self._event_handlers[COORDS_EXPANDED]:
+                    self._callback_executor.submit(handler, update)
 
 
 def get_format_for_backend(backend: str) -> FileFormat:

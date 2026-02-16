@@ -29,17 +29,17 @@ classifiers = [
 dependencies = [
     "numpy>=2",
     "typing-extensions>=4.10.0",
-    "yaozarrs[io]>=0.2.0",
+    "yaozarrs[io]>=0.2.4",
     "pydantic>=2.8",
     "pydantic-extra-types>=2.11.0",
 ]
 
 [project.optional-dependencies]
 tensorstore = [
-    "yaozarrs[write-tensorstore]>=0.2.0",
+    "yaozarrs[write-tensorstore]>=0.2.4",
     "tensorstore>=0.1.80; python_version >= '3.11'",
 ]
-zarr-python = ["yaozarrs[write-zarr]>=0.2.0"]
+zarr-python = ["yaozarrs[write-zarr]>=0.2.4"]
 zarrs-python = [
     "ome-writers[zarr-python]",
     "zarrs>=0.2.1; python_version >= '3.11'",
@@ -60,7 +60,7 @@ all = [
 test = [
     "pytest>=8.4.2",
     "pytest-cov>=7.0.0",
-    "yaozarrs[io]>=0.2.0",
+    "yaozarrs[io]>=0.2.4",
     "pytest-xdist>=3.8.0",
     "useq-schema>=0.8.2",
 ]
@@ -88,7 +88,7 @@ bioformats = [{ include-group = "tifffile" }, "scyjava>=1.12.1"]
 test-codspeed = [
     { include-group = "test" },
     "ome-writers[all]",
-    "pytest-codspeed",
+    "pytest-codspeed>=4.3.0",
 ]
 dev = [
     { include-group = "test" },
@@ -107,13 +107,17 @@ dev = [
     "ty>=0.0.12",
     "useq-schema>=0.8.2",
     "pytest-xdist>=3.8.0",
-    "typer>=0.15.0",
+    "typer>=0.22.0",
     "pdbpp>=0.12.0; sys_platform != 'win32'",
 ]
 docs = [
     "griffe-fieldz>=0.4.0",
     "mkdocstrings-python>=2.0.1",
     "zensical>=0.0.18",
+]
+pymmcore = [
+    "ndv[pyqt,vispy]>=0.4.1",
+    "pymmcore-plus>=0.17.1",
 ]
 
 [project.urls]

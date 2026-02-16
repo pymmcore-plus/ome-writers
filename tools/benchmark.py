@@ -48,7 +48,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, get_args
+from typing import TYPE_CHECKING, Annotated, cast, get_args
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
@@ -180,7 +180,7 @@ def run_benchmark(
             "median": np.median(values),
         }
 
-    return ResultsDict(results)
+    return cast("ResultsDict", results)
 
 
 def run_all_benchmarks(

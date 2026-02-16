@@ -3,16 +3,12 @@
 from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
-from typing import TYPE_CHECKING
 
 try:
     __version__ = version("ome-writers")
 except PackageNotFoundError:  # pragma: no cover
     __version__ = "uninstalled"
 
-if TYPE_CHECKING:
-    # may be imported at top level, but only for type checking
-    from ome_writers._stream import OMEStream as OMEStream
 
 from ome_writers._schema import (
     AcquisitionSettings,
@@ -26,15 +22,13 @@ from ome_writers._schema import (
     StandardAxis,
     dims_from_standard_axes,
 )
-from ome_writers._stream import OMEStream, create_stream
-from ome_writers._useq import (
-    dims_from_useq,  # ty: ignore
-    useq_to_acquisition_settings,
-)
+from ome_writers._stream import CoordUpdate, OMEStream, create_stream
+from ome_writers._useq import dims_from_useq, useq_to_acquisition_settings  # ty: ignore
 
 __all__ = [
     "AcquisitionSettings",
     "Channel",
+    "CoordUpdate",
     "Dimension",
     "OMEStream",
     "OmeTiffFormat",
