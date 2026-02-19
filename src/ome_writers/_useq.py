@@ -92,7 +92,8 @@ def _dims_from_useq(
     # Check if we have position-like content even if 'p' is not in used_axes
     # (e.g., grid_plan creates positions but may only show 'g' in used_axes)
     has_positions = (
-        Axis.POSITION in used_axes or Axis.GRID in used_axes
+        Axis.POSITION in used_axes
+        or Axis.GRID in used_axes
         # or bool(seq.stage_positions)
     )
 
@@ -458,10 +459,13 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
 
         if grid:
             for gp in grid:
-                # if this line ever raises an exception,
-                # break it into two parts:
-                # 1. create position, 2. try to add coords, suppressing errors.
-                pos_sum = pos + gp  # pyright: ignore[reportOperatorIssue]
+                # RelativePosition can be added to pos
+                # AbsolutePosition (e.g. from GridFromEdges) is used directly
+                pos_sum = (
+                    pos + gp  # pyright: ignore[reportOperatorIssue]
+                    if gp.is_relative
+                    else gp
+                )
                 positions.append(
                     Position(
                         name=name,

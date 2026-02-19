@@ -203,6 +203,63 @@ SEQ_CASES = [
         expected_positions=None,
         id="z_relative_positions",
     ),
+    # GridFromEdges as a global grid with stage positions - AbsolutePosition objects
+    # cannot be added to another Position, so the code falls back to using gp directly
+    Case(
+        seq=useq.MDASequence(
+            axis_order="pgtc",
+            stage_positions=[(0.0, 0.0)],
+            grid_plan=useq.GridFromEdges(
+                fov_width=50.0,
+                fov_height=50.0,
+                left=0.0,
+                right=100.0,
+                top=0.0,
+                bottom=100.0,
+            ),
+            channels=["DAPI"],
+        ),
+        expected_dim_names=["p", "c", "y", "x"],
+        expected_positions=[
+            ExpectedPosition(name="0", grid_row=0, grid_col=0),
+            ExpectedPosition(name="0", grid_row=0, grid_col=1),
+            ExpectedPosition(name="0", grid_row=1, grid_col=1),
+            ExpectedPosition(name="0", grid_row=1, grid_col=0),
+        ],
+        id="grid_from_edges_with_stage_positions",
+    ),
+    # GridFromEdges as a subsequence grid - generates AbsolutePosition objects
+    Case(
+        seq=useq.MDASequence(
+            axis_order="pgtc",
+            stage_positions=[
+                useq.Position(x=0.0, y=0.0, name="single_pos"),
+                useq.Position(
+                    x=10.0,
+                    y=10.0,
+                    name="grid",
+                    sequence=useq.MDASequence(
+                        grid_plan=useq.GridFromEdges(
+                            fov_width=50.0,
+                            fov_height=50.0,
+                            left=0.0,
+                            right=100.0,
+                            top=0.0,
+                            bottom=50.0,
+                        )
+                    ),
+                ),
+            ],
+            channels=["DAPI"],
+        ),
+        expected_dim_names=["p", "c", "y", "x"],
+        expected_positions=[
+            ExpectedPosition(name="single_pos"),
+            ExpectedPosition(name="grid", grid_row=0, grid_col=0),
+            ExpectedPosition(name="grid", grid_row=0, grid_col=1),
+        ],
+        id="position_subsequences_grid_from_edges",
+    ),
     # RandomPoints grid - row/col are None
     Case(
         seq=useq.MDASequence(
