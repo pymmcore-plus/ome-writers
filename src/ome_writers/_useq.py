@@ -457,7 +457,7 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
             grid = None
 
         if grid:
-            for gp in grid:
+            for gp_idx, gp in enumerate(grid):
                 # RelativePosition can be added to pos
                 # AbsolutePosition (e.g. from GridFromEdges) is used directly
                 pos_sum = (
@@ -465,11 +465,20 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
                     if gp.is_relative
                     else gp
                 )
+                grid_row = getattr(gp, "row", None)
+                grid_col = getattr(gp, "col", None)
+                # When there is no row/col (e.g. GridFromPolygon, RandomPoints),
+                # append an index to the name so each sub-position is unique
+                pos_name = (
+                    name
+                    if grid_row is not None or grid_col is not None
+                    else f"{name}_{gp_idx:04d}"
+                )
                 positions.append(
                     Position(
-                        name=name,
-                        grid_row=getattr(gp, "row", None),
-                        grid_column=getattr(gp, "col", None),
+                        name=pos_name,
+                        grid_row=grid_row,
+                        grid_column=grid_col,
                         x_coord=pos_sum.x,
                         y_coord=pos_sum.y,
                         z_coord=pos_sum.z,

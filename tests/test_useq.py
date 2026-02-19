@@ -260,6 +260,50 @@ SEQ_CASES = [
         ],
         id="position_subsequences_grid_from_edges",
     ),
+    # GridFromPolygon with stage position - absolute positions, row/col are None,
+    # so sub-positions get unique names by appending an index to the parent name
+    Case(
+        seq=useq.MDASequence(
+            axis_order="pgtc",
+            stage_positions=[useq.Position(x=0.0, y=0.0, name="poly_pos")],
+            grid_plan=useq.GridFromPolygon(
+                fov_width=50.0,
+                fov_height=50.0,
+                vertices=[(0, 0), (100, 0), (100, 100), (0, 100)],
+            ),
+            channels=["DAPI"],
+        ),
+        expected_dim_names=["p", "c", "y", "x"],
+        expected_positions=[
+            ExpectedPosition(name="poly_pos_0000"),
+            ExpectedPosition(name="poly_pos_0001"),
+            ExpectedPosition(name="poly_pos_0002"),
+            ExpectedPosition(name="poly_pos_0003"),
+        ],
+        id="grid_from_polygon_with_stage_position",
+    ),
+    # RandomPoints with a stage position - row/col are None, names get index suffix
+    Case(
+        seq=useq.MDASequence(
+            axis_order="pgtc",
+            stage_positions=[useq.Position(x=0.0, y=0.0, name="rp_pos")],
+            grid_plan=useq.RandomPoints(
+                num_points=3,
+                max_width=100,
+                max_height=100,
+                shape="ellipse",
+                random_seed=42,
+            ),
+            channels=["DAPI"],
+        ),
+        expected_dim_names=["p", "c", "y", "x"],
+        expected_positions=[
+            ExpectedPosition(name="rp_pos_0000"),
+            ExpectedPosition(name="rp_pos_0001"),
+            ExpectedPosition(name="rp_pos_0002"),
+        ],
+        id="random_points_with_stage_position",
+    ),
     # RandomPoints grid - row/col are None
     Case(
         seq=useq.MDASequence(
@@ -580,6 +624,46 @@ def test_useq_plans_combination(
     result = useq_to_acquisition_settings(seq, image_width=64, image_height=64)
     settings = AcquisitionSettings(**result, root_path="", dtype="u2")
     assert settings.num_frames == len(list(seq))
+
+
+def test_grid_from_polygon_subsequence_unique_names() -> None:
+    """Test that GridFromPolygon as a position subsequence produces unique names.
+
+    GridFromPolygon generates positions without row/column attributes. When used
+    as a subsequence for a stage position, all sub-positions would otherwise share
+    the parent position name with no hierarchical key, failing uniqueness validation.
+    The fix appends a positional index to make names unique.
+    """
+    seq = useq.MDASequence(
+        axis_order="pgtc",
+        stage_positions=[
+            useq.Position(
+                x=-959.93,
+                y=1233.72,
+                z=0.0,
+                name="grid",
+                sequence=useq.MDASequence(
+                    grid_plan=useq.GridFromPolygon(
+                        fov_width=512.0,
+                        fov_height=512.0,
+                        vertices=[
+                            (-1563.225, 2141.788),
+                            (-356.635, 1760.553),
+                            (-1402.626, 325.659),
+                        ],
+                    )
+                ),
+            )
+        ],
+        channels=["DAPI"],
+    )
+    result = useq_to_acquisition_settings(seq, image_width=64, image_height=64)
+    settings = AcquisitionSettings(**result, root_path="", dtype="u2")
+    assert settings.num_frames == len(list(seq))
+    # All position names must be unique
+    pos_dim = next(d for d in result["dimensions"] if d.type == "position")
+    names = [p.name for p in pos_dim.coords]
+    assert len(names) == len(set(names)), "Position names must be unique"
 
 
 def test_well_plate_fov_folder_names(tmp_path: Path, zarr_backend: str) -> None:
