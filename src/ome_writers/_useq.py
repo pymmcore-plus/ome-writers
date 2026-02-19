@@ -92,8 +92,7 @@ def _dims_from_useq(
     # Check if we have position-like content even if 'p' is not in used_axes
     # (e.g., grid_plan creates positions but may only show 'g' in used_axes)
     has_positions = (
-        Axis.POSITION in used_axes
-        or Axis.GRID in used_axes
+        Axis.POSITION in used_axes or Axis.GRID in used_axes
         # or bool(seq.stage_positions)
     )
 
