@@ -772,12 +772,15 @@ class OmeZarrFormat(_BaseModel):
 
 
 class ScratchFormat(_BaseModel):
-    """Settings for scratch array backend."""
+    """Settings for scratch array backend.
+
+    See [Scratch Format documentation](formats/scratch.md) for details and use cases.
+    """
 
     name: Literal["scratch"] = Field(
         default="scratch", description="File format identifier for scratch arrays."
     )
-    backend: Literal["scratch", "auto"] = Field(
+    backend: Literal["scratch"] = Field(
         default="scratch", description="Backend to use for scratch arrays."
     )
     max_memory_bytes: int = Field(
