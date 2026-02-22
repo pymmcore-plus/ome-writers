@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -23,22 +24,40 @@ if TYPE_CHECKING:
 class MemoryBackend(ArrayBackend):
     """Backend that stores frames in numpy arrays (or memmap for crash recovery)."""
 
+    __slots__ = (
+        "_arrays",
+        "_finalized",
+        "_logical_shapes",
+        "_metadata_fh",
+        "_root_path",
+        "_settings_dump",
+        "_unbounded_axes",
+    )
+
     def __init__(self) -> None:
+        # One array per position; may be in-memory or memmap depending on settings.
         self._arrays: list[np.ndarray | np.memmap] = []
+        # Logical shapes of each position
+        # may be smaller than the backing array if it was resized.
         self._logical_shapes: list[list[int]] = []
+        # indices of axes with unbounded (None) size
         self._unbounded_axes: list[int] = []
+        # If set, memmap files and metadata will be written to root_path for recovery.
         self._root_path: Path | None = None
+        # Dump of acquisition settings used for manifest.json;
         self._settings_dump: dict = {}
-        self._metadata_fh: IOBase | None = None  # file handle for frame_metadata.jsonl
+        # file handle for frame_metadata.jsonl, if root_path is set
+        self._metadata_fh: IOBase | None = None
+        # Flag to prevent multiple finalization steps
         self._finalized: bool = False
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         return False
 
     def prepare(self, settings: AcquisitionSettings, router: FrameRouter) -> None:
-        dims = settings.array_storage_dimensions
         self._settings_dump = settings.model_dump(mode="json", exclude_unset=True)
 
+        dims = settings.array_storage_dimensions
         shape = tuple(d.count or 1 for d in dims)
         self._unbounded_axes = [i for i, d in enumerate(dims) if d.count is None]
 
@@ -75,7 +94,7 @@ class MemoryBackend(ArrayBackend):
         self._arrays[position_index][index] = frame
         self._update_logical_shape(position_index, index)
         if frame_metadata and self._metadata_fh is not None:
-            record = {"pos": position_index, "idx": index, **frame_metadata}
+            record = {"_pos": position_index, "_idx": index, **frame_metadata}
             self._metadata_fh.write(json.dumps(record) + "\n")
 
     def advance(self, indices: Sequence[tuple[int, tuple[int, ...]]]) -> None:
@@ -106,8 +125,9 @@ class MemoryBackend(ArrayBackend):
 
     def _update_logical_shape(self, pos_idx: int, index: tuple[int, ...]) -> None:
         logical = self._logical_shapes[pos_idx]
-        for ax, idx_val in enumerate(index):
-            if isinstance(idx_val, int) and idx_val >= logical[ax]:
+        for ax in self._unbounded_axes:
+            idx_val = index[ax]
+            if idx_val >= logical[ax]:
                 logical[ax] = idx_val + 1
 
     def _ensure_size(self, pos_idx: int, index: tuple[int, ...]) -> None:
@@ -129,22 +149,42 @@ class MemoryBackend(ArrayBackend):
         new_shape_t = tuple(new_shape)
         copy_slices = tuple(slice(0, s) for s in old_shape)
 
-        if self._root_path is not None:
-            dat_path = self._root_path / f"pos_{pos_idx}.dat"
-            tmp_path = dat_path.with_suffix(".dat.tmp")
-            new_arr = np.memmap(tmp_path, dtype=arr.dtype, mode="w+", shape=new_shape_t)
-            new_arr[copy_slices] = arr[:]
-            new_arr.flush()
-            del arr
-            self._arrays[pos_idx] = new_arr
-            shutil.move(tmp_path, dat_path)
-            self._arrays[pos_idx] = np.memmap(
-                dat_path, dtype=new_arr.dtype, mode="r+", shape=new_shape_t
-            )
-        else:
+        if self._root_path is None:
+            # Fast path for in-memory arrays: allocate a new array and copy old data
             new_arr = np.zeros(new_shape_t, dtype=arr.dtype)
             new_arr[copy_slices] = arr
             self._arrays[pos_idx] = new_arr
+            return
+
+        dat_path = self._root_path / f"pos_{pos_idx}.dat"
+        old_arr = self._arrays[pos_idx]
+        dtype = old_arr.dtype
+        if isinstance(old_arr, np.memmap):
+            old_arr.flush()
+        # Ensure backend no longer holds a reference to the old memmap before
+        # truncate/remap (important on Windows).
+        self._arrays[pos_idx] = np.empty((0,), dtype=dtype)
+        del old_arr, arr
+
+        try:
+            # In-place extend: OS zero-fills new bytes, existing data untouched
+            new_bytes = int(np.prod(new_shape_t)) * np.dtype(dtype).itemsize
+            os.truncate(dat_path, new_bytes)
+            self._arrays[pos_idx] = np.memmap(
+                dat_path, dtype=dtype, mode="r+", shape=new_shape_t
+            )
+        except (PermissionError, OSError):
+            # Fallback: copy via temp file (e.g. Windows with live views)
+            tmp_path = dat_path.with_suffix(".dat.tmp")
+            prev = np.memmap(dat_path, dtype=dtype, mode="r", shape=old_shape)
+            new_arr = np.memmap(tmp_path, dtype=dtype, mode="w+", shape=new_shape_t)
+            new_arr[copy_slices] = prev[:]
+            new_arr.flush()
+            del prev, new_arr  # release handles before move
+            shutil.move(tmp_path, dat_path)
+            self._arrays[pos_idx] = np.memmap(
+                dat_path, dtype=dtype, mode="r+", shape=new_shape_t
+            )
 
     def _write_manifest(self) -> None:
         """Write manifest.json alongside memmap files."""
@@ -174,4 +214,9 @@ class _MemoryArrayView:
         return self._backend._arrays[self._pos_idx].dtype
 
     def __getitem__(self, key: Any) -> Any:
-        return self._backend._arrays[self._pos_idx][key]
+        arr = self._backend._arrays[self._pos_idx]
+        if self._backend._unbounded_axes:
+            # Clip to logical shape so over-allocated backing storage is hidden
+            bounds = (slice(0, s) for s in self._backend._logical_shapes[self._pos_idx])
+            arr = arr[tuple(bounds)]
+        return arr[key]

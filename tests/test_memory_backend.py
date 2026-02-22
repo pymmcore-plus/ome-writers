@@ -212,8 +212,8 @@ def test_frame_metadata_jsonl(tmp_path: Path) -> None:
     first = json.loads(lines[0])
     assert first["delta_t"] == 0.0
     assert first["exposure_time"] == 0.05
-    assert "pos" in first
-    assert "idx" in first
+    assert "_pos" in first
+    assert "_idx" in first
 
     last = json.loads(lines[5])
     assert last["delta_t"] == pytest.approx(0.5)
@@ -329,6 +329,27 @@ def test_acquisition_view_unbounded() -> None:
         # get_arrays works and shows live shape
         assert arrays[0].shape == (2, 2, 8, 8)
         assert np.all(arrays[0][0, 0] == 0)
+
+
+def test_logical_bounds_guard() -> None:
+    """Reading via get_arrays() should be bounded to logical shape."""
+    dims = dims_from_standard_axes({"t": None, "c": 2, "y": 8, "x": 8})
+    settings = _make_settings(dimensions=dims)
+    with create_stream(settings) as stream:
+        arrays = stream._backend.get_arrays()
+        # Write 2 frames (t=0, c=0 and c=1)
+        stream.append(np.ones((8, 8), dtype="uint16"))
+        stream.append(np.ones((8, 8), dtype="uint16"))
+
+        # Logical shape should be (1, 2, 8, 8)
+        assert arrays[0].shape == (1, 2, 8, 8)
+        # Full slice should return only the logical region
+        result = arrays[0][:]
+        assert result.shape == (1, 2, 8, 8)
+
+        # Out-of-logical-range indexing should raise
+        with pytest.raises(IndexError):
+            arrays[0][1, 0]
 
 
 def test_storage_order_memory_uses_acquisition_order() -> None:
