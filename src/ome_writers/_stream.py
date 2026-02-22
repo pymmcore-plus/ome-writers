@@ -407,6 +407,13 @@ BACKENDS: list[BackendMetadata] = [
         format="ome-tiff",
         is_available=_is_tifffile_available,
     ),
+    BackendMetadata(
+        name="memory",
+        module_path="ome_writers._backends._memory",
+        class_name="MemoryBackend",
+        format="memory",
+        is_available=lambda: True,
+    ),
 ]
 VALID_BACKEND_NAMES: list[str] = [b.name for b in BACKENDS] + ["auto"]
 AVAILABLE_BACKENDS: dict[str, BackendMetadata] = {
@@ -460,6 +467,9 @@ def create_stream(settings: AcquisitionSettings) -> OMEStream:
     # copy the settings once here.  The point is that no modifications made
     # to the settings after this call will be reflected in the stream.
     settings = settings.model_copy(deep=True)
+
+    if settings.format.name != "memory" and not settings.root_path:
+        raise ValueError("root_path is required for ome-tiff and ome-zarr formats.")
 
     backend: ArrayBackend = _create_backend(settings)
     router = FrameRouter(settings)

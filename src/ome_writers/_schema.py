@@ -58,7 +58,7 @@ class _BaseModel(BaseModel):
 # Type Aliases and Enums
 # =======================================
 
-FileFormat: TypeAlias = Literal["ome-tiff", "ome-zarr"]
+FileFormat: TypeAlias = Literal["ome-tiff", "ome-zarr", "memory"]
 TiffBackendName: TypeAlias = Literal["tifffile"]
 ZarrBackendName: TypeAlias = Literal[
     "acquire-zarr", "tensorstore", "zarrs-python", "zarr-python"
@@ -771,6 +771,16 @@ class OmeZarrFormat(_BaseModel):
         return ome_stem + self.suffix
 
 
+class MemoryFormat(_BaseModel):
+    """Settings for in-memory array backend."""
+
+    name: Literal["memory"] = "memory"
+    backend: Literal["memory", "auto"] = "memory"
+
+    def get_output_path(self, root_path: str, *, num_positions: int = 1) -> str:
+        return root_path
+
+
 def _cast_format(value: Any) -> Any:
     # _backend_str possibly passed from _pick_auto_format
     suffix = ""
@@ -795,12 +805,14 @@ def _cast_format(value: Any) -> Any:
                 return OmeZarrFormat(backend="zarr-python", **kwargs)
             case "tifffile":
                 return OmeTiffFormat(backend="tifffile", **kwargs)
+            case "memory":
+                return MemoryFormat()
 
     return value
 
 
 Format: TypeAlias = Annotated[
-    OmeTiffFormat | OmeZarrFormat, BeforeValidator(_cast_format)
+    OmeTiffFormat | OmeZarrFormat | MemoryFormat, BeforeValidator(_cast_format)
 ]
 
 
@@ -892,10 +904,11 @@ class AcquisitionSettings(_BaseModel):
     """
 
     root_path: Annotated[str, BeforeValidator(str)] = Field(
+        default="",
         description="Root output path for the acquisition data.  This may be a "
         "directory (for OME-Zarr) or a file path (for OME-TIFF). It is customary "
         "to use an `.ome.zarr` extension for OME-Zarr directories and `.ome.tiff` "
-        "for OME-TIFF files.",
+        "for OME-TIFF files. May be empty for memory format.",
     )
     dimensions: DimensionList = Field(
         description="List of dimensions in order of acquisition. Must include at least "
@@ -1042,7 +1055,7 @@ class AcquisitionSettings(_BaseModel):
     @model_validator(mode="after")
     def _validate_format_compression(self) -> AcquisitionSettings:
         """Validate compression is supported for selected format."""
-        if self.compression is None:
+        if self.compression is None or self.format.name == "memory":
             return self
         # TODO: move this to Format classes?
         if self.format.name == "ome-tiff":
@@ -1291,8 +1304,13 @@ def _sort_dims_to_storage_order(
     elif storage_order == "ome":
         if format == "ome-zarr":
             return tuple(sorted(index_dims, key=_ngff_sort_key))
-        else:
+        elif format == "ome-tiff":
             return tuple(sorted(index_dims, key=_ome_tiff_sort_key))
+        elif format == "memory":
+            return tuple(index_dims)  # memory: use acquisition order
+        raise ValueError(  # pragma: no cover (unreachable due to prior validation)
+            f"Unsupported format for storage_order='ome': {format!r}"
+        )
     elif isinstance(storage_order, list):
         dims_map = {dim.name: dim for dim in index_dims}
         return tuple(dims_map[name] for name in storage_order if name in dims_map)

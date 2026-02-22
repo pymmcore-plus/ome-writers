@@ -15,13 +15,12 @@ import numpy as np
 
 from ome_writers import AcquisitionSettings, Dimension, create_stream
 
-# Derive backend from command line argument (default: auto)
-BACKEND = "auto" if len(sys.argv) < 2 else sys.argv[1]
-suffix = ".ome.tiff" if BACKEND == "tifffile" else ".ome.zarr"
+# Derive format/backend from command line argument (default: auto)
+FORMAT = "auto" if len(sys.argv) < 2 else sys.argv[1]
 
 # create acquisition settings
 settings = AcquisitionSettings(
-    root_path=f"example_event_driven{suffix}",
+    root_path="example_event_driven",
     dimensions=[
         Dimension(name="t", count=None, type="time"),
         Dimension(name="y", count=256, chunk_size=64, type="space"),
@@ -29,7 +28,7 @@ settings = AcquisitionSettings(
     ],
     dtype="uint16",
     overwrite=True,
-    format=BACKEND,
+    format=FORMAT,
 )
 
 
