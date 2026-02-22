@@ -76,8 +76,8 @@ files can be read back with:
 import json
 import numpy as np
 
-manifest = json.loads(open("root_path/manifest.json").read())
-shape = tuple(manifest["position_shapes"][0])
-dtype = manifest["dtype"]
-data = np.memmap("root_path/pos_0.dat", dtype=dtype, mode="r", shape=shape)
+root_path = 'path/to/scratch_root'
+manifest = json.loads(open(f"{root_path}/manifest.json").read())
+for p, shape in enumerate(manifest["position_shapes"]):
+    data = np.memmap(f"{root_path}/pos_{p}.dat", dtype=manifest["dtype"], mode="r", shape=shape)
 ```
