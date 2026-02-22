@@ -774,12 +774,28 @@ class OmeZarrFormat(_BaseModel):
 class ScratchFormat(_BaseModel):
     """Settings for scratch array backend."""
 
-    name: Literal["scratch"] = "scratch"
-    backend: Literal["scratch", "auto"] = "scratch"
-    max_memory_bytes: int = 4 * 1024**3  # 4 GB
-    spill_to_disk: bool = True
+    name: Literal["scratch"] = Field(
+        default="scratch", description="File format identifier for scratch arrays."
+    )
+    backend: Literal["scratch", "auto"] = Field(
+        default="scratch", description="Backend to use for scratch arrays."
+    )
+    max_memory_bytes: int = Field(
+        default=4 * 1024**3,
+        description=(
+            "Maximum memory to use, in bytes. If this limit is exceeded, *and* "
+            "`settings.root_path` is not set, data will be spilled to disk if "
+            "`spill_to_disk` is True, otherwise a `MemoryError` will be raised."
+        ),
+    )
+    spill_to_disk: bool = Field(
+        default=True,
+        description="Whether to spill to disk when memory limit is exceeded, "
+        "and no root_path is set",
+    )
 
     def get_output_path(self, root_path: str, *, num_positions: int = 1) -> str:
+        """Compute output path based on `root_path` (identity for scratch format)."""
         return root_path
 
 
