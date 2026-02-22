@@ -469,7 +469,7 @@ def create_stream(settings: AcquisitionSettings) -> OMEStream:
     settings = settings.model_copy(deep=True)
 
     if settings.format.name != "memory" and not settings.root_path:
-        raise ValueError("root_path is required for ome-tiff and ome-zarr formats.")
+        raise ValueError(f"root_path is required for {settings.format.name} format.")
 
     backend: ArrayBackend = _create_backend(settings)
     router = FrameRouter(settings)

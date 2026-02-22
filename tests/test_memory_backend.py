@@ -217,6 +217,7 @@ def test_frame_metadata_jsonl(tmp_path: Path) -> None:
 
     last = json.loads(lines[5])
     assert last["delta_t"] == pytest.approx(0.5)
+    assert last["exposure_time"] == 0.05
 
 
 def test_frame_metadata_not_written_without_root_path() -> None:
