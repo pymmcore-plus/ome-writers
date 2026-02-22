@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import shutil
+import tempfile
+import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
 from ome_writers._backends._backend import ArrayBackend
+from ome_writers._schema import ScratchFormat
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -55,7 +59,9 @@ class ScratchBackend(ArrayBackend):
         return False
 
     def prepare(self, settings: AcquisitionSettings, router: FrameRouter) -> None:
-        self._settings_dump = settings.model_dump(mode="json", exclude_unset=True)
+        fmt = settings.format
+        if not isinstance(fmt, ScratchFormat):  # pragma: no cover
+            raise ValueError(f"Expected ScratchFormat, got {type(fmt)}")
 
         dims = settings.array_storage_dimensions
         shape = tuple(d.count or 1 for d in dims)
@@ -63,8 +69,42 @@ class ScratchBackend(ArrayBackend):
 
         if settings.root_path:
             self._root_path = Path(settings.root_path)
+            if self._root_path.exists():
+                if not settings.overwrite:
+                    raise FileExistsError(
+                        f"{self._root_path} already exists. "
+                        f"Use overwrite=True to overwrite it."
+                    )
+                shutil.rmtree(self._root_path)
             self._root_path.mkdir(parents=True, exist_ok=True)
 
+        self._settings_dump = settings.model_dump(mode="json", exclude_unset=True)
+
+        # Check memory bound for pure in-memory mode
+        if self._root_path is None:
+            bytes_per_pos = int(np.prod(shape)) * np.dtype(settings.dtype).itemsize
+            total_bytes = len(settings.positions) * bytes_per_pos
+
+            if total_bytes > fmt.max_memory_bytes:
+                if fmt.spill_to_disk:
+                    self._root_path = Path(tempfile.mkdtemp(prefix="ome_scratch_"))
+                    atexit.register(shutil.rmtree, self._root_path, True)
+                    warnings.warn(
+                        f"Scratch arrays would require "
+                        f"~{total_bytes / 1e9:.1f} GB in memory. "
+                        f"Using disk-backed storage at {self._root_path}",
+                        stacklevel=4,
+                    )
+                else:
+                    raise MemoryError(
+                        f"Scratch arrays would require "
+                        f"~{total_bytes / 1e9:.1f} GB, exceeding "
+                        f"max_memory_bytes={fmt.max_memory_bytes / 1e9:.1f} GB. "
+                        f"Set root_path to use disk-backed storage, "
+                        f"or increase max_memory_bytes."
+                    )
+
+        # Initialize arrays (empty or memmap) and logical shapes for each position
         for i in range(len(settings.positions)):
             if self._root_path is not None:
                 arr: np.ndarray = np.memmap(
@@ -78,6 +118,8 @@ class ScratchBackend(ArrayBackend):
             self._arrays.append(arr)
             self._logical_shapes.append([*shape])
 
+        # If using disk-backed storage
+        # open metadata file for appending and write initial manifest
         if self._root_path is not None:
             self._write_manifest()
             self._metadata_fh = open(self._root_path / "frame_metadata.jsonl", "a")
@@ -137,6 +179,8 @@ class ScratchBackend(ArrayBackend):
         new_shape = [*old_shape]
         needs_resize = False
 
+        # determine if any unbounded axes need to grow to accommodate index;
+        # if so, double size to amortize future resizes
         for ax in self._unbounded_axes:
             needed = index[ax] + 1 if isinstance(index[ax], int) else 0
             if needed > old_shape[ax]:

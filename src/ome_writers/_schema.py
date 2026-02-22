@@ -776,6 +776,8 @@ class ScratchFormat(_BaseModel):
 
     name: Literal["scratch"] = "scratch"
     backend: Literal["scratch", "auto"] = "scratch"
+    max_memory_bytes: int = 4 * 1024**3  # 4 GB
+    spill_to_disk: bool = True
 
     def get_output_path(self, root_path: str, *, num_positions: int = 1) -> str:
         return root_path
