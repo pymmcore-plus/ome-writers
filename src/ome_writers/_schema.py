@@ -58,7 +58,7 @@ class _BaseModel(BaseModel):
 # Type Aliases and Enums
 # =======================================
 
-FileFormat: TypeAlias = Literal["ome-tiff", "ome-zarr", "memory"]
+FileFormat: TypeAlias = Literal["ome-tiff", "ome-zarr", "scratch"]
 TiffBackendName: TypeAlias = Literal["tifffile"]
 ZarrBackendName: TypeAlias = Literal[
     "acquire-zarr", "tensorstore", "zarrs-python", "zarr-python"
@@ -771,11 +771,11 @@ class OmeZarrFormat(_BaseModel):
         return ome_stem + self.suffix
 
 
-class MemoryFormat(_BaseModel):
-    """Settings for in-memory array backend."""
+class ScratchFormat(_BaseModel):
+    """Settings for scratch array backend."""
 
-    name: Literal["memory"] = "memory"
-    backend: Literal["memory", "auto"] = "memory"
+    name: Literal["scratch"] = "scratch"
+    backend: Literal["scratch", "auto"] = "scratch"
 
     def get_output_path(self, root_path: str, *, num_positions: int = 1) -> str:
         return root_path
@@ -805,14 +805,14 @@ def _cast_format(value: Any) -> Any:
                 return OmeZarrFormat(backend="zarr-python", **kwargs)
             case "tifffile":
                 return OmeTiffFormat(backend="tifffile", **kwargs)
-            case "memory":
-                return MemoryFormat()
+            case "scratch" | "memory":
+                return ScratchFormat()
 
     return value
 
 
 Format: TypeAlias = Annotated[
-    OmeTiffFormat | OmeZarrFormat | MemoryFormat, BeforeValidator(_cast_format)
+    OmeTiffFormat | OmeZarrFormat | ScratchFormat, BeforeValidator(_cast_format)
 ]
 
 
@@ -1055,7 +1055,7 @@ class AcquisitionSettings(_BaseModel):
     @model_validator(mode="after")
     def _validate_format_compression(self) -> AcquisitionSettings:
         """Validate compression is supported for selected format."""
-        if self.compression is None or self.format.name == "memory":
+        if self.compression is None or self.format.name == "scratch":
             return self
         # TODO: move this to Format classes?
         if self.format.name == "ome-tiff":
@@ -1306,8 +1306,8 @@ def _sort_dims_to_storage_order(
             return tuple(sorted(index_dims, key=_ngff_sort_key))
         elif format == "ome-tiff":
             return tuple(sorted(index_dims, key=_ome_tiff_sort_key))
-        elif format == "memory":
-            return tuple(index_dims)  # memory: use acquisition order
+        elif format == "scratch":
+            return tuple(index_dims)  # scratch: use acquisition order
         raise ValueError(  # pragma: no cover (unreachable due to prior validation)
             f"Unsupported format for storage_order='ome': {format!r}"
         )

@@ -1,4 +1,4 @@
-"""In-memory array backend for ome-writers."""
+"""Scratch array backend for ome-writers."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from ome_writers._schema import AcquisitionSettings
 
 
-class MemoryBackend(ArrayBackend):
+class ScratchBackend(ArrayBackend):
     """Backend that stores frames in numpy arrays (or memmap for crash recovery)."""
 
     __slots__ = (
@@ -117,7 +117,7 @@ class MemoryBackend(ArrayBackend):
             self._write_manifest()
 
     def get_arrays(self) -> Sequence[ArrayLike]:
-        return [_MemoryArrayView(self, i) for i in range(len(self._arrays))]
+        return [_ScratchArrayView(self, i) for i in range(len(self._arrays))]
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -196,12 +196,12 @@ class MemoryBackend(ArrayBackend):
         (self._root_path / "manifest.json").write_text(json.dumps(self._settings_dump))
 
 
-class _MemoryArrayView:
+class _ScratchArrayView:
     """Live proxy that always reads from the backend's current array."""
 
     __slots__ = ("_backend", "_pos_idx")
 
-    def __init__(self, backend: MemoryBackend, pos_idx: int) -> None:
+    def __init__(self, backend: ScratchBackend, pos_idx: int) -> None:
         self._backend = backend
         self._pos_idx = pos_idx
 

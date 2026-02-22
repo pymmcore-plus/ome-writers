@@ -1,4 +1,4 @@
-"""Tests for the in-memory array backend."""
+"""Tests for the scratch array backend."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 def _make_settings(**kwargs: object) -> AcquisitionSettings:
     defaults = {
-        "format": "memory",
+        "format": "scratch",
         "dimensions": dims_from_standard_axes({"t": 3, "c": 2, "y": 8, "x": 8}),
         "dtype": "uint16",
     }
@@ -265,15 +265,15 @@ def test_event_callbacks() -> None:
     assert len(events) == 6
 
 
-def test_no_root_path_required_for_memory() -> None:
-    """Memory format should work without root_path."""
+def test_no_root_path_required_for_scratch() -> None:
+    """Scratch format should work without root_path."""
     settings = AcquisitionSettings(
-        format="memory",
+        format="scratch",
         dimensions=dims_from_standard_axes({"t": 2, "y": 8, "x": 8}),
         dtype="uint16",
     )
     assert settings.root_path == ""
-    assert settings.format.name == "memory"
+    assert settings.format.name == "scratch"
 
 
 def test_root_path_required_for_disk_formats() -> None:
@@ -287,12 +287,12 @@ def test_root_path_required_for_disk_formats() -> None:
         create_stream(settings)
 
 
-def test_memory_format_object() -> None:
-    from ome_writers import MemoryFormat
+def test_scratch_format_object() -> None:
+    from ome_writers import ScratchFormat
 
-    fmt = MemoryFormat()
-    assert fmt.name == "memory"
-    assert fmt.backend == "memory"
+    fmt = ScratchFormat()
+    assert fmt.name == "scratch"
+    assert fmt.backend == "scratch"
     assert fmt.get_output_path("/tmp/foo") == "/tmp/foo"
 
 
@@ -352,10 +352,10 @@ def test_logical_bounds_guard() -> None:
             arrays[0][1, 0]
 
 
-def test_storage_order_memory_uses_acquisition_order() -> None:
-    """Memory format with storage_order='ome' should use acquisition order."""
+def test_storage_order_scratch_uses_acquisition_order() -> None:
+    """Scratch format with storage_order='ome' should use acquisition order."""
     settings = AcquisitionSettings(
-        format="memory",
+        format="scratch",
         dimensions=dims_from_standard_axes({"c": 2, "t": 3, "y": 8, "x": 8}),
         dtype="uint16",
         storage_order="ome",

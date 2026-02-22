@@ -408,10 +408,10 @@ BACKENDS: list[BackendMetadata] = [
         is_available=_is_tifffile_available,
     ),
     BackendMetadata(
-        name="memory",
-        module_path="ome_writers._backends._memory",
-        class_name="MemoryBackend",
-        format="memory",
+        name="scratch",
+        module_path="ome_writers._backends._scratch",
+        class_name="ScratchBackend",
+        format="scratch",
         is_available=lambda: True,
     ),
 ]
@@ -468,7 +468,7 @@ def create_stream(settings: AcquisitionSettings) -> OMEStream:
     # to the settings after this call will be reflected in the stream.
     settings = settings.model_copy(deep=True)
 
-    if settings.format.name != "memory" and not settings.root_path:
+    if settings.format.name != "scratch" and not settings.root_path:
         raise ValueError(f"root_path is required for {settings.format.name} format.")
 
     backend: ArrayBackend = _create_backend(settings)

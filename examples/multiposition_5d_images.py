@@ -50,5 +50,5 @@ elif settings.format.name == "ome-tiff":
         from_tiff(file)
         print(f"✓ TIFF file {file} is valid")
 
-elif settings.format.name == "memory":
+elif settings.format.name == "scratch":
     print(settings.output_path)
