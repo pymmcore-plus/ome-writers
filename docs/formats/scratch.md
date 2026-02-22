@@ -81,6 +81,3 @@ shape = tuple(manifest["position_shapes"][0])
 dtype = manifest["dtype"]
 data = np.memmap("root_path/pos_0.dat", dtype=dtype, mode="r", shape=shape)
 ```
-
-## Configuration
-
