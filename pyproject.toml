@@ -62,7 +62,7 @@ test = [
     "pytest-cov>=7.0.0",
     "yaozarrs[io]>=0.2.4",
     "pytest-xdist>=3.8.0",
-    "useq-schema>=0.8.2",
+    "useq-schema>=0.8.3",
 ]
 # these mirror the extras above
 # but with additional dependencies for testing
@@ -105,7 +105,7 @@ dev = [
     "pytest-benchmark>=5.1.0",
     "prek>=0.2.28",
     "ty>=0.0.12",
-    "useq-schema>=0.8.2",
+    "useq-schema>=0.8.3",
     "pytest-xdist>=3.8.0",
     "typer>=0.22.0",
     "pdbpp>=0.12.0; sys_platform != 'win32'",
