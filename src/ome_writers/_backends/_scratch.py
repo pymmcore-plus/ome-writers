@@ -268,6 +268,8 @@ class _ScratchArrayView:
             arr = arr[tuple(bounds)]
         result = arr[key]
         if isinstance(result, np.ndarray):
+            # it's important to create a view, so that writeable=False doesn't
+            # propagate back to the backend's array and break future writes.
             result = result.view()
             result.flags.writeable = False
         return result
