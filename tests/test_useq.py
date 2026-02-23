@@ -659,6 +659,7 @@ def test_random_points_subsequence_unique_names() -> None:
     assert settings.num_frames == len(list(seq))
     pos_dim = next(d for d in result["dimensions"] if d.type == "position")
     # RandomPoints has no row/col — names must be unique via the index suffix
+    assert pos_dim.coords is not None
     names = [p.name for p in pos_dim.coords]
     assert names == ["grid_0000", "grid_0001", "grid_0002", "grid_0003"]
     assert all(p.grid_row is None and p.grid_column is None for p in pos_dim.coords)

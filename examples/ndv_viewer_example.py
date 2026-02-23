@@ -117,7 +117,7 @@ class CoordsAwareDataWrapper(ndv.DataWrapper):
         return self._current_coords
 
     @classmethod
-    def supports(cls, obj: Any) -> bool:  # type: ignore[override]
+    def supports(cls, obj: Any) -> bool:
         """Check if this wrapper supports the given object."""
         return isinstance(obj, AcquisitionView)
 
