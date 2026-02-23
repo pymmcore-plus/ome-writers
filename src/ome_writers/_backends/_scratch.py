@@ -257,10 +257,17 @@ class _ScratchArrayView:
     def dtype(self) -> np.dtype:
         return self._backend._arrays[self._pos_idx].dtype
 
+    def __setitem__(self, key: Any, value: Any) -> None:
+        raise TypeError("_ScratchArrayView is read-only")
+
     def __getitem__(self, key: Any) -> Any:
         arr = self._backend._arrays[self._pos_idx]
         if self._backend._unbounded_axes:
             # Clip to logical shape so over-allocated backing storage is hidden
             bounds = (slice(0, s) for s in self._backend._logical_shapes[self._pos_idx])
             arr = arr[tuple(bounds)]
-        return arr[key]
+        result = arr[key]
+        if isinstance(result, np.ndarray):
+            result = result.view()
+            result.flags.writeable = False
+        return result
