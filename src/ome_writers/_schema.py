@@ -897,16 +897,20 @@ class AcquisitionSettings(_BaseModel):
         "to use an `.ome.zarr` extension for OME-Zarr directories and `.ome.tiff` "
         "for OME-TIFF files.",
     )
-    dimensions: DimensionList = Field(
+    dimensions: DimensionList | tuple[()] = Field(
+        default=(),
         description="List of dimensions in order of acquisition. Must include at least "
         "two spatial 'in-frame' dimensions (usually Y and X) at the end. May not "
         "include more than 5 non-position dimensions total. May include one "
         "position dimension (type='position') to specify multiple acquisition "
-        "positions. Only the first dimension may be unbounded (count=None).",
+        "positions. Only the first dimension may be unbounded (count=None). "
+        "May be empty at construction time, but must be set before creating a stream.",
     )
-    dtype: DTypeStr = Field(
+    dtype: DTypeStr | Literal[""] = Field(
+        default="",
         description="Data type of the pixel data to be written, e.g. 'uint8', "
-        "'uint16', 'float32', etc. Must be a valid numpy DTypeLike string.",
+        "'uint16', 'float32', etc. Must be a valid numpy DTypeLike string. "
+        "May be empty at construction time, but must be set before creating a stream.",
     )
     format: Format = Field(  # type: ignore
         default="auto",
@@ -954,6 +958,7 @@ class AcquisitionSettings(_BaseModel):
         For multi-file TIFF: returns a directory path (suffix stripped).
         For Zarr: returns a directory path with suffix.
         """
+        self._require_dimensions("output_path")
         return self.format.get_output_path(
             self.root_path,
             num_positions=len(self.positions),
@@ -962,16 +967,19 @@ class AcquisitionSettings(_BaseModel):
     @property
     def shape(self) -> tuple[int | None, ...]:
         """Shape of the array (count for each dimension)."""
+        self._require_dimensions("shape")
         return tuple(dim.count for dim in self.dimensions)
 
     @property
     def is_unbounded(self) -> bool:
         """Whether the acquisition has an unbounded (None) dimension."""
-        return self.dimensions[0].count is None
+        dims = self._require_dimensions("is_unbounded")
+        return dims[0].count is None
 
     @property
     def num_frames(self) -> int | None:
         """Return total number of frames, or None if unlimited dimension present."""
+        self._require_dimensions("num_frames")
         _non_frame_sizes = tuple(d.count for d in self.dimensions[:-2])
         total = 1
         for size in _non_frame_sizes:
@@ -983,6 +991,7 @@ class AcquisitionSettings(_BaseModel):
     @property
     def positions(self) -> tuple[Position, ...]:
         """Position objects in acquisition order."""
+        self._require_dimensions("positions")
         for dim in self.dimensions[:-2]:  # last 2 dims may never be positions
             if is_position_dim(dim):
                 if dim.coords:
@@ -994,6 +1003,7 @@ class AcquisitionSettings(_BaseModel):
     @property
     def position_dimension_index(self) -> int | None:
         """Index of position dimension in dimensions, or None if not present."""
+        self._require_dimensions("position_dimension_index")
         for i, dim in enumerate(self.dimensions[:-2]):
             if dim.type == "position":
                 return i
@@ -1002,21 +1012,25 @@ class AcquisitionSettings(_BaseModel):
     @property
     def frame_dimensions(self) -> tuple[Dimension, ...]:
         """In-frame dimensions, currently always last two dims (usually (Y,X))."""
+        self._require_dimensions("frame_dimensions")
         return self.dimensions[-2:]
 
     @property
     def index_dimensions(self) -> tuple[Dimension, ...]:
         """All NON-frame Dimensions, excluding position dimensions."""
+        self._require_dimensions("index_dimensions")
         return tuple(dim for dim in self.dimensions[:-2] if dim.type != "position")
 
     @property
     def array_dimensions(self) -> tuple[Dimension, ...]:
         """All Dimensions excluding position dimensions."""
+        self._require_dimensions("array_dimensions")
         return tuple(dim for dim in self.dimensions if dim.type != "position")
 
     @property
     def storage_index_dimensions(self) -> tuple[Dimension, ...]:
         """NON-frame Dimensions in storage order."""
+        self._require_dimensions("storage_index_dimensions")
         return _sort_dims_to_storage_order(
             self.index_dimensions, self.storage_order, self.format.name
         )
@@ -1038,6 +1052,25 @@ class AcquisitionSettings(_BaseModel):
         return self.storage_index_dimensions + self.frame_dimensions
 
     # --------- Validators ---------
+
+    def validate_stream_ready(self) -> Literal[True]:
+        """Validate that settings are ready for passing to `create_stream`.
+
+        This checks that required fields like `dimensions` and `dtype` are set, and that
+        all settings are mutually compatible. This is called internally by
+        `create_stream` before creating the stream, but can also be called directly by
+        users to check readiness before creating the stream.
+
+        The rationale for this method is that while we want to allow some flexibility
+        in constructing a "partial" AcquisitionSettings object (e.g. without dimensions
+        or dtype) in certain scenarios, while still ensuring various properties are
+        satisfied before creating a stream.
+        """
+        if not self.dimensions:
+            raise ValueError("settings.dimensions must be set before creating a stream")
+        if not self.dtype:
+            raise ValueError("settings.dtype must be set before creating a stream")
+        return True
 
     @model_validator(mode="after")
     def _validate_format_compression(self) -> AcquisitionSettings:
@@ -1065,6 +1098,8 @@ class AcquisitionSettings(_BaseModel):
     @model_validator(mode="after")
     def _validate_storage_order(self) -> AcquisitionSettings:
         """Validate storage_order value."""
+        if not self.dimensions:
+            return self
         if isinstance(self.storage_order, list):
             # manual sort orders are still not allowed to permute the last 2 dims
             if set(self.storage_order[-2:]) != {
@@ -1086,6 +1121,8 @@ class AcquisitionSettings(_BaseModel):
     @model_validator(mode="after")
     def _validate_plate_positions(self) -> AcquisitionSettings:
         """Validate plate mode requirements."""
+        if not self.dimensions:
+            return self
         if self.plate is not None:
             # Ensure there is a position dimension
             # and that all positions have row/column assigned
@@ -1130,8 +1167,18 @@ class AcquisitionSettings(_BaseModel):
     @model_validator(mode="after")
     def _warn_chunk_buffer_memory(self) -> AcquisitionSettings:
         """Warn if chunk buffering may use excessive memory (Windows only)."""
+        if not self.dimensions:
+            return self
         warn_if_high_memory_usage(self)
         return self
+
+    def _require_dimensions(self, prop_name: str) -> DimensionList:
+        """Raise if dimensions is empty."""
+        if not self.dimensions:
+            raise ValueError(
+                f"Cannot access '{prop_name}': dimensions has not been set yet."
+            )
+        return self.dimensions
 
     @model_validator(mode="before")
     @classmethod

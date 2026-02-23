@@ -100,7 +100,7 @@ class CoordsAwareDataWrapper(ndv.DataWrapper):
     def update_coords(self, update: CoordUpdate) -> None:
         """Called when new dimensions become visible (high water marks)."""
         # Store the latest coordinate ranges
-        self._current_coords = update.max_coords
+        self._current_coords = update.max_coords  # ty: ignore
         # Emit dims_changed to tell ndv to update its slider ranges
         self.dims_changed.emit()
         print("Updating ndv slider ranges to:\n", self._current_coords)

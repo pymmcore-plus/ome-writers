@@ -440,7 +440,8 @@ def create_stream(settings: AcquisitionSettings) -> OMEStream:
     Raises
     ------
     ValueError
-        If settings are invalid or backend is incompatible.
+        If settings are invalid (missing dimensions or dtype) or backend is
+        incompatible.
     NotImplementedError
         If requesting unsupported features (e.g., plate mode).
 
@@ -456,6 +457,8 @@ def create_stream(settings: AcquisitionSettings) -> OMEStream:
     ...     for i in range(20):  # 10 timepoints x 2 channels
     ...         stream.append(np.zeros((512, 512), dtype=np.uint16))
     """
+    settings.validate_stream_ready()  # raises ValueError if settings are incomplete
+
     # rather than making AcquisitionSettings a frozen model,
     # copy the settings once here.  The point is that no modifications made
     # to the settings after this call will be reflected in the stream.
