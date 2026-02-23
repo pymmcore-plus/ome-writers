@@ -284,7 +284,7 @@ SEQ_CASES = [
     Case(
         seq=useq.MDASequence(
             axis_order="pgtc",
-            stage_positions=[useq.Position(z=3, name="rp_pos")],
+            stage_positions=[useq.Position(x=1, y=2, z=3, name="rp_pos")],
             grid_plan=useq.RandomPoints(
                 num_points=3,
                 max_width=100,
@@ -306,6 +306,7 @@ SEQ_CASES = [
     Case(
         seq=useq.MDASequence(
             axis_order="gc",
+            stage_positions=[(1, 2, 3)],
             grid_plan=useq.RandomPoints(
                 num_points=3,
                 max_width=100,
@@ -317,9 +318,9 @@ SEQ_CASES = [
         ),
         expected_dim_names=["p", "c", "y", "x"],
         expected_positions=[
-            ExpectedPosition(name="0000", grid_row=None, grid_col=None),
-            ExpectedPosition(name="0001", grid_row=None, grid_col=None),
-            ExpectedPosition(name="0002", grid_row=None, grid_col=None),
+            ExpectedPosition(name="0_0000", grid_row=None, grid_col=None),
+            ExpectedPosition(name="0_0001", grid_row=None, grid_col=None),
+            ExpectedPosition(name="0_0002", grid_row=None, grid_col=None),
         ],
         id="random_points_grid",
     ),
