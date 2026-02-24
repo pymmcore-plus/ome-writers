@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
+from ome_writers import __version__
 from ome_writers._backends._backend import ArrayBackend
 from ome_writers._schema import ScratchFormat
 
@@ -79,7 +80,10 @@ class ScratchBackend(ArrayBackend):
                 shutil.rmtree(self._root_path)
             self._root_path.mkdir(parents=True, exist_ok=True)
 
-        self._settings_dump = settings.model_dump(mode="json", exclude_unset=True)
+        self._settings_dump = {
+            "version": __version__,
+            **settings.model_dump(mode="json", exclude_unset=True),
+        }
 
         # Check memory bound for pure in-memory mode
         if self._root_path is None:
