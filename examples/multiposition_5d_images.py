@@ -43,9 +43,12 @@ if settings.format.name == "ome-zarr":
     yaozarrs.validate_zarr_store(settings.output_path)
     print("✓ Zarr store is valid")
 
-if settings.format.name == "ome-tiff":
+elif settings.format.name == "ome-tiff":
     from ome_types import from_tiff
 
     for file in Path(settings.output_path).glob("*.tiff"):
         from_tiff(file)
         print(f"✓ TIFF file {file} is valid")
+
+elif settings.format.name == "scratch":
+    print(settings.output_path)
