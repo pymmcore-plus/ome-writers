@@ -1232,8 +1232,10 @@ class AcquisitionSettings(_BaseModel):
             if isinstance(fmt, dict):
                 fmt.setdefault("suffix", suffix)
             elif fmt == "auto":
-                # suffix-based inference
-                if suffix.endswith((".tiff", ".tif")):
+                # root_path & suffix-based inference
+                if root == "":
+                    data["format"] = {"name": "scratch"}
+                elif suffix.endswith((".tiff", ".tif")):
                     data["format"] = {"name": "ome-tiff", "suffix": suffix}
                 elif suffix.endswith(".zarr"):
                     data["format"] = {"name": "ome-zarr", "suffix": suffix}
