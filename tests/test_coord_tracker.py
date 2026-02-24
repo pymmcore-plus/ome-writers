@@ -15,16 +15,17 @@ if TYPE_CHECKING:
     from ome_writers._coord_tracker import CoordUpdate
 
 
+# Number of barrier tasks to submit when waiting for callbacks (for CI consistency)
+BARRIERS = 20
+
+
 def _wait_for_pending_callbacks(stream: OMEStream, timeout: float = 1.0) -> None:
     """Wait for all pending async callbacks to complete (for testing).
 
-    Submits barrier tasks serially to ensure all prior work completes.
-    tests.
+    Submits barrier tasks serially to ensure all prior work completes tests.
     """
     if executor := stream._callback_executor:
-        # Testing shows 5 barriers is good for 2 workers...  using 10 for CI
-        # but increase if CI is flaky
-        for _ in range(10):
+        for _ in range(BARRIERS):
             executor.submit(lambda: None).result(timeout=timeout)
 
 
@@ -87,6 +88,7 @@ def test_coord_events(tmp_path: Path, first_backend: str) -> None:
         # Write third frame (t=1, c=0) - new timepoint, high water mark
         stream.append(frame)
         _wait_for_pending_callbacks(stream)
+        # Hi dev!  See an error here in CI logs?? re-run, or increase BARRIERS!
         assert len(expanded_history) == 3
         assert len(changed_history) == 3
         assert expanded_history[2].max_coords["t"] == range(2)
@@ -100,6 +102,7 @@ def test_coord_events(tmp_path: Path, first_backend: str) -> None:
         # Test skip crossing high water marks
         stream.skip(frames=2)  # Skip to end
         _wait_for_pending_callbacks(stream)
+        # Hi dev!  See an error here in CI logs?? re-run, or increase BARRIERS!
         assert len(expanded_history) == 4  # New high water mark at t=2
         assert expanded_history[3].max_coords["t"] == range(3)
 
@@ -179,6 +182,7 @@ def test_coord_tracking_mid_acquisition(tmp_path: Path, first_backend: str) -> N
         # Next frame doesn't cross high water mark
         stream.append(frame)  # t=1, c=1
         _wait_for_pending_callbacks(stream)
+        # Hi dev!  See an error here in CI logs?? re-run, or increase BARRIERS!
         assert len(expanded_history) == 0  # No expanded event
         assert len(changed_history) == 1  # But coords_changed fires
 
