@@ -19,6 +19,7 @@ from ome_writers._schema import (
     Plate,
     Position,
     PositionDimension,
+    ScratchFormat,
     StandardAxis,
     dims_from_standard_axes,
 )
@@ -36,6 +37,7 @@ __all__ = [
     "Plate",
     "Position",
     "PositionDimension",
+    "ScratchFormat",
     "StandardAxis",
     "__version__",
     "create_stream",

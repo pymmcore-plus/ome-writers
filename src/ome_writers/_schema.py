@@ -58,7 +58,7 @@ class _BaseModel(BaseModel):
 # Type Aliases and Enums
 # =======================================
 
-FileFormat: TypeAlias = Literal["ome-tiff", "ome-zarr"]
+FileFormat: TypeAlias = Literal["ome-tiff", "ome-zarr", "scratch"]
 TiffBackendName: TypeAlias = Literal["tifffile"]
 ZarrBackendName: TypeAlias = Literal[
     "acquire-zarr", "tensorstore", "zarrs-python", "zarr-python"
@@ -771,6 +771,37 @@ class OmeZarrFormat(_BaseModel):
         return ome_stem + self.suffix
 
 
+class ScratchFormat(_BaseModel):
+    """Settings for scratch array backend.
+
+    See [Scratch Format documentation](formats/scratch.md) for details and use cases.
+    """
+
+    name: Literal["scratch"] = Field(
+        default="scratch", description="File format identifier for scratch arrays."
+    )
+    backend: Literal["scratch"] = Field(
+        default="scratch", description="Backend to use for scratch arrays."
+    )
+    max_memory_bytes: int = Field(
+        default=4 * 1024**3,
+        description=(
+            "Maximum memory to use, in bytes. If this limit is exceeded, *and* "
+            "`settings.root_path` is not set, data will be spilled to disk if "
+            "`spill_to_disk` is True, otherwise a `MemoryError` will be raised."
+        ),
+    )
+    spill_to_disk: bool = Field(
+        default=True,
+        description="Whether to spill to disk when memory limit is exceeded, "
+        "and no root_path is set",
+    )
+
+    def get_output_path(self, root_path: str, *, num_positions: int = 1) -> str:
+        """Compute output path based on `root_path` (identity for scratch format)."""
+        return root_path
+
+
 def _cast_format(value: Any) -> Any:
     # _backend_str possibly passed from _pick_auto_format
     suffix = ""
@@ -795,12 +826,14 @@ def _cast_format(value: Any) -> Any:
                 return OmeZarrFormat(backend="zarr-python", **kwargs)
             case "tifffile":
                 return OmeTiffFormat(backend="tifffile", **kwargs)
+            case "scratch" | "memory":
+                return ScratchFormat()
 
     return value
 
 
 Format: TypeAlias = Annotated[
-    OmeTiffFormat | OmeZarrFormat, BeforeValidator(_cast_format)
+    OmeTiffFormat | OmeZarrFormat | ScratchFormat, BeforeValidator(_cast_format)
 ]
 
 
@@ -892,10 +925,11 @@ class AcquisitionSettings(_BaseModel):
     """
 
     root_path: Annotated[str, BeforeValidator(str)] = Field(
+        default="",
         description="Root output path for the acquisition data.  This may be a "
         "directory (for OME-Zarr) or a file path (for OME-TIFF). It is customary "
         "to use an `.ome.zarr` extension for OME-Zarr directories and `.ome.tiff` "
-        "for OME-TIFF files.",
+        "for OME-TIFF files. May be empty for memory format.",
     )
     dimensions: DimensionList | tuple[()] = Field(
         default=(),
@@ -1075,7 +1109,7 @@ class AcquisitionSettings(_BaseModel):
     @model_validator(mode="after")
     def _validate_format_compression(self) -> AcquisitionSettings:
         """Validate compression is supported for selected format."""
-        if self.compression is None:
+        if self.compression is None or self.format.name == "scratch":
             return self
         # TODO: move this to Format classes?
         if self.format.name == "ome-tiff":
@@ -1338,8 +1372,13 @@ def _sort_dims_to_storage_order(
     elif storage_order == "ome":
         if format == "ome-zarr":
             return tuple(sorted(index_dims, key=_ngff_sort_key))
-        else:
+        elif format == "ome-tiff":
             return tuple(sorted(index_dims, key=_ome_tiff_sort_key))
+        elif format == "scratch":
+            return tuple(index_dims)  # scratch: use acquisition order
+        raise ValueError(  # pragma: no cover (unreachable due to prior validation)
+            f"Unsupported format for storage_order='ome': {format!r}"
+        )
     elif isinstance(storage_order, list):
         dims_map = {dim.name: dim for dim in index_dims}
         return tuple(dims_map[name] for name in storage_order if name in dims_map)

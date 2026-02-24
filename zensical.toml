@@ -16,6 +16,7 @@ nav = [
     "formats/index.md",
     "formats/tiff.md",
     "formats/zarr.md",
+    "formats/scratch.md",
   ] },
   "reference.md",
   { "Examples" = [

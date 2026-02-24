@@ -7,7 +7,7 @@
 # ]
 #
 # [tool.uv.sources]
-# ome-writers = { path = "../" }
+# ome-writers = { path = "../", editable = true }
 # ///
 """Example of viewing ome_writers stream in ndv during acquisition.
 
@@ -35,8 +35,8 @@ if TYPE_CHECKING:
     from ome_writers._coord_tracker import CoordUpdate
 
 # Setup acquisition settings
-# Derive format/backend from command line argument (default: zarr)
-FORMAT = "zarr" if len(sys.argv) < 2 else sys.argv[1]
+# Derive format/backend from command line argument (default: auto)
+FORMAT = "auto" if len(sys.argv) < 2 else sys.argv[1]
 
 settings = AcquisitionSettings(
     root_path="example_ndv_viewer",
@@ -100,7 +100,7 @@ class CoordsAwareDataWrapper(ndv.DataWrapper):
     def update_coords(self, update: CoordUpdate) -> None:
         """Called when new dimensions become visible (high water marks)."""
         # Store the latest coordinate ranges
-        self._current_coords = update.max_coords  # ty: ignore
+        self._current_coords = update.max_coords  # ty : ignore[invalid-assignment]
         # Emit dims_changed to tell ndv to update its slider ranges
         self.dims_changed.emit()
         print("Updating ndv slider ranges to:\n", self._current_coords)
