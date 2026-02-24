@@ -33,7 +33,7 @@ repos:
     hooks:
       - id: ty
         name: uv run ty check
-        entry: uv run ty check --project .
+        entry: uv run --active ty check
         language: python
         pass_filenames: false
 
