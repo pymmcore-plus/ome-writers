@@ -30,7 +30,6 @@ from pydantic import (
 from pydantic_extra_types.color import Color  # noqa TC002
 
 from ome_writers._memory import warn_if_high_memory_usage
-from ome_writers._stream import AVAILABLE_BACKENDS
 from ome_writers._units import cast_unit_to_ngff, infer_dim_type_from_unit
 
 if TYPE_CHECKING:
@@ -1240,6 +1239,8 @@ class AcquisitionSettings(_BaseModel):
                 elif suffix.endswith(".zarr"):
                     data["format"] = {"name": "ome-zarr", "suffix": suffix}
                 else:  # pick first available backend
+                    from ome_writers._stream import AVAILABLE_BACKENDS
+
                     backend = next(iter(AVAILABLE_BACKENDS.values()))
                     warnings.warn(
                         f"\n\nOutput format could not be inferred from root_path "
