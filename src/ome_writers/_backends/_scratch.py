@@ -8,6 +8,7 @@ import os
 import shutil
 import tempfile
 import warnings
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -180,11 +181,11 @@ class ScratchBackend(ArrayBackend):
         needs_resize = False
 
         # determine if any unbounded axes need to grow to accommodate index;
-        # if so, double size to amortize future resizes
+        # if so, 1.5x size to amortize future resizes
         for ax in self._unbounded_axes:
             needed = index[ax] + 1 if isinstance(index[ax], int) else 0
             if needed > old_shape[ax]:
-                new_shape[ax] = max(needed, old_shape[ax] * 2)
+                new_shape[ax] = max(needed, int(old_shape[ax] * 1.5))
                 needs_resize = True
 
         if not needs_resize:
@@ -225,7 +226,17 @@ class ScratchBackend(ArrayBackend):
             new_arr[copy_slices] = prev[:]
             new_arr.flush()
             del prev, new_arr  # release handles before move
-            shutil.move(tmp_path, dat_path)
+            try:
+                shutil.move(tmp_path, dat_path)
+            except (PermissionError, OSError) as e:
+                with suppress(OSError):
+                    tmp_path.unlink(missing_ok=True)
+                raise RuntimeError(
+                    f"Failed to resize scratch array for position {pos_idx} at "
+                    f"{dat_path}. Consider setting root_path to a location on a "
+                    "filesystem that supports in-place resizing, or avoid accessing "
+                    "arrays while acquisition is in progress."
+                ) from e
             self._arrays[pos_idx] = np.memmap(
                 dat_path, dtype=dtype, mode="r+", shape=new_shape_t
             )
@@ -268,8 +279,14 @@ class _ScratchArrayView:
             arr = arr[tuple(bounds)]
         result = arr[key]
         if isinstance(result, np.ndarray):
-            # it's important to create a view, so that writeable=False doesn't
-            # propagate back to the backend's array and break future writes.
-            result = result.view()
+            if isinstance(arr, np.memmap):
+                # Copy so user code never holds a reference to mapped memory,
+                # which would block file resize/replace on Windows.
+                # and create possibly stale views on non-Windows.
+                result = result.copy()
+            else:
+                # it's important to create a view, so that writeable=False doesn't
+                # propagate back to the backend's array and break future writes.
+                result = result.view()
             result.flags.writeable = False
         return result
