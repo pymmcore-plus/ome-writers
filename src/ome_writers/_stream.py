@@ -19,7 +19,13 @@ from typing import (
 
 from ome_writers._coord_tracker import CoordUpdate
 from ome_writers._router import FrameRouter
-from ome_writers._schema import AcquisitionSettings, Dimension, Format
+from ome_writers._schema import (
+    AcquisitionSettings,
+    Compression,
+    Dimension,
+    Format,
+    Plate,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -440,6 +446,9 @@ def create_stream(
     dtype: str,
     overwrite: bool = False,
     format: Format | dict | str = "auto",
+    compression: Compression | dict | str | None = None,
+    storage_order: Literal["acquisition", "ome"] | Sequence[str] = (),
+    plate: Plate | dict | None = None,
 ) -> OMEStream: ...
 @overload
 def create_stream(settings: AcquisitionSettings, /) -> OMEStream: ...
@@ -451,6 +460,9 @@ def create_stream(
     dtype: str = "",
     overwrite: bool = False,
     format: Format | dict | str = "auto",
+    compression: Compression | dict | str | None = None,
+    storage_order: Literal["acquisition", "ome"] | Sequence[str] = (),
+    plate: Plate | dict | None = None,
 ) -> OMEStream:
     """Create a stream for writing OME-TIFF or OME-ZARR data.
 
@@ -482,6 +494,12 @@ def create_stream(
         will be deleted or overwritten according to backend capabilities.
     format : Format | dict | str
         (Keyword only) Desired format and/or backend settings.
+    compression : Compression | dict | str | None
+        (Keyword only) Compression algorithm.
+    storage_order : Literal["acquisition", "ome"] | Sequence[str]
+        (Keyword only) Desired storage order of dimensions.
+    plate : Plate | dict | None
+        (Keyword only) Plate configuration if writing plate data.
 
 
     Alternatively, you can specify settings via individual parameters.  If `settings`
@@ -520,6 +538,27 @@ def create_stream(
             dtype=dtype,
             overwrite=overwrite,
             format=format,
+            compression=compression,
+            plate=plate,
+            storage_order=storage_order or "ome",
+        )
+    elif any(
+        [
+            root_path,
+            dimensions,
+            dtype,
+            overwrite,
+            format != "auto",
+            compression is not None,
+            storage_order,
+            plate is not None,
+        ]
+    ):
+        warnings.warn(
+            "Both settings object and individual parameters provided to "
+            "create_stream(). Individual parameters will be ignored in favor of "
+            "settings object.",
+            stacklevel=2,
         )
 
     settings.validate_stream_ready()  # raises ValueError if settings are incomplete
