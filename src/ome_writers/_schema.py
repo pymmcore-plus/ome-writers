@@ -791,6 +791,7 @@ class ScratchFormat(_BaseModel):
             "`spill_to_disk` is True, otherwise a `MemoryError` will be raised."
         ),
     )
+    suffix: str = ".scratch"
     spill_to_disk: bool = Field(
         default=True,
         description="Whether to spill to disk when memory limit is exceeded, "
@@ -799,7 +800,8 @@ class ScratchFormat(_BaseModel):
 
     def get_output_path(self, root_path: str, *, num_positions: int = 1) -> str:
         """Compute output path based on `root_path` (identity for scratch format)."""
-        return root_path
+        ome_stem, _ = _ome_stem_suffix(root_path)
+        return ome_stem + self.suffix
 
 
 def _cast_format(value: Any) -> Any:
