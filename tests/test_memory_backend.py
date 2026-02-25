@@ -133,7 +133,7 @@ def test_tempdir_mode(tmp_path: Path) -> None:
         for _ in range(6):
             stream.append(frame)
 
-    root = tmp_path / "memback.scratch"
+    root = tmp_path / "memback"
     assert root.exists()
     assert (root / "pos_0.dat").exists()
     assert (root / "manifest.json").exists()
@@ -168,7 +168,7 @@ def test_tempdir_mode_multi_position(tmp_path: Path) -> None:
         for i in range(2):
             stream.append(np.full((8, 8), i, dtype="uint16"))
 
-    root = tmp_path / "multi.scratch"
+    root = tmp_path / "multi"
     assert (root / "pos_0.dat").exists()
     assert (root / "pos_1.dat").exists()
     manifest = json.loads((root / "manifest.json").read_text())
@@ -207,9 +207,7 @@ def test_frame_metadata_jsonl(tmp_path: Path) -> None:
                 frame_metadata={"delta_t": i * 0.1, "exposure_time": 0.05},
             )
 
-    lines = (
-        (tmp_path / "meta.scratch" / "frame_metadata.jsonl").read_text().splitlines()
-    )
+    lines = (tmp_path / "meta" / "frame_metadata.jsonl").read_text().splitlines()
     assert len(lines) == 6
     first = json.loads(lines[0])
     assert first["delta_t"] == 0.0
@@ -246,9 +244,7 @@ def test_frame_metadata_skipped_when_none(tmp_path: Path) -> None:
         for _ in range(4):
             stream.append(np.zeros((8, 8), dtype="uint16"))  # no metadata
 
-    lines = (
-        (tmp_path / "sparse.scratch" / "frame_metadata.jsonl").read_text().splitlines()
-    )
+    lines = (tmp_path / "sparse" / "frame_metadata.jsonl").read_text().splitlines()
     assert len(lines) == 1
     assert json.loads(lines[0])["delta_t"] == 1.0
 
@@ -297,7 +293,7 @@ def test_scratch_format_object() -> None:
     fmt = ScratchFormat()
     assert fmt.name == "scratch"
     assert fmt.backend == "scratch"
-    assert fmt.get_output_path("/tmp/foo") == "/tmp/foo.scratch"
+    assert fmt.get_output_path("/tmp/foo") == "/tmp/foo"
 
 
 def test_unbounded_with_tempdir(tmp_path: Path) -> None:
@@ -310,7 +306,7 @@ def test_unbounded_with_tempdir(tmp_path: Path) -> None:
         for i in range(10):
             stream.append(np.full((8, 8), i, dtype="uint16"))
 
-    root = tmp_path / "unbounded.scratch"
+    root = tmp_path / "unbounded"
     manifest = json.loads((root / "manifest.json").read_text())
     assert manifest["position_shapes"] == [[10, 8, 8]]
 

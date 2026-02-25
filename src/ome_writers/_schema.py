@@ -791,7 +791,9 @@ class ScratchFormat(_BaseModel):
             "`spill_to_disk` is True, otherwise a `MemoryError` will be raised."
         ),
     )
-    suffix: str = ".scratch"
+    suffix: str = Field(
+        default="", description="File suffix to disk-backed scratch files."
+    )
     spill_to_disk: bool = Field(
         default=True,
         description="Whether to spill to disk when memory limit is exceeded, "
@@ -800,8 +802,7 @@ class ScratchFormat(_BaseModel):
 
     def get_output_path(self, root_path: str, *, num_positions: int = 1) -> str:
         """Compute output path based on `root_path` (identity for scratch format)."""
-        ome_stem, _ = _ome_stem_suffix(root_path)
-        return ome_stem + self.suffix
+        return root_path
 
 
 def _cast_format(value: Any) -> Any:
@@ -1236,7 +1237,7 @@ class AcquisitionSettings(_BaseModel):
             elif fmt == "auto":
                 # root_path & suffix-based inference
                 if root == "":
-                    data["format"] = {"name": "scratch", "suffix": ".scratch"}
+                    data["format"] = {"name": "scratch"}
                 elif suffix.endswith((".tiff", ".tif")):
                     data["format"] = {"name": "ome-tiff", "suffix": suffix}
                 elif suffix.endswith(".zarr"):
