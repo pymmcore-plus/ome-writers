@@ -29,8 +29,7 @@ jobs:
         with:
           enable-cache: true
           python-version: "3.13"
-      - run: uv run prek --all-files
-      - run: uv run pyright
+      - run: uv run prek --all-files --hook-stage manual
 
   changes:
     runs-on: ubuntu-latest
@@ -62,7 +61,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.13.11"  # Pin to 3.13.11 - 3.13.12 has GC segfault bug
+          python-version: "3.13.11" # Pin to 3.13.11 - 3.13.12 has GC segfault bug
 
       - name: Install the project
         run: pip install . --group test-codspeed
