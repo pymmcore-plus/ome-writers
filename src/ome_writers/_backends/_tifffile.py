@@ -352,7 +352,7 @@ class TiffBackend(ArrayBackend):
                 if frames_written >= expected_frames:
                     # Fully written: use aszarr (supports compression)
                     tf = tifffile.TiffFile(path)
-                    zarray = zarr.open_array(tf.aszarr(), mode="r")
+                    zarray = zarr.open(tf.aszarr(), mode="r")
                     weakref.finalize(zarray, tf.close)
                     arrays.append(zarray)
                     continue
