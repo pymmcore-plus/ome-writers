@@ -370,7 +370,7 @@ class TiffBackend(ArrayBackend):
                 chunks=tuple(1 for _ in storage_dims[:-2]) + self._frame_shape,
                 fill_value=0,
             )
-            arrays.append(zarr.open_array(store, mode="r"))
+            arrays.append(zarr.open(store, mode="r"))
 
         return arrays
 
