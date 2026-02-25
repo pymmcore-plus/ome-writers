@@ -1236,7 +1236,7 @@ class AcquisitionSettings(_BaseModel):
             elif fmt == "auto":
                 # root_path & suffix-based inference
                 if root == "":
-                    data["format"] = {"name": "scratch"}
+                    data["format"] = {"name": "scratch", "suffix": ".scratch"}
                 elif suffix.endswith((".tiff", ".tif")):
                     data["format"] = {"name": "ome-tiff", "suffix": suffix}
                 elif suffix.endswith(".zarr"):
@@ -1258,6 +1258,8 @@ class AcquisitionSettings(_BaseModel):
                 # Format is a string like "zarr-python", "tifffile", etc.
                 # Pass the suffix from root_path so _cast_format can use it
                 data["format"] = {"_backend_str": fmt, "suffix": suffix}
+
+        print(data)
         return data
 
 
