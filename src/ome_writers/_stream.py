@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any, Final, Literal, NoReturn, TypeAlias
 
 from ome_writers._coord_tracker import CoordUpdate
 from ome_writers._router import FrameRouter
-from ome_writers._stream_view import StreamView
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -21,6 +20,7 @@ if TYPE_CHECKING:
     from ome_writers._backends._backend import ArrayBackend
     from ome_writers._coord_tracker import _CoordTracker
     from ome_writers._schema import AcquisitionSettings, FileFormat
+    from ome_writers._stream_view import StreamView
 
     EventName: TypeAlias = Literal["coords_expanded", "coords_changed"]
 
@@ -259,6 +259,8 @@ class OMEStream:
             If the backend does not support providing a view, for whatever reason.
             (This would be a bug in the backend implementation, open an issue.)
         """
+        from ome_writers._stream_view import StreamView
+
         return StreamView.from_stream(self)
 
     def on(

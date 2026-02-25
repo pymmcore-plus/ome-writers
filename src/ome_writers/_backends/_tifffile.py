@@ -340,17 +340,35 @@ class TiffBackend(ArrayBackend):
             # Choose Store based on finalization state
             if self._finalized:
                 # FINALIZED: Use complete TIFF file via aszarr
-                if manager.thread and manager.thread.frames_written == 0:
-                    # No frames written — return zero array matching expected shape
-                    shape = tuple(d.count or 1 for d in storage_dims)
-                    zarray = zarr.zeros(shape, dtype=self._dtype)
-                else:
-                    tf = tifffile.TiffFile(path)
-                    zarray = zarr.open_array(tf.aszarr(), mode="r")
-                    # The StreamView now holds the zarr array,
-                    # which holds a reference to the TiffFile via aszarr.
-                    # Ensure file handle is closed when the array is GC'd
-                    weakref.finalize(zarray, tf.close)
+                assert manager.thread is not None, f"No WriterThread for {path}"
+
+                expected_shape = tuple(d.count or 1 for d in storage_dims)
+                expected_frames = math.prod(expected_shape[:-2] or (1,))
+                if manager.thread.frames_written == 0:
+                    zarray = zarr.create(
+                        expected_shape,
+                        dtype=self._dtype,
+                        fill_value=0,
+                    )
+                    arrays.append(zarray)
+                    continue
+
+                if manager.thread._compression is not None:
+                    raise NotImplementedError(
+                        "Viewing finalized compressed TIFF is not supported."
+                    )
+
+                if manager.thread.frames_written < expected_frames:
+                    raise NotImplementedError(
+                        "Viewing finalized partial TIFF is not supported."
+                    )
+
+                tf = tifffile.TiffFile(path)
+                zarray = zarr.open_array(tf.aszarr(), mode="r")
+                # The StreamView now holds the zarr array,
+                # which holds a reference to the TiffFile via aszarr.
+                # Ensure file handle is closed when the array is GC'd
+                weakref.finalize(zarray, tf.close)
                 arrays.append(zarray)
             else:
                 # LIVE: Use LiveTiffStore for incomplete file

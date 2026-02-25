@@ -217,6 +217,8 @@ def test_tiff_view_on_empty_closed_stream(tmp_path: Path) -> None:
         root_path=tmp_path / "empty.ome.tiff",
         dimensions=[
             Dimension(name="t", count=3),
+            Dimension(name="c", count=3),
+            Dimension(name="z", count=3),
             Dimension(name="y", count=64),
             Dimension(name="x", count=64),
         ],
@@ -227,5 +229,69 @@ def test_tiff_view_on_empty_closed_stream(tmp_path: Path) -> None:
     stream = create_stream(settings)
     stream.close()
     view = stream.view()
-    assert view.shape == (3, 64, 64)
+    assert view.shape == tuple(d.count for d in settings.dimensions)
+    assert np.allclose(view[:], 0)
+
+
+def test_tiff_view_on_single_written_closed_stream(tmp_path: Path) -> None:
+    """Finalized partial TIFF view is not supported (fewer frames than expected)."""
+    settings = AcquisitionSettings(
+        root_path=tmp_path / "single_written.ome.tiff",
+        dimensions=[
+            Dimension(name="t", count=3),
+            Dimension(name="y", count=64),
+            Dimension(name="x", count=64),
+        ],
+        dtype="uint16",
+        overwrite=True,
+        format="tifffile",
+    )
+    stream = create_stream(settings)
+    stream.append(np.ones((64, 64), dtype=np.uint16))
+    stream.close()
+    with pytest.raises(NotImplementedError, match="finalized partial TIFF"):
+        stream.view()
+
+
+def test_tiff_view_on_finalized_compressed_stream_raises(tmp_path: Path) -> None:
+    """Finalized compressed TIFF view is currently unsupported."""
+    settings = AcquisitionSettings(
+        root_path=tmp_path / "compressed_finalized.ome.tiff",
+        dimensions=[
+            Dimension(name="t", count=3),
+            Dimension(name="y", count=64),
+            Dimension(name="x", count=64),
+        ],
+        dtype="uint16",
+        overwrite=True,
+        format="tifffile",
+        compression="lzw",
+    )
+    with create_stream(settings) as stream:
+        stream.append(np.ones((64, 64), dtype=np.uint16))
+        stream.append(np.ones((64, 64), dtype=np.uint16))
+        stream.append(np.ones((64, 64), dtype=np.uint16))
+
+    with pytest.raises(NotImplementedError, match="finalized compressed TIFF"):
+        stream.view()
+
+
+def test_tiff_view_on_empty_finalized_compressed_stream(tmp_path: Path) -> None:
+    """Zero-frame finalized compressed TIFF returns expected-shape zeros."""
+    settings = AcquisitionSettings(
+        root_path=tmp_path / "empty_compressed.ome.tiff",
+        dimensions=[
+            Dimension(name="t", count=3),
+            Dimension(name="y", count=64),
+            Dimension(name="x", count=64),
+        ],
+        dtype="uint16",
+        overwrite=True,
+        format="tifffile",
+        compression="lzw",
+    )
+    stream = create_stream(settings)
+    stream.close()
+    view = stream.view()
+    assert view.shape == tuple(d.count for d in settings.dimensions)
     assert np.allclose(view[:], 0)

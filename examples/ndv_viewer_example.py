@@ -118,7 +118,7 @@ class CoordsAwareDataWrapper(ndv.DataWrapper):
     @classmethod
     def supports(cls, obj: Any) -> bool:  # type: ignore[override]
         """Check if this wrapper supports the given object."""
-        return type(obj).__name__ == "StreamView"
+        return True
 
 
 # ===============================================================================
