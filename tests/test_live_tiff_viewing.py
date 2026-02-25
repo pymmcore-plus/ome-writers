@@ -156,8 +156,8 @@ def test_live_viewing_with_compression_raises_error(tmp_path: Path) -> None:
 
         # Attempting live view with compression should raise error
         with pytest.raises(
-            RuntimeError,
-            match="Live viewing is not supported with compression enabled",
+            NotImplementedError,
+            match="not supported with compression",
         ):
             stream.view()
 
@@ -234,7 +234,7 @@ def test_tiff_view_on_empty_closed_stream(tmp_path: Path) -> None:
 
 
 def test_tiff_view_on_single_written_closed_stream(tmp_path: Path) -> None:
-    """Finalized partial TIFF view is not supported (fewer frames than expected)."""
+    """Finalized partial uncompressed TIFF uses LiveTiffStore."""
     settings = AcquisitionSettings(
         root_path=tmp_path / "single_written.ome.tiff",
         dimensions=[
@@ -249,12 +249,15 @@ def test_tiff_view_on_single_written_closed_stream(tmp_path: Path) -> None:
     stream = create_stream(settings)
     stream.append(np.ones((64, 64), dtype=np.uint16))
     stream.close()
-    with pytest.raises(NotImplementedError, match="finalized partial TIFF"):
-        stream.view()
+    view = stream.view()
+    assert view.shape == (3, 64, 64)
+    assert np.all(view[0] == 1)  # Written frame
+    assert np.all(view[1] == 0)  # Unwritten
+    assert np.all(view[2] == 0)  # Unwritten
 
 
-def test_tiff_view_on_finalized_compressed_stream_raises(tmp_path: Path) -> None:
-    """Finalized compressed TIFF view is currently unsupported."""
+def test_tiff_view_on_finalized_compressed_stream(tmp_path: Path) -> None:
+    """Finalized fully-written compressed TIFF is viewable via aszarr."""
     settings = AcquisitionSettings(
         root_path=tmp_path / "compressed_finalized.ome.tiff",
         dimensions=[
@@ -272,7 +275,31 @@ def test_tiff_view_on_finalized_compressed_stream_raises(tmp_path: Path) -> None
         stream.append(np.ones((64, 64), dtype=np.uint16))
         stream.append(np.ones((64, 64), dtype=np.uint16))
 
-    with pytest.raises(NotImplementedError, match="finalized compressed TIFF"):
+    view = stream.view()
+    assert view.shape == (3, 64, 64)
+    assert np.all(view[:] == 1)
+
+
+def test_tiff_view_on_partial_finalized_compressed_stream_raises(
+    tmp_path: Path,
+) -> None:
+    """Finalized partial compressed TIFF view is not supported."""
+    settings = AcquisitionSettings(
+        root_path=tmp_path / "partial_compressed.ome.tiff",
+        dimensions=[
+            Dimension(name="t", count=3),
+            Dimension(name="y", count=64),
+            Dimension(name="x", count=64),
+        ],
+        dtype="uint16",
+        overwrite=True,
+        format="tifffile",
+        compression="lzw",
+    )
+    stream = create_stream(settings)
+    stream.append(np.ones((64, 64), dtype=np.uint16))
+    stream.close()
+    with pytest.raises(NotImplementedError, match="not supported with compression"):
         stream.view()
 
 

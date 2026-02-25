@@ -337,67 +337,40 @@ class TiffBackend(ArrayBackend):
                 continue  # Skip companion-only entries
 
             path = manager.file_path
-            # Choose Store based on finalization state
-            if self._finalized:
-                # FINALIZED: Use complete TIFF file via aszarr
-                assert manager.thread is not None, f"No WriterThread for {path}"
+            thread = manager.thread
+            assert thread is not None, f"No WriterThread for {path}"
 
-                expected_shape = tuple(d.count or 1 for d in storage_dims)
-                expected_frames = math.prod(expected_shape[:-2] or (1,))
-                if manager.thread.frames_written == 0:
-                    zarray = zarr.create(
-                        expected_shape,
-                        dtype=self._dtype,
-                        fill_value=0,
-                    )
+            if self._finalized:
+                frames_written = thread.frames_written
+                shape = tuple(d.count or 1 for d in storage_dims)
+                if frames_written == 0:
+                    zarray = zarr.create(shape, dtype=self._dtype, fill_value=0)
                     arrays.append(zarray)
                     continue
 
-                if manager.thread._compression is not None:
-                    raise NotImplementedError(
-                        "Viewing finalized compressed TIFF is not supported."
-                    )
+                expected_frames = math.prod(shape[:-2] or (1,))
+                if frames_written >= expected_frames:
+                    # Fully written: use aszarr (supports compression)
+                    tf = tifffile.TiffFile(path)
+                    zarray = zarr.open_array(tf.aszarr(), mode="r")
+                    weakref.finalize(zarray, tf.close)
+                    arrays.append(zarray)
+                    continue
 
-                if manager.thread.frames_written < expected_frames:
-                    raise NotImplementedError(
-                        "Viewing finalized partial TIFF is not supported."
-                    )
-
-                tf = tifffile.TiffFile(path)
-                zarray = zarr.open_array(tf.aszarr(), mode="r")
-                # The StreamView now holds the zarr array,
-                # which holds a reference to the TiffFile via aszarr.
-                # Ensure file handle is closed when the array is GC'd
-                weakref.finalize(zarray, tf.close)
-                arrays.append(zarray)
-            else:
-                # LIVE: Use LiveTiffStore for incomplete file
-                if manager.thread is None:  # pragma: no cover
-                    raise RuntimeError(f"No WriterThread for {path}")
-
-                # Check if compression is enabled (LiveTiffStore won't work)
-                if manager.thread._compression is not None:  # pragma: no cover
-                    raise NotImplementedError(
-                        "Live viewing is not supported with compression enabled."
-                    )
-
-                # Calculate full shape from storage dimensions
-                # Use large default for unbounded
-                shape = tuple(d.count or 1000 for d in storage_dims)
-
-                # Chunks are single frames (1 for each non-spatial dim, full Y,X)
-                # (regardless of the settings used during for tiff writing, currently)
-                chunks = tuple(1 for _ in storage_dims[:-2]) + self._frame_shape
-
-                store = LiveTiffStore(
-                    writer_thread=manager.thread,
-                    file_path=path,
-                    shape=shape,
-                    dtype=self._dtype,
-                    chunks=chunks,
-                    fill_value=0,
+            # LiveTiffStore: live viewing OR finalized partial uncompressed
+            if thread._compression is not None:
+                raise NotImplementedError(
+                    "Tiff viewing is not supported with compression enabled."
                 )
-                arrays.append(zarr.open_array(store, mode="r"))
+            store = LiveTiffStore(
+                writer_thread=thread,
+                file_path=path,
+                shape=tuple(d.count or 1000 for d in storage_dims),
+                dtype=self._dtype,
+                chunks=tuple(1 for _ in storage_dims[:-2]) + self._frame_shape,
+                fill_value=0,
+            )
+            arrays.append(zarr.open_array(store, mode="r"))
 
         return arrays
 
