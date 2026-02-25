@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import threading
 import warnings
+import weakref
 from contextlib import suppress
 from dataclasses import dataclass
 from itertools import count
@@ -330,6 +331,7 @@ class TiffBackend(ArrayBackend):
             raise RuntimeError("Backend not prepared. Call prepare() first.")
 
         arrays = []
+        storage_dims = cast("tuple[Dimension]", self._storage_dims)
         for _, manager in sorted(self._position_managers.items()):
             if not manager.metadata_mirror.is_tiff:  # pragma: no cover
                 continue  # Skip companion-only entries
@@ -338,7 +340,18 @@ class TiffBackend(ArrayBackend):
             # Choose Store based on finalization state
             if self._finalized:
                 # FINALIZED: Use complete TIFF file via aszarr
-                store = tifffile.TiffFile(path).aszarr()
+                if manager.thread and manager.thread.frames_written == 0:
+                    # No frames written — return zero array matching expected shape
+                    shape = tuple(d.count or 1 for d in storage_dims)
+                    zarray = zarr.zeros(shape, dtype=self._dtype)
+                else:
+                    tf = tifffile.TiffFile(path)
+                    zarray = zarr.open_array(tf.aszarr(), mode="r")
+                    # The StreamView now holds the zarr array,
+                    # which holds a reference to the TiffFile via aszarr.
+                    # Ensure file handle is closed when the array is GC'd
+                    weakref.finalize(zarray, tf.close)
+                arrays.append(zarray)
             else:
                 # LIVE: Use LiveTiffStore for incomplete file
                 if manager.thread is None:  # pragma: no cover
@@ -350,7 +363,6 @@ class TiffBackend(ArrayBackend):
                         "Live viewing is not supported with compression enabled."
                     )
 
-                storage_dims = cast("tuple[Dimension]", self._storage_dims)
                 # Calculate full shape from storage dimensions
                 # Use large default for unbounded
                 shape = tuple(d.count or 1000 for d in storage_dims)
@@ -367,8 +379,7 @@ class TiffBackend(ArrayBackend):
                     chunks=chunks,
                     fill_value=0,
                 )
-
-            arrays.append(zarr.open(store, mode="r"))
+                arrays.append(zarr.open_array(store, mode="r"))
 
         return arrays
 

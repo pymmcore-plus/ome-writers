@@ -9,7 +9,6 @@ import numpy as np
 import pytest
 
 from ome_writers import AcquisitionSettings, Dimension, create_stream
-from ome_writers._array_view import AcquisitionView
 from tests._utils import wait_for_frames
 
 try:
@@ -43,7 +42,7 @@ def test_live_tiff_viewing_basic(tmp_path: Path) -> None:
     )
 
     with create_stream(settings) as stream:
-        view = AcquisitionView.from_stream(stream)
+        view = stream.view()
         # exercising some implementation details of the LiveTiffStore
         array0 = view._arrays[0]
         assert isinstance(array0, zarr.Array)
@@ -95,7 +94,7 @@ def test_live_viewing_returns_zeros_for_unwritten(tmp_path: Path) -> None:
         wait_for_frames(stream._backend, expected_count=3)
 
         # Get live view
-        view = AcquisitionView.from_stream(stream)
+        view = stream.view()
 
         # First 3 frames should have data
         assert np.all(view[0] == 100)
@@ -160,7 +159,7 @@ def test_live_viewing_with_compression_raises_error(tmp_path: Path) -> None:
             RuntimeError,
             match="Live viewing is not supported with compression enabled",
         ):
-            AcquisitionView.from_stream(stream)
+            stream.view()
 
 
 def test_parse_chunk_key() -> None:
@@ -210,3 +209,23 @@ def test_metadata_json_valid() -> None:
     assert metadata["chunk_grid"]["configuration"]["chunk_shape"] == [1, 1, 1, 32, 32]
     assert metadata["fill_value"] == 0
     assert metadata["data_type"] == "uint16"
+
+
+def test_tiff_view_on_empty_closed_stream(tmp_path: Path) -> None:
+    """View on a closed tiff stream with no frames written."""
+    settings = AcquisitionSettings(
+        root_path=tmp_path / "empty.ome.tiff",
+        dimensions=[
+            Dimension(name="t", count=3),
+            Dimension(name="y", count=64),
+            Dimension(name="x", count=64),
+        ],
+        dtype="uint16",
+        overwrite=True,
+        format="tifffile",
+    )
+    stream = create_stream(settings)
+    stream.close()
+    view = stream.view()
+    assert view.shape == (3, 64, 64)
+    assert np.allclose(view[:], 0)

@@ -7,6 +7,7 @@ import threading
 import warnings
 from abc import abstractmethod
 from collections.abc import Iterator, MutableMapping
+from contextlib import suppress
 from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
@@ -346,9 +347,19 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
 
     def get_arrays(self) -> Sequence[ArrayLike]:
         """Return array-like objects for each position."""
-        if not self._arrays:
-            raise RuntimeError("Backend not prepared. Call prepare() first.")
-        return self._arrays  # type: ignore[return-value]
+        if self._arrays:
+            return self._arrays  # type: ignore[return-value]
+        if self._finalized and self._root and self._image_group_paths:
+            return self._reopen_arrays()
+        raise RuntimeError("Backend not prepared. Call prepare() first.")
+
+    def _reopen_arrays(self) -> Sequence[ArrayLike]:
+        """Reopen arrays read-only from disk after finalization."""
+        assert self._root is not None
+        arrays = []
+        for group_path in self._image_group_paths:
+            arrays.append(_open_any_zarr_readonly(self._root / group_path / "0"))
+        return arrays
 
     def get_metadata(self) -> dict[str, dict]:
         """Get metadata from all array groups in the zarr hierarchy.
@@ -424,7 +435,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
             for mirror in self._meta_mirrors.values():
                 mirror.flush()
             self._arrays.clear()
-            self._image_group_paths.clear()
+            # Keep _image_group_paths for post-close reading
             self._finalized = True
 
     def _finalize_chunk_buffers(self) -> None:
@@ -475,6 +486,25 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
 # -----------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------
+
+
+def _open_any_zarr_readonly(path: Path) -> ArrayLike:
+    """Open a zarr v3 array read-only, using whichever library is available."""
+    with suppress(ImportError):
+        import tensorstore as ts
+
+        spec = {"driver": "zarr3", "kvstore": {"driver": "file", "path": str(path)}}
+        return ts.open(spec, read=True, write=False).result()  # type: ignore[return-value]
+
+    with suppress(ImportError):
+        import zarr
+
+        return zarr.open_array(path, mode="r")  # type: ignore[return-value]
+
+    raise NotImplementedError(
+        "Post-close viewing requires zarr or tensorstore. "
+        "Install with: pip install zarr or pip install tensorstore"
+    )
 
 
 def _get_chunks_and_shards(

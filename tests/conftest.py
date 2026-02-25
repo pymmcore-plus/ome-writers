@@ -4,6 +4,7 @@ from ome_writers import _stream
 
 ZARR_BACKENDS = []
 TIFF_BACKENDS = []
+INTERNAL_BACKENDS = ["scratch"]
 for name, meta in _stream.AVAILABLE_BACKENDS.items():
     if meta.format.endswith("zarr"):
         ZARR_BACKENDS.append(name)

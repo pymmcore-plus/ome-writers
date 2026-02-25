@@ -179,7 +179,6 @@ show_error_codes = true
 pretty = true
 
 [tool.pyright]
-include = ["src"]
 pythonVersion = "3.10"
 enableExperimentalFeatures = true
 reportArgumentType = false         # tough with pydantic type casting.

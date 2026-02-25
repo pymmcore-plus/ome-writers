@@ -1,22 +1,22 @@
-"""Experimental multi-position array view."""
-
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
-    from typing import Any
+    from typing import Any, SupportsIndex, TypeAlias
 
     from typing_extensions import Self
 
     from ome_writers._backends._backend import ArrayLike
     from ome_writers._stream import OMEStream
 
+    Index: TypeAlias = SupportsIndex | slice
 
-class AcquisitionView:
+
+class StreamView:
     """Read-only view presenting multiple position arrays as a single array.
 
     This class provides a read-only view onto an ongoing acquisition stream.  It
@@ -27,6 +27,8 @@ class AcquisitionView:
     - `__getitem__` with integer and slice indexing (no advanced indexing)
     - `__array__` for conversion to a numpy array (with optional dtype conversion)
     - `shape`, `dtype`, and `ndim` properties
+    - `__len__` returning the number of positions (size of position dimension)
+    - `dims` property returning dimension labels (xarray-style)
 
     Accessing not-yet-written positions or frames should return zeros (or the
     fill-value of the underlying arrays, if specified).
@@ -41,6 +43,7 @@ class AcquisitionView:
         "_acq_perm",
         "_arrays",
         "_dims",
+        "_dtype",
         "_inv_perm",
         "_n_perm",
         "_position_axis",
@@ -48,12 +51,11 @@ class AcquisitionView:
 
     @classmethod
     def from_stream(cls, stream: OMEStream) -> Self:
-        """Create view directly from OMEStream."""
-        if stream.closed:
-            raise NotImplementedError(
-                "Creating a view on a closed stream is not currently supported."
-            )
+        """Create view directly from OMEStream.
 
+        Prefer using [`OMEStream.view`][ome_writers.OMEStream.view], which calls
+        this method internally (and may have additional logic).
+        """
         settings = stream._settings
         if settings.is_unbounded:  # pragma: no cover
             raise NotImplementedError(
@@ -91,6 +93,9 @@ class AcquisitionView:
         # logic in __getitem__.  But that puts more demands on the ArrayLike object
         # ... let's explore that later.
         self._arrays = list(arrays)
+        a0 = arrays[0]
+        dtype = getattr(a0.dtype, "name", a0.dtype)  # handle non-numpy arrays
+        self._dtype = np.dtype(dtype)
         self._acq_perm = acquisition_order_perm
         self._dims = dimension_labels
 
@@ -123,6 +128,7 @@ class AcquisitionView:
 
     @property
     def shape(self) -> tuple[int, ...]:
+        """Return the full shape of the view, combining all position arrays."""
         acq_shape = self._acq_shape(self._arrays[0].shape)
 
         # If no position dimension, return array shape directly
@@ -133,28 +139,30 @@ class AcquisitionView:
         return (*acq_shape[:pos_ax], len(self._arrays), *acq_shape[pos_ax:])
 
     @property
-    def dtype(self) -> Any:
-        return getattr(self._arrays[0], "dtype", None)
+    def dtype(self) -> np.dtype:
+        """Return the dtype of the underlying arrays."""
+        return self._dtype
 
     @property
     def ndim(self) -> int:
+        """Return the number of dimensions in the view."""
         return len(self.shape)
 
-    def __getitem__(self, key: Any) -> np.ndarray:
+    def __getitem__(self, key: Index | tuple[Index, ...]) -> np.ndarray:
+        """Get item(s) from the view using integer and slice indexing."""
         # Normalize key to full tuple with slices
-        if not isinstance(key, tuple):
-            key = (key,)
-        key = key + (slice(None),) * (self.ndim - len(key))
+        keys = key if isinstance(key, tuple) else (key,)
+        keys = keys + (slice(None),) * (self.ndim - len(keys))
 
         # Extract position index and array indices
         if (pos_axis := self._position_axis) is None:
             # No position dimension: single position, all indices for array
             pos_idx = 0
-            array_indices = key
+            array_indices = keys
         else:
             # Has position dimension: extract it from key
-            pos_idx = key[pos_axis]
-            array_indices = key[:pos_axis] + key[pos_axis + 1 :]
+            pos_idx = keys[pos_axis]
+            array_indices = keys[:pos_axis] + keys[pos_axis + 1 :]
 
         # Convert array indices to storage order
         if inv_perm := self._inv_perm:
@@ -168,7 +176,7 @@ class AcquisitionView:
         kept_dims = tuple(not isinstance(k, int) for k in array_indices[:n_permuted])
 
         # Single position: return directly
-        if isinstance(pos_idx, int):
+        if not isinstance(pos_idx, slice):
             return self._get_from_position(pos_idx, storage_idx, kept_dims)
 
         # Multiple positions: stack results at adjusted position axis
@@ -177,12 +185,14 @@ class AcquisitionView:
             self._get_from_position(int(i), storage_idx, kept_dims)
             for i in self._resolve_position_indices(pos_idx)
         ]
-        pos_axis = cast("int", pos_axis)
-        stack_ax = pos_axis - sum(1 for i in range(pos_axis) if isinstance(key[i], int))
+        assert pos_axis is not None  # narrowed by earlier check
+        stack_ax = pos_axis - sum(
+            1 for i in range(pos_axis) if isinstance(keys[i], int)
+        )
         return np.stack(results, axis=stack_ax)
 
     def _get_from_position(
-        self, pos: int, key: tuple, kept: tuple[bool, ...]
+        self, pos: SupportsIndex, key: tuple[Index, ...], kept: tuple[bool, ...]
     ) -> np.ndarray:
         # Normalize negative indices for backends like TensorStore
         arr = self._arrays[pos]
@@ -221,6 +231,7 @@ class AcquisitionView:
         )
 
     def __len__(self) -> int:
+        """Return the length of the first dimension."""
         return self.shape[0]
 
     def __array__(self, dtype: Any = None, copy: bool | None = None) -> np.ndarray:
@@ -232,7 +243,7 @@ class AcquisitionView:
         return result.astype(dtype) if dtype else result
 
 
-def _norm_index(idx: int | slice, dim_size: int) -> int | slice:
+def _norm_index(idx: Index, dim_size: int) -> Index:
     """Normalize negative indices to positive for all backends."""
     if isinstance(idx, int):
         # Convert negative to positive
