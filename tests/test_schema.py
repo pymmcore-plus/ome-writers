@@ -12,6 +12,7 @@ from ome_writers import (
     StandardAxis,
     dims_from_standard_axes,
 )
+from ome_writers._schema import OmeTiffFormat, OmeZarrFormat, ScratchFormat
 
 
 def test_schema_unique_dimension_names() -> None:
@@ -771,3 +772,41 @@ def test_properties_raise_without_dimensions() -> None:
         _ = settings.positions
     with pytest.raises(ValueError, match="Cannot access 'output_path'"):
         _ = settings.output_path
+
+
+@pytest.mark.parametrize(
+    "kwargs, instance",
+    [
+        ({"format": "scratch"}, ScratchFormat()),
+        ({"format": "memory"}, ScratchFormat()),
+        ({"format": {"name": "scratch"}}, ScratchFormat()),
+        ({"format": "auto", "root_path": ""}, ScratchFormat()),
+        (
+            {"format": "auto", "root_path": "out.ome.tif"},
+            OmeTiffFormat(suffix=".ome.tif"),
+        ),
+        (
+            {"format": "auto", "root_path": "out.zarr"},
+            OmeZarrFormat(suffix=".zarr"),
+        ),
+        (
+            {"format": "zarr-python", "root_path": "out.zarr"},
+            OmeZarrFormat(backend="zarr-python", suffix=".zarr"),
+        ),
+        (
+            {"format": {"name": "ome-zarr"}, "root_path": "out.zarr"},
+            OmeZarrFormat(suffix=".zarr"),
+        ),
+    ],
+)
+def test_format_validation(kwargs: dict[str, object], instance: object) -> None:
+    """Test that format values and root_path inference are accepted."""
+    settings = AcquisitionSettings(**kwargs)
+    assert settings.format == instance
+
+
+def test_format_validation_errors() -> None:
+    """Test that invalid format values raise errors."""
+    with pytest.warns(UserWarning, match="format could not be inferred from root_path"):
+        settings = AcquisitionSettings(format="auto", root_path="plain_dir")
+    assert settings.format.name == "ome-zarr"

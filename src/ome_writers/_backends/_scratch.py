@@ -70,7 +70,7 @@ class ScratchBackend(ArrayBackend):
         self._unbounded_axes = [i for i, d in enumerate(dims) if d.count is None]
 
         if settings.root_path:
-            self._root_path = Path(settings.root_path)
+            self._root_path = Path(settings.output_path)
             if self._root_path.exists():
                 if not settings.overwrite:
                     raise FileExistsError(
