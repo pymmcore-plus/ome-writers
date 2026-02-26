@@ -1,4 +1,4 @@
-"""Tests for live_shape mode on StreamView."""
+"""Tests for dynamic_shape mode on StreamView."""
 
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ def test_coords_non_live(
     """Non-live view returns full coords from settings."""
     dims = [Dimension(name="t", count=3, type="time"), ch_dim, *TC_DIMS[2:]]
     with create_stream(_settings(tmp_path, first_backend, dims)) as stream:
-        c = stream.view(live_shape=False).coords
+        c = stream.view(dynamic_shape=False).coords
         assert c["t"] == range(3)
         assert c["c"] == expected_c
         assert c["y"] == range(16)
@@ -89,7 +89,7 @@ def test_dynamic_shape_and_coords(tmp_path: Path, first_backend: str) -> None:
         *TC_DIMS[2:],
     ]
     with create_stream(_settings(tmp_path, first_backend, dims)) as stream:
-        view = stream.view(live_shape=True)
+        view = stream.view(dynamic_shape=True)
 
         # Initial: zero for non-frame dims
         assert view.shape == (0, 0, 16, 16)
@@ -130,7 +130,7 @@ def test_strict_bounds(
 ) -> None:
     """strict=True checks integer indices against live shape."""
     with create_stream(_settings(tmp_path, first_backend, TC_DIMS)) as stream:
-        view = stream.view(live_shape=True, strict=True)
+        view = stream.view(dynamic_shape=True, strict=True)
         stream.append(FRAME)  # shape → (1, 1, 16, 16)
         wait_for_pending_callbacks(stream)
 
@@ -142,9 +142,9 @@ def test_strict_bounds(
 
 
 def test_non_strict_allows_over_indexing(tmp_path: Path, first_backend: str) -> None:
-    """live_shape=True without strict returns zeros beyond live bounds."""
+    """dynamic_shape=True without strict returns zeros beyond live bounds."""
     with create_stream(_settings(tmp_path, first_backend, TC_DIMS)) as stream:
-        view = stream.view(live_shape=True)
+        view = stream.view(dynamic_shape=True)
         stream.append(FRAME)  # live shape (1, 1, 16, 16)
         wait_for_pending_callbacks(stream)
         assert np.allclose(view[2, 0], 0)
@@ -165,7 +165,7 @@ def test_position_dimension_tracking(tmp_path: Path, first_backend: str) -> None
         *TC_DIMS[2:],
     ]
     with create_stream(_settings(tmp_path, first_backend, dims)) as stream:
-        view = stream.view(live_shape=True)
+        view = stream.view(dynamic_shape=True)
         assert view.shape == (0, 0, 16, 16)
 
         stream.append(FRAME)  # t=0, p=0
@@ -183,10 +183,10 @@ def test_mid_acquisition_and_multiple_views(tmp_path: Path, first_backend: str) 
         for _ in range(3):  # t=0,c=0 / t=0,c=1 / t=1,c=0
             stream.append(FRAME)
 
-        view1 = stream.view(live_shape=True)
+        view1 = stream.view(dynamic_shape=True)
         assert view1.shape == (2, 2, 16, 16)
 
-        view2 = stream.view(live_shape=True)
+        view2 = stream.view(dynamic_shape=True)
         assert view2.shape == (2, 2, 16, 16)
 
         stream.append(FRAME)  # t=1,c=1 (no HWM)
@@ -197,9 +197,9 @@ def test_mid_acquisition_and_multiple_views(tmp_path: Path, first_backend: str) 
 
 
 def test_non_live_full_shape(tmp_path: Path, first_backend: str) -> None:
-    """Regression: live_shape=False always returns full shape."""
+    """Regression: dynamic_shape=False always returns full shape."""
     with create_stream(_settings(tmp_path, first_backend, TC_DIMS)) as stream:
-        view = stream.view(live_shape=False)
+        view = stream.view(dynamic_shape=False)
         assert view.shape == (3, 2, 16, 16)
         stream.append(FRAME)
         assert view.shape == (3, 2, 16, 16)

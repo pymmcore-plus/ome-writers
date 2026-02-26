@@ -230,7 +230,7 @@ def test_tiff_view_on_empty_closed_stream(tmp_path: Path) -> None:
     )
     stream = create_stream(settings)
     stream.close()
-    view = stream.view(live_shape=False)
+    view = stream.view(dynamic_shape=False)
     assert view.shape == tuple(d.count for d in settings.dimensions)
     assert np.allclose(view[:], 0)
 
@@ -251,7 +251,7 @@ def test_tiff_view_on_single_written_closed_stream(tmp_path: Path) -> None:
     stream = create_stream(settings)
     stream.append(np.ones((64, 64), dtype=np.uint16))
     stream.close()
-    view = stream.view(live_shape=False)
+    view = stream.view(dynamic_shape=False)
     assert view.shape == (3, 64, 64)
     assert np.all(view[0] == 1)  # Written frame
     assert np.all(view[1] == 0)  # Unwritten
@@ -321,6 +321,6 @@ def test_tiff_view_on_empty_finalized_compressed_stream(tmp_path: Path) -> None:
     )
     stream = create_stream(settings)
     stream.close()
-    view = stream.view(live_shape=False)
+    view = stream.view(dynamic_shape=False)
     assert view.shape == tuple(d.count for d in settings.dimensions)
     assert np.allclose(view[:], 0)

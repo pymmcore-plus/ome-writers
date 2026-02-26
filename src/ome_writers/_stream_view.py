@@ -92,7 +92,7 @@ class StreamView:
         cls,
         stream: OMEStream,
         *,
-        live_shape: bool = True,
+        dynamic_shape: bool = True,
         strict: bool = False,
     ) -> Self:
         """Create view directly from OMEStream.
@@ -104,10 +104,15 @@ class StreamView:
         ----------
         stream : OMEStream
             The stream to create a view from.
-        live_shape : bool
-            If True, shape/coords dynamically reflect only what has been acquired.
+        dynamic_shape : bool
+            If True, `shape`/`coords` dynamically reflect only what has been acquired.
+            `dims` will always reflect the full acquisition dimensions, but `shape` will
+            start with zeros for non-frame dims and grow as new frames/positions are
+            written, and `coords` will represent the coords of the currently acquired
+            frames.  If False, `shape`/`coords` reflect the full/expected acquisition
+            settings from the start.
         strict : bool
-            If True (and live_shape=True), raise IndexError on integer indices
+            If True (and dynamic_shape=True), raise IndexError on integer indices
             outside the live bounds.
         """
         settings = stream._settings
@@ -140,7 +145,7 @@ class StreamView:
                 full_coords[dim.name] = range(dim.count)
         view._coords_data = full_coords
 
-        if live_shape:
+        if dynamic_shape:
             view._strict_bounds = strict
             # Register callback (lazily creates coord tracker)
             stream.on("coords_expanded", view._on_coords_expanded)
@@ -196,7 +201,7 @@ class StreamView:
                 raise ValueError(f"position_axis {position_axis} out of range")
         self._position_axis = position_axis
 
-        # Live-shape tracking (set by from_stream when live_shape=True)
+        # Live-shape tracking (set by from_stream when dynamic_shape=True)
         self._coords_data: Mapping[Hashable, Sequence] | None = None
         self._shape_override: tuple[int, ...] | None = None
         self._strict_bounds: bool = False
@@ -204,7 +209,7 @@ class StreamView:
 
     @property
     def coords_changed(self) -> _SimpleSignalInstance:
-        """Signal emitted when coords/shape change in `live_shape` mode.
+        """Signal emitted when coords/shape change in `dynamic_shape` mode.
 
         This is a simple API, with no dependencies on psygnal/Qt.  The returned object
         provides `connect` and `disconnect` methods for registering callbacks, and an
@@ -270,7 +275,7 @@ class StreamView:
         keys = key if isinstance(key, tuple) else (key,)
         keys = keys + (slice(None),) * (self.ndim - len(keys))
 
-        # Strict bounds check for live_shape mode
+        # Strict bounds check for dynamic_shape mode
         if self._strict_bounds and (live := self._shape_override) is not None:
             for i, (k, s) in enumerate(zip(keys, live, strict=False)):
                 if isinstance(k, int):

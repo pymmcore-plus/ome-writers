@@ -11,7 +11,7 @@
 # ///
 """Example of viewing ome_writers stream in ndv during acquisition.
 
-This example demonstrates using `live_shape=True` to get a StreamView
+This example demonstrates using `dynamic_shape=True` to get a StreamView
 whose shape/coords dynamically reflect acquisition progress, and wiring
 it to an ndv viewer for real-time display.
 """
@@ -75,7 +75,7 @@ def generate_frames(stream: OMEStream) -> None:
 
 with create_stream(settings) as stream:
     # Create a StreamView.  This is an array-like object with dims/coords
-    # that reflect the stream's current state (by default, live_shape=True).
+    # that reflect the stream's current state (by default, dynamic_shape=True).
     view = stream.view()
 
     # ndv has built-in support for array-like objects that support the xarray
