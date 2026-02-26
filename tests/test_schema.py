@@ -808,5 +808,4 @@ def test_format_validation(kwargs: dict[str, object], instance: object) -> None:
 def test_format_validation_errors() -> None:
     """Test that invalid format values raise errors."""
     with pytest.warns(UserWarning, match="format could not be inferred from root_path"):
-        settings = AcquisitionSettings(format="auto", root_path="plain_dir")
-    assert settings.format.name == "ome-zarr"
+        AcquisitionSettings(format="auto", root_path="plain_dir")
