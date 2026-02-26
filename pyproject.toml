@@ -46,6 +46,7 @@ zarrs-python = [
 ]
 acquire-zarr = ["acquire-zarr>=0.6.0; python_version < '3.14'"]
 tifffile = [
+    "tifffile>=2025.5.21; python_version >= '3.11'", # for aszarr support
     "tifffile>=2024.8.30",
     "imagecodecs>=2024.9.22",
     "ome-types>=0.6.1",
@@ -115,10 +116,7 @@ docs = [
     "mkdocstrings-python>=2.0.1",
     "zensical>=0.0.18",
 ]
-pymmcore = [
-    "ndv[pyqt,vispy]>=0.4.1",
-    "pymmcore-plus>=0.17.1",
-]
+pymmcore = ["ndv[pyqt,vispy]>=0.4.1", "pymmcore-plus>=0.17.1"]
 
 [project.urls]
 homepage = "https://github.com/pymmcore-plus/ome-writers"
@@ -225,4 +223,4 @@ python = "./.venv"
 invalid-argument-type = "ignore"
 unresolved-import = "ignore"
 possibly-missing-attribute = "ignore"
-unresolved-attribute = "ignore"  # Dimension casting by type... hard for ty
+unresolved-attribute = "ignore"       # Dimension casting by type... hard for ty

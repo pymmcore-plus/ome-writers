@@ -324,7 +324,8 @@ class TiffBackend(ArrayBackend):
             from ome_writers._backends._live_tiff_store import LiveTiffStore
         except ImportError as e:
             raise ImportError(
-                f"{self.__class__.__name__}.get_arrays() requires zarr: "
+                "zarr v3 (and therefore python>=3.11 is required for live-viewing tiff "
+                "data. Please install with 'pip install ome-writers[tifffile,zarr]'."
             ) from e
 
         if not self._position_managers:  # pragma: no cover
