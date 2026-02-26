@@ -57,7 +57,6 @@ if TYPE_CHECKING:
     from typing import Any, Literal, Protocol
 
     import numpy as np
-    from numpy.typing import DTypeLike
 
     from ome_writers._router import FrameRouter
     from ome_writers._schema import AcquisitionSettings
@@ -71,7 +70,7 @@ if TYPE_CHECKING:
         def __getitem__(self, key: Any) -> Any: ...
 
         @property
-        def dtype(self) -> DTypeLike: ...
+        def dtype(self) -> Any: ...
 
 
 class ArrayBackend(ABC):

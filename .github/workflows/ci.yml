@@ -29,7 +29,7 @@ jobs:
         with:
           enable-cache: true
           python-version: "3.13"
-      - run: uv run prek --all-files --hook-stage manual
+      - run: uv run prek --all-files
 
   changes:
     runs-on: ubuntu-latest

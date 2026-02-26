@@ -503,7 +503,7 @@ def _open_any_zarr_readonly(path: Path) -> ArrayLike:
 
     raise NotImplementedError(
         "Post-close viewing requires zarr or tensorstore. "
-        "Install with: pip install zarr or pip install tensorstore"
+        "Pip install with `ome-writers[zarr]` or `ome-writers[tensorstore]`."
     )
 
 

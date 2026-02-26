@@ -83,7 +83,7 @@ class StreamView:
         *,
         position_axis: int | None = 0,
         acquisition_order_perm: tuple[int, ...] | None = None,
-        dimension_labels: tuple[str, ...] = (),
+        dimension_labels: Sequence[str] = (),
     ) -> None:
         if not arrays:  # pragma: no cover
             raise ValueError("Arrays list cannot be empty")
@@ -97,7 +97,7 @@ class StreamView:
         dtype = getattr(a0.dtype, "name", a0.dtype)  # handle non-numpy arrays
         self._dtype = np.dtype(dtype)
         self._acq_perm = acquisition_order_perm
-        self._dims = dimension_labels
+        self._dims: tuple[str, ...] = tuple(dimension_labels)
 
         # Validate shapes match
         first, *others = self._arrays
