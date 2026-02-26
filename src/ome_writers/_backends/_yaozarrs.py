@@ -499,7 +499,7 @@ def _open_any_zarr_readonly(path: Path) -> ArrayLike:
     with suppress(ImportError):
         import zarr
 
-        return zarr.open_array(path, mode="r")  # type: ignore[return-value]
+        return zarr.open_array(path, mode="r")  # pyright: ignore[reportReturnType]
 
     raise NotImplementedError(
         "Post-close viewing requires zarr or tensorstore. "

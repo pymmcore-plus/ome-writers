@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     import numpy as np
 
     from ome_writers._backends._backend import ArrayBackend
-    from ome_writers._coord_tracker import _CoordTracker
+    from ome_writers._coord_tracker import CoordTracker
     from ome_writers._schema import AcquisitionSettings, FileFormat
     from ome_writers._stream_view import StreamView
 
@@ -90,7 +90,7 @@ class OMEStream:
         self._frames_written = 0
 
         # Lazy coordinate tracking - only created when first event handler registered
-        self._coord_tracker: _CoordTracker | None = None
+        self._coord_tracker: CoordTracker | None = None
         self._event_handlers: dict[EventName, list[Callable[[CoordUpdate], None]]] = {}
         self._callback_executor: ThreadPoolExecutor | None = None
 
@@ -232,7 +232,7 @@ class OMEStream:
         """Return True if the stream has been closed."""
         return not self._finalizer.alive
 
-    def view(self) -> StreamView:
+    def view(self, *, dynamic_shape: bool = True, strict: bool = False) -> StreamView:
         """Return an ArrayLike view of the stream data as it is being written.
 
         The returned `StreamView` object provides array-like, read-only access to the
@@ -241,10 +241,17 @@ class OMEStream:
         `AcquisitionSettings.dimensions` that were passed to `create_stream()`,
         regardless of the storage order.
 
-        The shape of the StreamView reflects the *full* expected shape of the
-        acquisition (not just the portion that has been written so far).  Frames
-        that have not been written yet *may* be indexed, and will appear as arrays of
-        zeros (or the fill value for zarr backends).
+        Parameters
+        ----------
+        dynamic_shape : bool
+            If True (default), shape/len/coords dynamically reflect only the
+            coordinate extent seen so far (the "high water marks"). Indexing
+            beyond the live shape still returns zeros unless `strict` is also
+            True. If False, the shape reflects the full expected acquisition.
+        strict : bool
+            Only meaningful when `dynamic_shape=True`. If True, integer indices outside
+            the current live bounds raise IndexError. Slices are always clipped
+            (no error). Ignored when `dynamic_shape=False`.
 
         Returns
         -------
@@ -261,7 +268,7 @@ class OMEStream:
         """
         from ome_writers._stream_view import StreamView
 
-        return StreamView.from_stream(self)
+        return StreamView.from_stream(self, dynamic_shape=dynamic_shape, strict=strict)
 
     def on(
         self,
@@ -301,14 +308,14 @@ class OMEStream:
         ...     print(f"Frame {update.frame_number}: {update.max_coords}")
         >>> stream.on("coords_expanded", on_new_frame)
         """
-        if event not in ("coords_expanded", "coords_changed"):
+        if event not in ("coords_expanded", "coords_changed"):  # pragma: no cover
             raise ValueError(f"Unknown event: {event!r}")
 
         if self._coord_tracker is None:
             # Lazy init - only create when first handler registered
-            from ome_writers._coord_tracker import _CoordTracker
+            from ome_writers._coord_tracker import CoordTracker
 
-            self._coord_tracker = _CoordTracker(self._settings, self._frames_written)
+            self._coord_tracker = CoordTracker(self._settings, self._frames_written)
 
         if self._callback_executor is None:
             self._callback_executor = ThreadPoolExecutor(

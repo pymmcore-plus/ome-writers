@@ -68,7 +68,7 @@ def test_array_view(tmp_path: Path, dim_order: str, any_backend: str) -> None:
 
     frames = frame_generator(settings)
     with create_stream(settings) as stream:
-        view = stream.view()
+        view = stream.view(dynamic_shape=False)
         for i, frame in enumerate(frames):
             stream.append(frame)
 
@@ -119,7 +119,7 @@ def test_array_view(tmp_path: Path, dim_order: str, any_backend: str) -> None:
 
     assert stream.closed
 
-    view = stream.view()
+    view = stream.view(dynamic_shape=False)
     assert view.shape == tuple(d.count for d in settings.dimensions)
 
 

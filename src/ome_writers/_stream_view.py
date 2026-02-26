@@ -5,15 +5,49 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
-    from typing import Any, SupportsIndex, TypeAlias
+    from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
+    from typing import Any, SupportsIndex, TypeAlias, TypeVar
 
     from typing_extensions import Self
 
     from ome_writers._backends._backend import ArrayLike
+    from ome_writers._coord_tracker import CoordUpdate
     from ome_writers._stream import OMEStream
 
     Index: TypeAlias = SupportsIndex | slice
+    F = TypeVar("F", bound=Callable[..., Any])
+
+
+class _SimpleSignalInstance:
+    """Minimal signal with connect/disconnect/emit (no dependencies)."""
+
+    __slots__ = ("_slots",)
+
+    def __init__(self) -> None:
+        self._slots: list[Callable[[], None]] = []
+
+    def connect(self, callback: F) -> F:
+        """Connect a callback to the signal. The callback must take NO arguments.
+
+        Note: a direct (strong) reference to the callback is stored.  The same
+        object must be used when calling `disconnect`.
+
+        Returns
+        -------
+        Callable
+            The same callback that was passed in, for convenience in decorator usage.
+        """
+        self._slots.append(callback)
+        return callback
+
+    def disconnect(self, callback: Callable[[], None]) -> None:
+        """Remove a previously connected callback."""
+        self._slots.remove(callback)
+
+    def emit(self) -> None:
+        """Emit the signal, calling all connected callbacks."""
+        for cb in self._slots:
+            cb()
 
 
 class StreamView:
@@ -42,19 +76,44 @@ class StreamView:
     __slots__ = (
         "_acq_perm",
         "_arrays",
+        "_coords_changed",
+        "_coords_data",
         "_dims",
         "_dtype",
         "_inv_perm",
         "_n_perm",
         "_position_axis",
+        "_shape_override",
+        "_strict_bounds",
     )
 
     @classmethod
-    def from_stream(cls, stream: OMEStream) -> Self:
+    def from_stream(
+        cls,
+        stream: OMEStream,
+        *,
+        dynamic_shape: bool = True,
+        strict: bool = False,
+    ) -> Self:
         """Create view directly from OMEStream.
 
         Prefer using [`OMEStream.view`][ome_writers.OMEStream.view], which calls
         this method internally (and may have additional logic).
+
+        Parameters
+        ----------
+        stream : OMEStream
+            The stream to create a view from.
+        dynamic_shape : bool
+            If True, `shape`/`coords` dynamically reflect only what has been acquired.
+            `dims` will always reflect the full acquisition dimensions, but `shape` will
+            start with zeros for non-frame dims and grow as new frames/positions are
+            written, and `coords` will represent the coords of the currently acquired
+            frames.  If False, `shape`/`coords` reflect the full/expected acquisition
+            settings from the start.
+        strict : bool
+            If True (and dynamic_shape=True), raise IndexError on integer indices
+            outside the live bounds.
         """
         settings = stream._settings
         if settings.is_unbounded:  # pragma: no cover
@@ -70,12 +129,33 @@ class StreamView:
         else:
             acquisition_perm = None
 
-        return cls(
+        view = cls(
             stream._backend.get_arrays(),
             position_axis=settings.position_dimension_index,
             acquisition_order_perm=acquisition_perm,
             dimension_labels=[d.name for d in settings.dimensions],
         )
+
+        # Compute full coords from settings
+        full_coords: dict[Hashable, Sequence] = {}
+        for dim in settings.dimensions:
+            if dim.coords:
+                full_coords[dim.name] = [getattr(c, "name", c) for c in dim.coords]
+            else:
+                full_coords[dim.name] = range(dim.count)
+        view._coords_data = full_coords
+
+        if dynamic_shape:
+            view._strict_bounds = strict
+            # Register callback (lazily creates coord tracker)
+            stream.on("coords_expanded", view._on_coords_expanded)
+            # read initial state from coord tracker
+            assert stream._coord_tracker is not None  # should be created by on()
+            coords = stream._coord_tracker.get_coords()
+            view._coords_data = dict(coords)
+            view._shape_override = tuple(len(coords[d]) for d in view._dims)
+
+        return view
 
     def __init__(
         self,
@@ -121,6 +201,33 @@ class StreamView:
                 raise ValueError(f"position_axis {position_axis} out of range")
         self._position_axis = position_axis
 
+        # Live-shape tracking (set by from_stream when dynamic_shape=True)
+        self._coords_data: Mapping[Hashable, Sequence] | None = None
+        self._shape_override: tuple[int, ...] | None = None
+        self._strict_bounds: bool = False
+        self._coords_changed = _SimpleSignalInstance()
+
+    @property
+    def coords_changed(self) -> _SimpleSignalInstance:
+        """Signal emitted when coords/shape change in `dynamic_shape` mode.
+
+        This is a simple API, with no dependencies on psygnal/Qt.  The returned object
+        provides `connect` and `disconnect` methods for registering callbacks, and an
+        `emit` method for emitting the signal.  Callbacks must take no arguments.
+        """
+        return self._coords_changed
+
+    @property
+    def coords(self) -> Mapping[Hashable, Sequence]:
+        """Coordinate labels for each dimension.
+
+        In practice this will be `Mapping[str, Sequence]` but for consistency with
+        the broader xarray semantics, consumers should prepare for any hashable keys.
+        """
+        if self._coords_data is not None:
+            return self._coords_data
+        return {d: range(s) for d, s in zip(self.dims, self.shape, strict=False)}
+
     @property
     def dims(self) -> tuple[str, ...]:
         """Return dimension labels."""
@@ -129,6 +236,9 @@ class StreamView:
     @property
     def shape(self) -> tuple[int, ...]:
         """Return the full shape of the view, combining all position arrays."""
+        if (override := self._shape_override) is not None:
+            return override
+
         acq_shape = self._acq_shape(self._arrays[0].shape)
 
         # If no position dimension, return array shape directly
@@ -148,11 +258,33 @@ class StreamView:
         """Return the number of dimensions in the view."""
         return len(self.shape)
 
+    def _on_coords_expanded(self, update: CoordUpdate) -> None:
+        """Update live coords and shape from a high water mark event."""
+        mc = update.max_coords
+        new_shape = tuple(len(mc[d]) for d in self._dims)
+        # Events may arrive out of order (async executor); only grow shape.
+        if (old := self._shape_override) is not None and new_shape <= old:
+            return
+        self._coords_data = dict(mc)
+        self._shape_override = new_shape
+        self._coords_changed.emit()
+
     def __getitem__(self, key: Index | tuple[Index, ...]) -> np.ndarray:
         """Get item(s) from the view using integer and slice indexing."""
         # Normalize key to full tuple with slices
         keys = key if isinstance(key, tuple) else (key,)
         keys = keys + (slice(None),) * (self.ndim - len(keys))
+
+        # Strict bounds check for dynamic_shape mode
+        if self._strict_bounds and (live := self._shape_override) is not None:
+            for i, (k, s) in enumerate(zip(keys, live, strict=False)):
+                if isinstance(k, int):
+                    resolved = k if k >= 0 else s + k
+                    if resolved < 0 or resolved >= s:
+                        raise IndexError(
+                            f"Index {k} is out of bounds for live "
+                            f"dimension {self._dims[i]!r} with size {s}"
+                        )
 
         # Extract position index and array indices
         if (pos_axis := self._position_axis) is None:

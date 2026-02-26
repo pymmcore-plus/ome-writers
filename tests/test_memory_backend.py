@@ -48,7 +48,7 @@ def test_basic_write_and_read() -> None:
 def test_acquisition_view_compatibility() -> None:
     settings = _make_settings()
     with create_stream(settings) as stream:
-        view = stream.view()
+        view = stream.view(dynamic_shape=False)
 
         frame = np.ones((8, 8), dtype="uint16") * 7
         for _ in range(6):

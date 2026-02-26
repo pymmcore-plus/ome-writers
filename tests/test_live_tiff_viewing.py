@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from ome_writers import AcquisitionSettings, Dimension, create_stream
-from tests._utils import wait_for_frames
+from tests._utils import wait_for_frames, wait_for_pending_callbacks
 
 try:
     import zarr
@@ -55,6 +55,8 @@ def test_live_tiff_viewing_basic(tmp_path: Path) -> None:
 
         # Wait for frames to be written by WriterThread
         wait_for_frames(stream._backend, expected_count=10)
+        # Wait for async coord callbacks to update the view's shape
+        wait_for_pending_callbacks(stream)
 
         # Should be able to read written frames
         assert view.shape == (5, 2, 32, 32)
@@ -228,7 +230,7 @@ def test_tiff_view_on_empty_closed_stream(tmp_path: Path) -> None:
     )
     stream = create_stream(settings)
     stream.close()
-    view = stream.view()
+    view = stream.view(dynamic_shape=False)
     assert view.shape == tuple(d.count for d in settings.dimensions)
     assert np.allclose(view[:], 0)
 
@@ -249,7 +251,7 @@ def test_tiff_view_on_single_written_closed_stream(tmp_path: Path) -> None:
     stream = create_stream(settings)
     stream.append(np.ones((64, 64), dtype=np.uint16))
     stream.close()
-    view = stream.view()
+    view = stream.view(dynamic_shape=False)
     assert view.shape == (3, 64, 64)
     assert np.all(view[0] == 1)  # Written frame
     assert np.all(view[1] == 0)  # Unwritten
@@ -319,6 +321,6 @@ def test_tiff_view_on_empty_finalized_compressed_stream(tmp_path: Path) -> None:
     )
     stream = create_stream(settings)
     stream.close()
-    view = stream.view()
+    view = stream.view(dynamic_shape=False)
     assert view.shape == tuple(d.count for d in settings.dimensions)
     assert np.allclose(view[:], 0)
