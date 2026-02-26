@@ -6,7 +6,7 @@ import numpy as np
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
-    from typing import Any, SupportsIndex, TypeAlias
+    from typing import Any, SupportsIndex, TypeAlias, TypeVar
 
     from typing_extensions import Self
 
@@ -15,9 +15,10 @@ if TYPE_CHECKING:
     from ome_writers._stream import OMEStream
 
     Index: TypeAlias = SupportsIndex | slice
+    F = TypeVar("F", bound=Callable[..., Any])
 
 
-class _SimpleSignal:
+class _SimpleSignalInstance:
     """Minimal signal with connect/disconnect/emit (no dependencies)."""
 
     __slots__ = ("_slots",)
@@ -25,13 +26,26 @@ class _SimpleSignal:
     def __init__(self) -> None:
         self._slots: list[Callable[[], None]] = []
 
-    def connect(self, callback: Callable[[], None]) -> None:
+    def connect(self, callback: F) -> F:
+        """Connect a callback to the signal. The callback must take NO arguments.
+
+        Note: a direct (strong) reference to the callback is stored.  The same
+        object must be used when calling `disconnect`.
+
+        Returns
+        -------
+        Callable
+            The same callback that was passed in, for convenience in decorator usage.
+        """
         self._slots.append(callback)
+        return callback
 
     def disconnect(self, callback: Callable[[], None]) -> None:
+        """Remove a previously connected callback."""
         self._slots.remove(callback)
 
     def emit(self) -> None:
+        """Emit the signal, calling all connected callbacks."""
         for cb in self._slots:
             cb()
 
@@ -186,11 +200,16 @@ class StreamView:
         self._coords_data: Mapping[Hashable, Sequence] | None = None
         self._shape_override: tuple[int, ...] | None = None
         self._strict_bounds: bool = False
-        self._coords_changed = _SimpleSignal()
+        self._coords_changed = _SimpleSignalInstance()
 
     @property
-    def coords_changed(self) -> _SimpleSignal:
-        """Signal emitted when coords/shape change in live_shape mode."""
+    def coords_changed(self) -> _SimpleSignalInstance:
+        """Signal emitted when coords/shape change in `live_shape` mode.
+
+        This is a simple API, with no dependencies on psygnal/Qt.  The returned object
+        provides `connect` and `disconnect` methods for registering callbacks, and an
+        `emit` method for emitting the signal.  Callbacks must take no arguments.
+        """
         return self._coords_changed
 
     @property
