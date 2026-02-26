@@ -5,12 +5,13 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
     from typing import Any, SupportsIndex, TypeAlias
 
     from typing_extensions import Self
 
     from ome_writers._backends._backend import ArrayLike
+    from ome_writers._coord_tracker import CoordUpdate
     from ome_writers._stream import OMEStream
 
     Index: TypeAlias = SupportsIndex | slice
@@ -42,19 +43,38 @@ class StreamView:
     __slots__ = (
         "_acq_perm",
         "_arrays",
+        "_coords_data",
         "_dims",
         "_dtype",
         "_inv_perm",
         "_n_perm",
         "_position_axis",
+        "_shape_override",
+        "_strict_bounds",
     )
 
     @classmethod
-    def from_stream(cls, stream: OMEStream) -> Self:
+    def from_stream(
+        cls,
+        stream: OMEStream,
+        *,
+        live_shape: bool = False,
+        strict: bool = False,
+    ) -> Self:
         """Create view directly from OMEStream.
 
         Prefer using [`OMEStream.view`][ome_writers.OMEStream.view], which calls
         this method internally (and may have additional logic).
+
+        Parameters
+        ----------
+        stream : OMEStream
+            The stream to create a view from.
+        live_shape : bool
+            If True, shape/coords dynamically reflect only what has been acquired.
+        strict : bool
+            If True (and live_shape=True), raise IndexError on integer indices
+            outside the live bounds.
         """
         settings = stream._settings
         if settings.is_unbounded:  # pragma: no cover
@@ -70,12 +90,33 @@ class StreamView:
         else:
             acquisition_perm = None
 
-        return cls(
+        view = cls(
             stream._backend.get_arrays(),
             position_axis=settings.position_dimension_index,
             acquisition_order_perm=acquisition_perm,
             dimension_labels=[d.name for d in settings.dimensions],
         )
+
+        # Compute full coords from settings
+        full_coords: dict[str, Sequence] = {}
+        for dim in settings.dimensions:
+            if dim.coords:
+                full_coords[dim.name] = [getattr(c, "name", c) for c in dim.coords]
+            else:
+                full_coords[dim.name] = range(dim.count)
+        view._coords_data = full_coords
+
+        if live_shape:
+            view._strict_bounds = strict
+            # Register callback (lazily creates coord tracker)
+            stream.on("coords_expanded", view._on_coords_expanded)
+            # read initial state from coord tracker
+            assert stream._coord_tracker is not None  # should be created by on()
+            coords = stream._coord_tracker.get_coords()
+            view._coords_data = dict(coords)
+            view._shape_override = tuple(len(coords[d]) for d in view._dims)
+
+        return view
 
     def __init__(
         self,
@@ -121,6 +162,18 @@ class StreamView:
                 raise ValueError(f"position_axis {position_axis} out of range")
         self._position_axis = position_axis
 
+        # Live-shape tracking (set by from_stream when live_shape=True)
+        self._coords_data: Mapping[str, Sequence] | None = None
+        self._shape_override: tuple[int, ...] | None = None
+        self._strict_bounds: bool = False
+
+    @property
+    def coords(self) -> Mapping[str, Sequence]:
+        """Coordinate labels for each dimension."""
+        if self._coords_data is not None:
+            return self._coords_data
+        return {d: range(s) for d, s in zip(self.dims, self.shape, strict=False)}
+
     @property
     def dims(self) -> tuple[str, ...]:
         """Return dimension labels."""
@@ -129,6 +182,9 @@ class StreamView:
     @property
     def shape(self) -> tuple[int, ...]:
         """Return the full shape of the view, combining all position arrays."""
+        if (override := self._shape_override) is not None:
+            return override
+
         acq_shape = self._acq_shape(self._arrays[0].shape)
 
         # If no position dimension, return array shape directly
@@ -148,11 +204,28 @@ class StreamView:
         """Return the number of dimensions in the view."""
         return len(self.shape)
 
+    def _on_coords_expanded(self, update: CoordUpdate) -> None:
+        """Update live coords and shape from a high water mark event."""
+        mc = update.max_coords
+        self._coords_data = dict(mc)
+        self._shape_override = tuple(len(mc[d]) for d in self._dims)
+
     def __getitem__(self, key: Index | tuple[Index, ...]) -> np.ndarray:
         """Get item(s) from the view using integer and slice indexing."""
         # Normalize key to full tuple with slices
         keys = key if isinstance(key, tuple) else (key,)
         keys = keys + (slice(None),) * (self.ndim - len(keys))
+
+        # Strict bounds check for live_shape mode
+        if self._strict_bounds and (live := self._shape_override) is not None:
+            for i, (k, s) in enumerate(zip(keys, live, strict=False)):
+                if isinstance(k, int):
+                    resolved = k if k >= 0 else s + k
+                    if resolved < 0 or resolved >= s:
+                        raise IndexError(
+                            f"Index {k} is out of bounds for live "
+                            f"dimension {self._dims[i]!r} with size {s}"
+                        )
 
         # Extract position index and array indices
         if (pos_axis := self._position_axis) is None:

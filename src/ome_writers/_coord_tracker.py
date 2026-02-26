@@ -65,7 +65,7 @@ def high_water_marks(shape: tuple[range | int, ...]) -> dict[int, list[int]]:
     return dict(zip(a, b, strict=False))
 
 
-class _CoordTracker:
+class CoordTracker:
     """Tracks coordinate visibility and detects high water marks."""
 
     def __init__(

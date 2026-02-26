@@ -11,6 +11,8 @@ if TYPE_CHECKING:
 
     import numpy as np
 
+    from ome_writers._stream import OMEStream
+
 
 def read_array_data(path: Path | str) -> np.ndarray:
     """Read array data from either Zarr or TIFF file.
@@ -84,3 +86,15 @@ def wait_for_frames(
                     if written > 0:
                         break
                 time.sleep(0.01)  # Small sleep to avoid busy-waiting
+
+
+def wait_for_pending_callbacks(
+    stream: OMEStream, timeout: float = 1.0, barriers: int = 20
+) -> None:
+    """Wait for all pending async callbacks to complete (for testing).
+
+    Submits barrier tasks serially to ensure all prior work completes tests.
+    """
+    if executor := stream._callback_executor:
+        for _ in range(barriers):
+            executor.submit(lambda: None).result(timeout=timeout)
