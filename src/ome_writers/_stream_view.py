@@ -256,8 +256,12 @@ class StreamView:
     def _on_coords_expanded(self, update: CoordUpdate) -> None:
         """Update live coords and shape from a high water mark event."""
         mc = update.max_coords
+        new_shape = tuple(len(mc[d]) for d in self._dims)
+        # Events may arrive out of order (async executor); only grow shape.
+        if (old := self._shape_override) is not None and new_shape <= old:
+            return
         self._coords_data = dict(mc)
-        self._shape_override = tuple(len(mc[d]) for d in self._dims)
+        self._shape_override = new_shape
         self._coords_changed.emit()
 
     def __getitem__(self, key: Index | tuple[Index, ...]) -> np.ndarray:

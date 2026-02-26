@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from ome_writers import AcquisitionSettings, Dimension, create_stream
-from tests._utils import wait_for_frames
+from tests._utils import wait_for_frames, wait_for_pending_callbacks
 
 try:
     import zarr
@@ -55,6 +55,8 @@ def test_live_tiff_viewing_basic(tmp_path: Path) -> None:
 
         # Wait for frames to be written by WriterThread
         wait_for_frames(stream._backend, expected_count=10)
+        # Wait for async coord callbacks to update the view's shape
+        wait_for_pending_callbacks(stream)
 
         # Should be able to read written frames
         assert view.shape == (5, 2, 32, 32)
