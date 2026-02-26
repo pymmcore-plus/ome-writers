@@ -40,5 +40,6 @@ def test_example_runs(example_path: Path, tmp_path: Path, any_backend: str) -> N
             raise
 
     # Validate that example created output files (use rglob for subdirectories)
-    output_files = list(tmp_path.rglob("*.ome.*"))
+    # By convention, all examples should create outputs starting with "example_"
+    output_files = list(tmp_path.rglob("example_*"))
     assert output_files, f"Example {example_path.name} did not create output files"

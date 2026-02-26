@@ -10,7 +10,7 @@ for name, meta in _stream.AVAILABLE_BACKENDS.items():
         ZARR_BACKENDS.append(name)
     elif meta.format.endswith("tiff"):
         TIFF_BACKENDS.append(name)
-AVAILABLE_BACKENDS = ZARR_BACKENDS + TIFF_BACKENDS
+AVAILABLE_BACKENDS = ZARR_BACKENDS + TIFF_BACKENDS + INTERNAL_BACKENDS
 
 
 @pytest.fixture(params=AVAILABLE_BACKENDS)

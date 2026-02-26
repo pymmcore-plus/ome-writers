@@ -274,8 +274,10 @@ def test_cases(
 
     if settings.format.name == "ome-tiff":
         _assert_valid_ome_tiff(settings)
-    else:
+    elif settings.format.name == "ome-zarr":
         _assert_valid_ome_zarr(settings)
+    elif settings.format.name == "scratch":
+        _assert_valid_scratch(settings)
 
 
 @pytest.mark.parametrize("fmt", ["tiff", "zarr"])
@@ -579,6 +581,25 @@ def _assert_valid_ome_zarr(case: AcquisitionSettings) -> None:
         _assert_array_valid(data, dims, case.dtype, i)
 
 
+def _assert_valid_scratch(case: AcquisitionSettings) -> None:
+    root = Path(case.output_path)
+    manifest = json.loads((root / "manifest.json").read_text())
+
+    # Manifest should round-trip the key settings
+    assert manifest["dtype"] == case.dtype
+    assert len(manifest["position_shapes"]) == len(case.positions)
+
+    dims = case.array_storage_dimensions
+    expected_shape = tuple(d.count or UNBOUNDED_FRAME_COUNT for d in dims)
+
+    for i in range(len(case.positions)):
+        data = read_array_data(root, position_index=i)
+        assert data.shape == expected_shape
+        assert data.dtype == np.dtype(case.dtype)
+        storage_names = [d.name for d in dims[:-2]]
+        validate_encoded_frame_values(data, storage_names, i)
+
+
 def test_skip_frames(tmp_path: Path, any_backend: str) -> None:
     """Test frame skipping with OMEStream.skip()."""
     root_path = tmp_path / f"skip_test{BACKEND_TO_EXT[any_backend]}"
@@ -609,9 +630,7 @@ def test_skip_frames(tmp_path: Path, any_backend: str) -> None:
             stream.append(frame_value)
 
     # Verify skipped frames are zeros
-    is_zarr = settings.format.name == "ome-zarr"
-    array_path = root_path / "0" if is_zarr else root_path
-    data = read_array_data(array_path)
+    data = read_array_data(root_path)
     empty_frame = np.zeros(frame_shape, dtype="uint16")
 
     # Check written frames
