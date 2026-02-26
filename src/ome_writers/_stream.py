@@ -232,7 +232,7 @@ class OMEStream:
         """Return True if the stream has been closed."""
         return not self._finalizer.alive
 
-    def view(self, *, live_shape: bool = False, strict: bool = False) -> StreamView:
+    def view(self, *, live_shape: bool = True, strict: bool = False) -> StreamView:
         """Return an ArrayLike view of the stream data as it is being written.
 
         The returned `StreamView` object provides array-like, read-only access to the
@@ -244,10 +244,10 @@ class OMEStream:
         Parameters
         ----------
         live_shape : bool
-            If False (default), the shape reflects the full expected acquisition.
-            If True, shape/len/ndim/coords dynamically reflect only the coordinate
-            extent seen so far (the "high water marks"). Indexing beyond the live
-            shape still returns zeros unless `strict` is also True.
+            If True (default), shape/len/coords dynamically reflect only the
+            coordinate extent seen so far (the "high water marks"). Indexing
+            beyond the live shape still returns zeros unless `strict` is also
+            True. If False, the shape reflects the full expected acquisition.
         strict : bool
             Only meaningful when `live_shape=True`. If True, integer indices outside
             the current live bounds raise IndexError. Slices are always clipped

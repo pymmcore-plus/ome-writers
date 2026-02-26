@@ -11,8 +11,9 @@
 # ///
 """Example of viewing ome_writers stream in ndv during acquisition.
 
-This example demonstrates using the coordinate tracking API to update
-an ndv viewer in real-time as frames are generated and written.
+This example demonstrates using `live_shape=True` to get a StreamView
+whose shape/coords dynamically reflect acquisition progress, and wiring
+it to an ndv viewer for real-time display.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from __future__ import annotations
 import sys
 import time
 from threading import Thread
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import ndv
 import numpy as np
@@ -28,10 +29,7 @@ import numpy as np
 from ome_writers import AcquisitionSettings, Dimension, create_stream
 
 if TYPE_CHECKING:
-    from collections.abc import Hashable, Mapping, Sequence
-
-    from ome_writers import OMEStream, StreamView
-    from ome_writers._coord_tracker import CoordUpdate
+    from ome_writers import OMEStream
 
 # Setup acquisition settings
 # Derive format/backend from command line argument (default: auto)
@@ -52,97 +50,49 @@ settings = AcquisitionSettings(
     format=FORMAT,
 )
 
-# ===============================================================================
-# Function to generate and write frames in a background thread
-# ===============================================================================
-
 
 def generate_frames(stream: OMEStream) -> None:
-    """Generate random noise frames."""
-    rng = np.random.default_rng(42)
-    frame_shape = [dim.count or 1 for dim in settings.dimensions[-2:]]
+    """Generate gaussian blob frames that drift over time."""
+    ny, nx = (dim.count or 1 for dim in settings.dimensions[-2:])
+    nz = next((d.count for d in settings.dimensions if d.name == "z"), 1) or 1
+    yy, xx = np.mgrid[:ny, :nx].astype(np.float32)
 
-    print(f"Starting acquisition: {settings.num_frames} frames")
     for i in range(settings.num_frames):
-        # Generate random noise
-        frame = rng.integers(0, 2000, size=frame_shape, dtype=np.uint16)
-        stream.append(frame)
-
-        # Small delay to simulate acquisition
+        # Blob center drifts per (t,p,c) group; z only changes sigma
+        g = i // nz  # group index (constant across z)
+        cy, cx = ny / 2 + 80 * np.sin(g * 0.3), nx / 2 + 80 * np.cos(g * 0.2)
+        sigma2 = 1000 + 500 * (i % nz)  # wider blob at higher z
+        blob = 2000 * np.exp(-((yy - cy) ** 2 + (xx - cx) ** 2) / sigma2)
+        noise = np.random.randint(0, 200, size=(ny, nx), dtype=np.uint16)
+        stream.append(blob.astype(np.uint16) + noise)
         time.sleep(0.01)
 
         if (i + 1) % 10 == 0:
             print(f"  Written {i + 1}/{settings.num_frames} frames")
-    else:
-        print("Acquisition complete!")
 
 
 # ===============================================================================
-# ndv-specific code: DataWrapper that dynamically manages coordinate ranges
-# ===============================================================================
+
+with create_stream(settings) as stream:
+    # Create a StreamView.  This is an array-like object with dims/coords
+    # that reflect the stream's current state (by default, live_shape=True).
+    view = stream.view()
+
+    # ndv has built-in support for array-like objects that support the xarray
+    # dims/coords convention.  So we can directly pass our StreamView to an ndv viewer
+    viewer = ndv.ArrayViewer(view)
+    viewer.show()
+
+    # the only thing we need to connect is the StreamView's coords_changed signal,
+    # so that the viewer updates when new frames are added and the shape/coords change.
+    view.coords_changed.connect(viewer.data_wrapper.dims_changed)
+
+    # Start frame generation in a background thread
+    acquisition_thread = Thread(target=generate_frames, args=(stream,), daemon=True)
+    acquisition_thread.start()
+
+    # Start the ndv event loop (blocks until viewer is closed)
+    ndv.run_app()
 
 
-class CoordsAwareDataWrapper(ndv.DataWrapper):
-    """DataWrapper that tracks acquisition progress via coordinate events.
-
-    NDV updates the viewers sliders based on the coordinate ranges returned by `coords`,
-    and you can trigger slider range updates by emitting `dims_changed`.
-    """
-
-    def __init__(self, view: StreamView) -> None:
-        super().__init__(view)
-        self._view = view
-        self._current_coords: Mapping[Hashable, Sequence] = {
-            i: range(s) for i, s in zip(self.dims, self._data.shape, strict=False)
-        }
-
-    def update_coords(self, update: CoordUpdate) -> None:
-        """Called when new dimensions become visible (high water marks)."""
-        # Store the latest coordinate ranges
-        self._current_coords = update.max_coords  # ty : ignore[invalid-assignment]
-        # Emit dims_changed to tell ndv to update its slider ranges
-        self.dims_changed.emit()
-        print("Updating ndv slider ranges to:\n", self._current_coords)
-
-    @property
-    def dims(self) -> tuple[Hashable, ...]:
-        """Return dimension names."""
-        # Get dimension names from the view
-        return self._view.dims
-
-    @property
-    def coords(self) -> Mapping[Hashable, Sequence]:
-        """Return current visible coordinate ranges."""
-        return self._current_coords
-
-    @classmethod
-    def supports(cls, obj: Any) -> bool:  # type: ignore[override]
-        """Check if this wrapper supports the given object."""
-        return True
-
-
-# ===============================================================================
-# Main script: create stream, viewer, and start acquisition
-# ===============================================================================
-
-stream = create_stream(settings)
-
-# Create an acquisition view and pass it to ndv with our coords-tracking wrapper
-wrapper = CoordsAwareDataWrapper(stream.view())
-viewer = ndv.ArrayViewer(wrapper)
-viewer.show()
-
-# pass coordinate updates from the stream to the wrapper...
-stream.on("coords_expanded", wrapper.update_coords)
-
-# Start frame generation in a background thread
-acquisition_thread = Thread(target=generate_frames, args=(stream,), daemon=True)
-acquisition_thread.start()
-
-# Start the ndv event loop (blocks until viewer is closed)
-ndv.run_app()
-
-# Cleanup
-acquisition_thread.join(timeout=1.0)
-stream.close()
 print("Done!")

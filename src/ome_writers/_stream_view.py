@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping, Sequence
+    from collections.abc import Callable, Iterable, Mapping, Sequence
     from typing import Any, SupportsIndex, TypeAlias
 
     from typing_extensions import Self
@@ -15,6 +15,25 @@ if TYPE_CHECKING:
     from ome_writers._stream import OMEStream
 
     Index: TypeAlias = SupportsIndex | slice
+
+
+class _SimpleSignal:
+    """Minimal signal with connect/disconnect/emit (no dependencies)."""
+
+    __slots__ = ("_slots",)
+
+    def __init__(self) -> None:
+        self._slots: list[Callable[[], None]] = []
+
+    def connect(self, callback: Callable[[], None]) -> None:
+        self._slots.append(callback)
+
+    def disconnect(self, callback: Callable[[], None]) -> None:
+        self._slots.remove(callback)
+
+    def emit(self) -> None:
+        for cb in self._slots:
+            cb()
 
 
 class StreamView:
@@ -43,6 +62,7 @@ class StreamView:
     __slots__ = (
         "_acq_perm",
         "_arrays",
+        "_coords_changed",
         "_coords_data",
         "_dims",
         "_dtype",
@@ -58,7 +78,7 @@ class StreamView:
         cls,
         stream: OMEStream,
         *,
-        live_shape: bool = False,
+        live_shape: bool = True,
         strict: bool = False,
     ) -> Self:
         """Create view directly from OMEStream.
@@ -166,6 +186,12 @@ class StreamView:
         self._coords_data: Mapping[str, Sequence] | None = None
         self._shape_override: tuple[int, ...] | None = None
         self._strict_bounds: bool = False
+        self._coords_changed = _SimpleSignal()
+
+    @property
+    def coords_changed(self) -> _SimpleSignal:
+        """Signal emitted when coords/shape change in live_shape mode."""
+        return self._coords_changed
 
     @property
     def coords(self) -> Mapping[str, Sequence]:
@@ -209,6 +235,7 @@ class StreamView:
         mc = update.max_coords
         self._coords_data = dict(mc)
         self._shape_override = tuple(len(mc[d]) for d in self._dims)
+        self._coords_changed.emit()
 
     def __getitem__(self, key: Index | tuple[Index, ...]) -> np.ndarray:
         """Get item(s) from the view using integer and slice indexing."""

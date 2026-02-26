@@ -53,7 +53,7 @@ def test_coords_non_live(
     """Non-live view returns full coords from settings."""
     dims = [Dimension(name="t", count=3, type="time"), ch_dim, *TC_DIMS[2:]]
     with create_stream(_settings(tmp_path, first_backend, dims)) as stream:
-        c = stream.view().coords
+        c = stream.view(live_shape=False).coords
         assert c["t"] == range(3)
         assert c["c"] == expected_c
         assert c["y"] == range(16)
@@ -188,7 +188,7 @@ def test_mid_acquisition_and_multiple_views(tmp_path: Path, first_backend: str) 
 def test_non_live_full_shape(tmp_path: Path, first_backend: str) -> None:
     """Regression: live_shape=False always returns full shape."""
     with create_stream(_settings(tmp_path, first_backend, TC_DIMS)) as stream:
-        view = stream.view()
+        view = stream.view(live_shape=False)
         assert view.shape == (3, 2, 16, 16)
         stream.append(FRAME)
         assert view.shape == (3, 2, 16, 16)
