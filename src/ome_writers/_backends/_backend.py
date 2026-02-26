@@ -58,7 +58,6 @@ if TYPE_CHECKING:
 
     import numpy as np
 
-    from ome_writers._backends._backend import ArrayBackend
     from ome_writers._router import FrameRouter
     from ome_writers._schema import AcquisitionSettings
 
@@ -187,8 +186,14 @@ class ArrayBackend(ABC):
     def get_arrays(self) -> Sequence[ArrayLike]:
         """Return one array-like object per position.
 
-        Must be called after prepare() but before finalize().
-        Caller should retains references if needed after finalize().
+        Returns live array handles during acquisition, or reopened read-only
+        arrays after finalize() if the backend supports it.
+
+        Raises
+        ------
+        NotImplementedError
+            If the backend does not support read access, or if the backend
+            has been finalized and does not support post-close reading.
         """
         raise NotImplementedError(
             f"{self.__class__.__name__} does not support read access"

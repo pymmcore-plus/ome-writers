@@ -9,7 +9,6 @@ import numpy as np
 import pytest
 
 from ome_writers import AcquisitionSettings, Dimension, create_stream
-from ome_writers._array_view import AcquisitionView
 from tests._utils import wait_for_frames
 
 try:
@@ -43,7 +42,7 @@ def test_live_tiff_viewing_basic(tmp_path: Path) -> None:
     )
 
     with create_stream(settings) as stream:
-        view = AcquisitionView.from_stream(stream)
+        view = stream.view()
         # exercising some implementation details of the LiveTiffStore
         array0 = view._arrays[0]
         assert isinstance(array0, zarr.Array)
@@ -95,7 +94,7 @@ def test_live_viewing_returns_zeros_for_unwritten(tmp_path: Path) -> None:
         wait_for_frames(stream._backend, expected_count=3)
 
         # Get live view
-        view = AcquisitionView.from_stream(stream)
+        view = stream.view()
 
         # First 3 frames should have data
         assert np.all(view[0] == 100)
@@ -157,10 +156,10 @@ def test_live_viewing_with_compression_raises_error(tmp_path: Path) -> None:
 
         # Attempting live view with compression should raise error
         with pytest.raises(
-            RuntimeError,
-            match="Live viewing is not supported with compression enabled",
+            NotImplementedError,
+            match="not supported with compression",
         ):
-            AcquisitionView.from_stream(stream)
+            stream.view()
 
 
 def test_parse_chunk_key() -> None:
@@ -210,3 +209,116 @@ def test_metadata_json_valid() -> None:
     assert metadata["chunk_grid"]["configuration"]["chunk_shape"] == [1, 1, 1, 32, 32]
     assert metadata["fill_value"] == 0
     assert metadata["data_type"] == "uint16"
+
+
+def test_tiff_view_on_empty_closed_stream(tmp_path: Path) -> None:
+    """View on a closed tiff stream with no frames written."""
+    settings = AcquisitionSettings(
+        root_path=tmp_path / "empty.ome.tiff",
+        dimensions=[
+            Dimension(name="t", count=3),
+            Dimension(name="c", count=3),
+            Dimension(name="z", count=3),
+            Dimension(name="y", count=64),
+            Dimension(name="x", count=64),
+        ],
+        dtype="uint16",
+        overwrite=True,
+        format="tifffile",
+    )
+    stream = create_stream(settings)
+    stream.close()
+    view = stream.view()
+    assert view.shape == tuple(d.count for d in settings.dimensions)
+    assert np.allclose(view[:], 0)
+
+
+def test_tiff_view_on_single_written_closed_stream(tmp_path: Path) -> None:
+    """Finalized partial uncompressed TIFF uses LiveTiffStore."""
+    settings = AcquisitionSettings(
+        root_path=tmp_path / "single_written.ome.tiff",
+        dimensions=[
+            Dimension(name="t", count=3),
+            Dimension(name="y", count=64),
+            Dimension(name="x", count=64),
+        ],
+        dtype="uint16",
+        overwrite=True,
+        format="tifffile",
+    )
+    stream = create_stream(settings)
+    stream.append(np.ones((64, 64), dtype=np.uint16))
+    stream.close()
+    view = stream.view()
+    assert view.shape == (3, 64, 64)
+    assert np.all(view[0] == 1)  # Written frame
+    assert np.all(view[1] == 0)  # Unwritten
+    assert np.all(view[2] == 0)  # Unwritten
+
+
+def test_tiff_view_on_finalized_compressed_stream(tmp_path: Path) -> None:
+    """Finalized fully-written compressed TIFF is viewable via aszarr."""
+    settings = AcquisitionSettings(
+        root_path=tmp_path / "compressed_finalized.ome.tiff",
+        dimensions=[
+            Dimension(name="t", count=3),
+            Dimension(name="y", count=64),
+            Dimension(name="x", count=64),
+        ],
+        dtype="uint16",
+        overwrite=True,
+        format="tifffile",
+        compression="lzw",
+    )
+    with create_stream(settings) as stream:
+        stream.append(np.ones((64, 64), dtype=np.uint16))
+        stream.append(np.ones((64, 64), dtype=np.uint16))
+        stream.append(np.ones((64, 64), dtype=np.uint16))
+
+    view = stream.view()
+    assert view.shape == (3, 64, 64)
+    assert np.all(view[:] == 1)
+
+
+def test_tiff_view_on_partial_finalized_compressed_stream_raises(
+    tmp_path: Path,
+) -> None:
+    """Finalized partial compressed TIFF view is not supported."""
+    settings = AcquisitionSettings(
+        root_path=tmp_path / "partial_compressed.ome.tiff",
+        dimensions=[
+            Dimension(name="t", count=3),
+            Dimension(name="y", count=64),
+            Dimension(name="x", count=64),
+        ],
+        dtype="uint16",
+        overwrite=True,
+        format="tifffile",
+        compression="lzw",
+    )
+    stream = create_stream(settings)
+    stream.append(np.ones((64, 64), dtype=np.uint16))
+    stream.close()
+    with pytest.raises(NotImplementedError, match="not supported with compression"):
+        stream.view()
+
+
+def test_tiff_view_on_empty_finalized_compressed_stream(tmp_path: Path) -> None:
+    """Zero-frame finalized compressed TIFF returns expected-shape zeros."""
+    settings = AcquisitionSettings(
+        root_path=tmp_path / "empty_compressed.ome.tiff",
+        dimensions=[
+            Dimension(name="t", count=3),
+            Dimension(name="y", count=64),
+            Dimension(name="x", count=64),
+        ],
+        dtype="uint16",
+        overwrite=True,
+        format="tifffile",
+        compression="lzw",
+    )
+    stream = create_stream(settings)
+    stream.close()
+    view = stream.view()
+    assert view.shape == tuple(d.count for d in settings.dimensions)
+    assert np.allclose(view[:], 0)

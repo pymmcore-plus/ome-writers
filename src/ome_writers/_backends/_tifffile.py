@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import threading
 import warnings
+import weakref
 from contextlib import suppress
 from dataclasses import dataclass
 from itertools import count
@@ -323,51 +324,53 @@ class TiffBackend(ArrayBackend):
             from ome_writers._backends._live_tiff_store import LiveTiffStore
         except ImportError as e:
             raise ImportError(
-                f"{self.__class__.__name__}.get_arrays() requires zarr: "
+                "zarr v3 (and therefore python>=3.11) is required for live-viewing tiff"
+                " data. Please install with 'pip install ome-writers[tifffile,zarr]'."
             ) from e
 
         if not self._position_managers:  # pragma: no cover
             raise RuntimeError("Backend not prepared. Call prepare() first.")
 
         arrays = []
+        storage_dims = cast("tuple[Dimension]", self._storage_dims)
         for _, manager in sorted(self._position_managers.items()):
             if not manager.metadata_mirror.is_tiff:  # pragma: no cover
                 continue  # Skip companion-only entries
 
             path = manager.file_path
-            # Choose Store based on finalization state
+            thread = manager.thread
+            assert thread is not None, f"No WriterThread for {path}"
+
             if self._finalized:
-                # FINALIZED: Use complete TIFF file via aszarr
-                store = tifffile.TiffFile(path).aszarr()
-            else:
-                # LIVE: Use LiveTiffStore for incomplete file
-                if manager.thread is None:  # pragma: no cover
-                    raise RuntimeError(f"No WriterThread for {path}")
+                frames_written = thread.frames_written
+                shape = tuple(d.count or 1 for d in storage_dims)
+                if frames_written == 0:
+                    zarray = zarr.create(shape, dtype=self._dtype, fill_value=0)
+                    arrays.append(zarray)
+                    continue
 
-                # Check if compression is enabled (LiveTiffStore won't work)
-                if manager.thread._compression is not None:  # pragma: no cover
-                    raise NotImplementedError(
-                        "Live viewing is not supported with compression enabled."
-                    )
+                expected_frames = math.prod(shape[:-2] or (1,))
+                if frames_written >= expected_frames:
+                    # Fully written: use aszarr (supports compression)
+                    tf = tifffile.TiffFile(path)
+                    zarray = zarr.open(tf.aszarr(), mode="r")
+                    weakref.finalize(zarray, tf.close)
+                    arrays.append(zarray)
+                    continue
 
-                storage_dims = cast("tuple[Dimension]", self._storage_dims)
-                # Calculate full shape from storage dimensions
-                # Use large default for unbounded
-                shape = tuple(d.count or 1000 for d in storage_dims)
-
-                # Chunks are single frames (1 for each non-spatial dim, full Y,X)
-                # (regardless of the settings used during for tiff writing, currently)
-                chunks = tuple(1 for _ in storage_dims[:-2]) + self._frame_shape
-
-                store = LiveTiffStore(
-                    writer_thread=manager.thread,
-                    file_path=path,
-                    shape=shape,
-                    dtype=self._dtype,
-                    chunks=chunks,
-                    fill_value=0,
+            # LiveTiffStore: live viewing OR finalized partial uncompressed
+            if thread._compression is not None:
+                raise NotImplementedError(
+                    "Tiff viewing is not supported with compression enabled."
                 )
-
+            store = LiveTiffStore(
+                writer_thread=thread,
+                file_path=path,
+                shape=tuple(d.count or 1000 for d in storage_dims),
+                dtype=self._dtype,
+                chunks=tuple(1 for _ in storage_dims[:-2]) + self._frame_shape,
+                fill_value=0,
+            )
             arrays.append(zarr.open(store, mode="r"))
 
         return arrays

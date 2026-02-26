@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from ome_writers._backends._backend import ArrayBackend
     from ome_writers._coord_tracker import _CoordTracker
     from ome_writers._schema import AcquisitionSettings, FileFormat
+    from ome_writers._stream_view import StreamView
 
     EventName: TypeAlias = Literal["coords_expanded", "coords_changed"]
 
@@ -100,21 +101,6 @@ class OMEStream:
         self._finalizer = weakref.finalize(
             self, _finalize_backend, backend, self._state
         )
-
-    def _handle_stop_iteration(self, operation: str, frame_count: int = 1) -> NoReturn:
-        """Convert StopIteration to ValueError with helpful message."""
-        if self._expected_frames is not None:
-            suffix = f" (tried to skip {frame_count})" if frame_count > 1 else ""
-            msg = (
-                f"Cannot {operation}: would exceed total of {self._expected_frames} "
-                f"frames{suffix}. Check your AcquisitionSettings.dimensions. "
-                "If you need to write an unbounded number of frames, set the "
-                "count of your first dimension to None."
-            )
-        else:  # pragma: no cover
-            msg = f"Cannot {operation}: iteration finished unexpectedly. This is a bug "
-            "- please report it at https://github.com/pymmcore-plus/ome-writers/issues"
-        raise IndexError(msg)
 
     def append(self, frame: np.ndarray, *, frame_metadata: dict | None = None) -> None:
         """Write the next frame in acquisition order.
@@ -246,6 +232,37 @@ class OMEStream:
         """Return True if the stream has been closed."""
         return not self._finalizer.alive
 
+    def view(self) -> StreamView:
+        """Return an ArrayLike view of the stream data as it is being written.
+
+        The returned `StreamView` object provides array-like, read-only access to the
+        data. The axes in the view are *in acquisition order*, that is: the shape and
+        dimension order of the `StreamView` will always match the
+        `AcquisitionSettings.dimensions` that were passed to `create_stream()`,
+        regardless of the storage order.
+
+        The shape of the StreamView reflects the *full* expected shape of the
+        acquisition (not just the portion that has been written so far).  Frames
+        that have not been written yet *may* be indexed, and will appear as arrays of
+        zeros (or the fill value for zarr backends).
+
+        Returns
+        -------
+        StreamView
+            A live view of the stream data that can be indexed like a numpy array.
+
+        Raises
+        ------
+        NotImplementedError
+            If the stream is unbounded (i.e. has an unlimited first dimension).
+        ValueError
+            If the backend does not support providing a view, for whatever reason.
+            (This would be a bug in the backend implementation, open an issue.)
+        """
+        from ome_writers._stream_view import StreamView
+
+        return StreamView.from_stream(self)
+
     def on(
         self,
         event: Literal["coords_expanded", "coords_changed"],
@@ -304,6 +321,23 @@ class OMEStream:
         # Coords-changed need more "activate" tracking. update tracker accordingly
         if event == COORDS_CHANGED:
             self._coord_tracker.set_needs_current_indices(True)
+
+    # ----------------------- Internal Methods -----------------------
+
+    def _handle_stop_iteration(self, operation: str, frame_count: int = 1) -> NoReturn:
+        """Convert StopIteration to ValueError with helpful message."""
+        if self._expected_frames is not None:
+            suffix = f" (tried to skip {frame_count})" if frame_count > 1 else ""
+            msg = (
+                f"Cannot {operation}: would exceed total of {self._expected_frames} "
+                f"frames{suffix}. Check your AcquisitionSettings.dimensions. "
+                "If you need to write an unbounded number of frames, set the "
+                "count of your first dimension to None."
+            )
+        else:  # pragma: no cover
+            msg = f"Cannot {operation}: iteration finished unexpectedly. This is a bug "
+            "- please report it at https://github.com/pymmcore-plus/ome-writers/issues"
+        raise IndexError(msg)
 
     def _emit_coord_events(self, update: CoordUpdate) -> None:
         """Emit coordinate events to registered handlers asynchronously."""

@@ -26,12 +26,11 @@ import ndv
 import numpy as np
 
 from ome_writers import AcquisitionSettings, Dimension, create_stream
-from ome_writers._array_view import AcquisitionView
 
 if TYPE_CHECKING:
     from collections.abc import Hashable, Mapping, Sequence
 
-    from ome_writers import OMEStream
+    from ome_writers import OMEStream, StreamView
     from ome_writers._coord_tracker import CoordUpdate
 
 # Setup acquisition settings
@@ -90,7 +89,7 @@ class CoordsAwareDataWrapper(ndv.DataWrapper):
     and you can trigger slider range updates by emitting `dims_changed`.
     """
 
-    def __init__(self, view: AcquisitionView) -> None:
+    def __init__(self, view: StreamView) -> None:
         super().__init__(view)
         self._view = view
         self._current_coords: Mapping[Hashable, Sequence] = {
@@ -119,7 +118,7 @@ class CoordsAwareDataWrapper(ndv.DataWrapper):
     @classmethod
     def supports(cls, obj: Any) -> bool:  # type: ignore[override]
         """Check if this wrapper supports the given object."""
-        return isinstance(obj, AcquisitionView)
+        return True
 
 
 # ===============================================================================
@@ -129,8 +128,7 @@ class CoordsAwareDataWrapper(ndv.DataWrapper):
 stream = create_stream(settings)
 
 # Create an acquisition view and pass it to ndv with our coords-tracking wrapper
-view = AcquisitionView.from_stream(stream)
-wrapper = CoordsAwareDataWrapper(view)
+wrapper = CoordsAwareDataWrapper(stream.view())
 viewer = ndv.ArrayViewer(wrapper)
 viewer.show()
 

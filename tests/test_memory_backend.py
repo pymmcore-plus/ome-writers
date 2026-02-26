@@ -8,9 +8,12 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from ome_writers import AcquisitionSettings, Position, dims_from_standard_axes
-from ome_writers._array_view import AcquisitionView
-from ome_writers._stream import create_stream
+from ome_writers import (
+    AcquisitionSettings,
+    Position,
+    create_stream,
+    dims_from_standard_axes,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -45,7 +48,7 @@ def test_basic_write_and_read() -> None:
 def test_acquisition_view_compatibility() -> None:
     settings = _make_settings()
     with create_stream(settings) as stream:
-        view = AcquisitionView.from_stream(stream)
+        view = stream.view()
 
         frame = np.ones((8, 8), dtype="uint16") * 7
         for _ in range(6):
