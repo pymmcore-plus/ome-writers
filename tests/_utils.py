@@ -2,55 +2,64 @@
 
 from __future__ import annotations
 
+import json
 import time
 from contextlib import suppress
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import Any
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
-    import numpy as np
+import numpy as np
 
 
-def read_array_data(path: Path | str) -> np.ndarray:
-    """Read array data from either Zarr or TIFF file.
+def read_array_data(root: Path | str, position_index: int = 0) -> np.ndarray:
+    """Read array data from a Zarr, TIFF, or scratch output root.
+
+    Handles format-specific position/resolution path logic internally.
 
     Parameters
     ----------
-    path : Path | str
-        Path to either a Zarr array directory or TIFF file.
-
-    Returns
-    -------
-    np.ndarray
-        The array data.
+    root : Path | str
+        Root output path (e.g. the OME-Zarr store, TIFF file, or scratch dir).
+    position_index : int
+        Position index to read (default 0).
     """
-    # path = Path(path)
 
-    # Detect format by checking if it's a directory (Zarr) or file (TIFF)
-    if str(path).endswith((".tif", ".tiff")):
-        # TIFF format
-        import numpy as np
+    root = Path(root)
+
+    # TIFF format
+    if str(root).endswith((".tif", ".tiff")):
         import tifffile
 
-        return np.asarray(tifffile.imread(path))
+        return np.asarray(tifffile.imread(root))
 
-    # Zarr format - try tensorstore first, fall back to zarr
+    # Scratch format - has manifest.json with position shapes
+    manifest = root / "manifest.json"
+    if manifest.exists():
+        meta = json.loads(manifest.read_text())
+        shape = tuple(meta["position_shapes"][position_index])
+        dtype = np.dtype(meta["dtype"])
+        arr = np.memmap(
+            root / f"pos_{position_index}.dat", dtype=dtype, mode="r", shape=shape
+        )
+        return np.array(arr)
+
+    # Zarr format - resolve to resolution level 0 array
+    array_path = root / "0"
     try:
         import tensorstore as ts
 
         ts_array = ts.open(
-            {"driver": "zarr3", "kvstore": {"driver": "file", "path": str(path)}},
+            {
+                "driver": "zarr3",
+                "kvstore": {"driver": "file", "path": str(array_path)},
+            },
             open=True,
         ).result()
-        import numpy as np
-
         return np.asarray(ts_array.read().result())
     except ImportError:
-        import numpy as np
         import zarr
 
-        return np.asarray(zarr.open_array(path))
+        return np.asarray(zarr.open_array(array_path))
 
 
 def wait_for_frames(

@@ -545,7 +545,9 @@ def test_storage_order_ome(any_backend: str) -> None:
     assert len(settings.storage_index_dimensions) == 2
     if settings.format.name == "ome-tiff":
         assert not settings.storage_index_permutation  # CTYX is already correct
-    else:
+    elif settings.format.name == "scratch":
+        assert not settings.storage_index_permutation  # scratch uses acquisition order
+    elif settings.format.name == "ome-zarr":
         assert settings.storage_index_permutation == (1, 0)  # CTYX -> TCYX
 
 
