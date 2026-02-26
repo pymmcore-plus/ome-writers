@@ -15,6 +15,17 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+@pytest.fixture()
+def first_backend(first_backend: str) -> str:
+    """Skip view tests when tiff backend lacks zarr for live-viewing."""
+    if first_backend == "tifffile":
+        pytest.importorskip(
+            "zarr.abc.store",
+            reason="zarr v3 required for live-viewing tiff data",
+        )
+    return first_backend
+
+
 FRAME = np.zeros((16, 16), dtype=np.uint16)
 TC_DIMS = [
     Dimension(name="t", count=3, type="time"),

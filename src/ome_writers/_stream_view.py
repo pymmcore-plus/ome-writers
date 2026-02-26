@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping, Sequence
+    from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
     from typing import Any, SupportsIndex, TypeAlias
 
     from typing_extensions import Self
@@ -118,7 +118,7 @@ class StreamView:
         )
 
         # Compute full coords from settings
-        full_coords: dict[str, Sequence] = {}
+        full_coords: dict[Hashable, Sequence] = {}
         for dim in settings.dimensions:
             if dim.coords:
                 full_coords[dim.name] = [getattr(c, "name", c) for c in dim.coords]
@@ -183,7 +183,7 @@ class StreamView:
         self._position_axis = position_axis
 
         # Live-shape tracking (set by from_stream when live_shape=True)
-        self._coords_data: Mapping[str, Sequence] | None = None
+        self._coords_data: Mapping[Hashable, Sequence] | None = None
         self._shape_override: tuple[int, ...] | None = None
         self._strict_bounds: bool = False
         self._coords_changed = _SimpleSignal()
@@ -194,8 +194,12 @@ class StreamView:
         return self._coords_changed
 
     @property
-    def coords(self) -> Mapping[str, Sequence]:
-        """Coordinate labels for each dimension."""
+    def coords(self) -> Mapping[Hashable, Sequence]:
+        """Coordinate labels for each dimension.
+
+        In practice this will be `Mapping[str, Sequence]` but for consistency with
+        the broader xarray semantics, consumers should prepare for any hashable keys.
+        """
         if self._coords_data is not None:
             return self._coords_data
         return {d: range(s) for d, s in zip(self.dims, self.shape, strict=False)}
