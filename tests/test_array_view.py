@@ -85,7 +85,7 @@ def test_array_view(tmp_path: Path, dim_order: str, any_backend: str) -> None:
                 last_frame = view[last_idx]
                 assert np.allclose(last_frame, 0)
 
-    assert view.dims == list(dim_order)
+    assert view.dims == tuple(dim_order)
     assert repr(view)
     assert len(view) == settings.shape[0]
 
