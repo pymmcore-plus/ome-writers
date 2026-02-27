@@ -8,10 +8,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from ome_writers import AcquisitionSettings, Dimension, Position
-from ome_writers._array_view import AcquisitionView
+from ome_writers import AcquisitionSettings, Dimension, Position, create_stream
 from ome_writers._frame_encoder import frame_generator, validate_encoded_frame_values
-from ome_writers._stream import create_stream
 from tests._utils import wait_for_frames
 
 if TYPE_CHECKING:
@@ -51,10 +49,6 @@ def test_array_view(tmp_path: Path, dim_order: str, any_backend: str) -> None:
 
     This tests all 24 permutations of (t, p, c, z) with y, x always at the end.
     """
-    if any_backend == "tifffile":
-        pytest.importorskip(
-            "zarr", reason="tifffile backend requires zarr for array view"
-        )
     if any_backend == "acquire-zarr":
         pytest.skip("acquire-zarr doesn't support read-only views")
 
@@ -70,7 +64,7 @@ def test_array_view(tmp_path: Path, dim_order: str, any_backend: str) -> None:
 
     frames = frame_generator(settings)
     with create_stream(settings) as stream:
-        view = AcquisitionView.from_stream(stream)
+        view = stream.view(dynamic_shape=False)
         for i, frame in enumerate(frames):
             stream.append(frame)
 
@@ -87,7 +81,7 @@ def test_array_view(tmp_path: Path, dim_order: str, any_backend: str) -> None:
                 last_frame = view[last_idx]
                 assert np.allclose(last_frame, 0)
 
-    assert view.dims == list(dim_order)
+    assert view.dims == tuple(dim_order)
     assert repr(view)
     assert len(view) == settings.shape[0]
 
@@ -119,31 +113,14 @@ def test_array_view(tmp_path: Path, dim_order: str, any_backend: str) -> None:
             ary = np.take(arr, pos_idx, axis=settings.position_dimension_index)
             validate_encoded_frame_values(ary, expected_names, pos_idx=pos_idx)
 
-
-def test_array_view_on_closed_stream(tmp_path: Path, first_backend: str) -> None:
-    """Test that array view works correctly for all dimension orderings.
-
-    This tests all 24 permutations of (t, p, c, z) with y, x always at the end.
-    """
-    dim_order = "tzyx"
-    settings = AcquisitionSettings(
-        root_path=tmp_path / f"test_{dim_order}",
-        dimensions=[Dimension(name=dim, **DIM_SPECS[dim]) for dim in dim_order],
-        dtype="uint16",
-        overwrite=True,
-        format=first_backend,
-    )
-
-    stream = create_stream(settings)
-    stream.close()
     assert stream.closed
 
-    with pytest.raises(NotImplementedError, match="Creating a view on a closed stream"):
-        AcquisitionView.from_stream(stream)
+    view = stream.view(dynamic_shape=False)
+    assert view.shape == tuple(d.count for d in settings.dimensions)
 
 
 def test_norm_index() -> None:
-    from ome_writers._array_view import _norm_index
+    from ome_writers._stream_view import _norm_index
 
     assert _norm_index(0, 10) == 0
     assert _norm_index(5, 10) == 5

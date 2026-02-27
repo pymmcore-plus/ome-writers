@@ -7,25 +7,13 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from ome_writers import AcquisitionSettings, Dimension, create_stream
-from ome_writers._stream import OMEStream, get_format_for_backend
+from ome_writers._stream import get_format_for_backend
+from tests._utils import wait_for_pending_callbacks
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from ome_writers._coord_tracker import CoordUpdate
-
-
-def _wait_for_pending_callbacks(stream: OMEStream, timeout: float = 1.0) -> None:
-    """Wait for all pending async callbacks to complete (for testing).
-
-    Submits barrier tasks serially to ensure all prior work completes.
-    tests.
-    """
-    if executor := stream._callback_executor:
-        # Testing shows 5 barriers is good for 2 workers...  using 10 for CI
-        # but increase if CI is flaky
-        for _ in range(10):
-            executor.submit(lambda: None).result(timeout=timeout)
 
 
 def test_coord_events(tmp_path: Path, first_backend: str) -> None:
@@ -67,7 +55,7 @@ def test_coord_events(tmp_path: Path, first_backend: str) -> None:
 
         # Write first frame (t=0, c=0) - high water mark
         stream.append(frame)
-        _wait_for_pending_callbacks(stream)
+        wait_for_pending_callbacks(stream)
         assert len(expanded_history) == 1
         assert len(changed_history) == 1
         assert expanded_history[0].max_coords["t"] == range(1)
@@ -78,7 +66,7 @@ def test_coord_events(tmp_path: Path, first_backend: str) -> None:
 
         # Write second frame (t=0, c=1) - new channel, high water mark
         stream.append(frame)
-        _wait_for_pending_callbacks(stream)
+        wait_for_pending_callbacks(stream)
         assert len(expanded_history) == 2
         assert len(changed_history) == 2
         assert expanded_history[1].max_coords["c"] == range(2)
@@ -86,20 +74,22 @@ def test_coord_events(tmp_path: Path, first_backend: str) -> None:
 
         # Write third frame (t=1, c=0) - new timepoint, high water mark
         stream.append(frame)
-        _wait_for_pending_callbacks(stream)
+        wait_for_pending_callbacks(stream)
+        # Hi dev!  See an error here in CI logs?? re-run, or increase BARRIERS!
         assert len(expanded_history) == 3
         assert len(changed_history) == 3
         assert expanded_history[2].max_coords["t"] == range(2)
 
         # Write fourth frame (t=1, c=1) - no new high water mark
         stream.append(frame)
-        _wait_for_pending_callbacks(stream)
+        wait_for_pending_callbacks(stream)
         assert len(expanded_history) == 3  # No new expanded event
         assert len(changed_history) == 4  # But coords_changed fires
 
         # Test skip crossing high water marks
         stream.skip(frames=2)  # Skip to end
-        _wait_for_pending_callbacks(stream)
+        wait_for_pending_callbacks(stream)
+        # Hi dev!  See an error here in CI logs?? re-run, or increase BARRIERS!
         assert len(expanded_history) == 4  # New high water mark at t=2
         assert expanded_history[3].max_coords["t"] == range(3)
 
@@ -178,13 +168,14 @@ def test_coord_tracking_mid_acquisition(tmp_path: Path, first_backend: str) -> N
 
         # Next frame doesn't cross high water mark
         stream.append(frame)  # t=1, c=1
-        _wait_for_pending_callbacks(stream)
+        wait_for_pending_callbacks(stream)
+        # Hi dev!  See an error here in CI logs?? re-run, or increase BARRIERS!
         assert len(expanded_history) == 0  # No expanded event
         assert len(changed_history) == 1  # But coords_changed fires
 
         # This frame crosses to new timepoint - both events triggered
         stream.append(frame)  # t=2, c=0
-        _wait_for_pending_callbacks(stream)
+        wait_for_pending_callbacks(stream)
         assert len(expanded_history) == 1
         assert len(changed_history) == 2
         assert expanded_history[0].max_coords["t"] == range(3)

@@ -12,6 +12,7 @@ from ome_writers import (
     StandardAxis,
     dims_from_standard_axes,
 )
+from ome_writers._schema import OmeTiffFormat, OmeZarrFormat, ScratchFormat
 
 
 def test_schema_unique_dimension_names() -> None:
@@ -544,7 +545,9 @@ def test_storage_order_ome(any_backend: str) -> None:
     assert len(settings.storage_index_dimensions) == 2
     if settings.format.name == "ome-tiff":
         assert not settings.storage_index_permutation  # CTYX is already correct
-    else:
+    elif settings.format.name == "scratch":
+        assert not settings.storage_index_permutation  # scratch uses acquisition order
+    elif settings.format.name == "ome-zarr":
         assert settings.storage_index_permutation == (1, 0)  # CTYX -> TCYX
 
 
@@ -711,3 +714,100 @@ def test_plate_num_wells_or_shape_parameter() -> None:
         Plate.from_standard_wells((0, 4, 2))
     with pytest.raises(ValueError, match=r"with positive integers"):
         Plate.from_standard_wells((0, 4))
+
+
+def test_construct_without_dimensions_or_dtype() -> None:
+    """Test that AcquisitionSettings can be constructed without dimensions/dtype."""
+    settings = AcquisitionSettings(root_path="test.zarr")
+    assert settings.dimensions == ()
+    assert settings.dtype == ""
+
+    # Can also construct with just one of them
+    settings2 = AcquisitionSettings(root_path="test.zarr", dtype="uint16")
+    assert settings2.dimensions == ()
+    assert settings2.dtype == "uint16"
+
+
+def test_validate_stream_ready_raises() -> None:
+    """Test that validate_stream_ready raises when dimensions/dtype missing."""
+    settings = AcquisitionSettings(root_path="test.zarr")
+    with pytest.raises(ValueError, match="dimensions must be set"):
+        settings.validate_stream_ready()
+
+    settings.dimensions = (
+        Dimension(name="y", count=64, type="space"),
+        Dimension(name="x", count=64, type="space"),
+    )
+    with pytest.raises(ValueError, match="dtype must be set"):
+        settings.validate_stream_ready()
+
+    settings.dtype = "uint16"
+    settings.validate_stream_ready()  # should not raise
+
+
+def test_set_dimensions_after_construction() -> None:
+    """Test setting dimensions and dtype after construction."""
+    settings = AcquisitionSettings(root_path="test.zarr")
+
+    settings.dimensions = (
+        Dimension(name="t", count=10, type="time"),
+        Dimension(name="y", count=64, type="space"),
+        Dimension(name="x", count=64, type="space"),
+    )
+    settings.dtype = "uint16"
+
+    # Properties should now work
+    assert settings.shape == (10, 64, 64)
+    assert settings.is_unbounded is False
+    assert settings.num_frames == 10
+
+
+def test_properties_raise_without_dimensions() -> None:
+    """Test that properties raise clear errors when dimensions is None."""
+    settings = AcquisitionSettings(root_path="test.zarr")
+
+    with pytest.raises(ValueError, match="Cannot access 'shape'"):
+        _ = settings.shape
+    with pytest.raises(ValueError, match="Cannot access 'is_unbounded'"):
+        _ = settings.is_unbounded
+    with pytest.raises(ValueError, match="Cannot access 'positions'"):
+        _ = settings.positions
+    with pytest.raises(ValueError, match="Cannot access 'output_path'"):
+        _ = settings.output_path
+
+
+@pytest.mark.parametrize(
+    "kwargs, instance",
+    [
+        ({"format": "scratch"}, ScratchFormat()),
+        ({"format": "memory"}, ScratchFormat()),
+        ({"format": {"name": "scratch"}}, ScratchFormat()),
+        ({"format": "auto", "root_path": ""}, ScratchFormat()),
+        (
+            {"format": "auto", "root_path": "out.ome.tif"},
+            OmeTiffFormat(suffix=".ome.tif"),
+        ),
+        (
+            {"format": "auto", "root_path": "out.zarr"},
+            OmeZarrFormat(suffix=".zarr"),
+        ),
+        (
+            {"format": "zarr-python", "root_path": "out.zarr"},
+            OmeZarrFormat(backend="zarr-python", suffix=".zarr"),
+        ),
+        (
+            {"format": {"name": "ome-zarr"}, "root_path": "out.zarr"},
+            OmeZarrFormat(suffix=".zarr"),
+        ),
+    ],
+)
+def test_format_validation(kwargs: dict[str, object], instance: object) -> None:
+    """Test that format values and root_path inference are accepted."""
+    settings = AcquisitionSettings(**kwargs)
+    assert settings.format == instance
+
+
+def test_format_validation_errors() -> None:
+    """Test that invalid format values raise errors."""
+    with pytest.warns(UserWarning, match="format could not be inferred from root_path"):
+        AcquisitionSettings(format="auto", root_path="plain_dir")

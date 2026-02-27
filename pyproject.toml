@@ -62,7 +62,7 @@ test = [
     "pytest-cov>=7.0.0",
     "yaozarrs[io]>=0.2.4",
     "pytest-xdist>=3.8.0",
-    "useq-schema>=0.8.3",
+    "useq-schema>=0.8.2",
 ]
 # these mirror the extras above
 # but with additional dependencies for testing
@@ -79,11 +79,7 @@ acquire-zarr = [
     "ome-writers[acquire-zarr]",
     "tensorstore>=0.1.78",       # just for read validation in tests
 ]
-tifffile = [
-    { include-group = 'test' },
-    "ome-writers[tifffile]",
-    "zarr>=3.1.5; python_version >= '3.11'", # for live array-preview tests
-]
+tifffile = [{ include-group = 'test' }, "ome-writers[tifffile]"]
 bioformats = [{ include-group = "tifffile" }, "scyjava>=1.12.1"]
 test-codspeed = [
     { include-group = "test" },
@@ -105,7 +101,7 @@ dev = [
     "pytest-benchmark>=5.1.0",
     "prek>=0.2.28",
     "ty>=0.0.12",
-    "useq-schema>=0.8.3",
+    "useq-schema>=0.8.2",
     "pytest-xdist>=3.8.0",
     "typer>=0.22.0",
     "pdbpp>=0.12.0; sys_platform != 'win32'",
@@ -115,10 +111,7 @@ docs = [
     "mkdocstrings-python>=2.0.1",
     "zensical>=0.0.18",
 ]
-pymmcore = [
-    "ndv[pyqt,vispy]>=0.4.1",
-    "pymmcore-plus>=0.17.1",
-]
+pymmcore = ["ndv[pyqt,vispy]>=0.4.1", "pymmcore-plus>=0.17.1"]
 
 [project.urls]
 homepage = "https://github.com/pymmcore-plus/ome-writers"
@@ -179,7 +172,6 @@ show_error_codes = true
 pretty = true
 
 [tool.pyright]
-include = ["src"]
 pythonVersion = "3.10"
 enableExperimentalFeatures = true
 reportArgumentType = false         # tough with pydantic type casting.
@@ -226,4 +218,4 @@ python = "./.venv"
 invalid-argument-type = "ignore"
 unresolved-import = "ignore"
 possibly-missing-attribute = "ignore"
-unresolved-attribute = "ignore"  # Dimension casting by type... hard for ty
+unresolved-attribute = "ignore"       # Dimension casting by type... hard for ty

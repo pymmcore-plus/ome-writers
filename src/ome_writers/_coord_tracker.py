@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import bisect
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from math import prod
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -65,69 +68,147 @@ def high_water_marks(shape: tuple[range | int, ...]) -> dict[int, list[int]]:
     return dict(zip(a, b, strict=False))
 
 
-class _CoordTracker:
-    """Tracks coordinate visibility and detects high water marks."""
+def create_coord_tracker(
+    settings: AcquisitionSettings,
+    initial_frame_count: int = 0,
+) -> CoordTracker:
+    """Factory: return the appropriate CoordTracker subclass."""
+    non_frame_dims = settings.dimensions[:-2]
+    if non_frame_dims and non_frame_dims[0].count is None:
+        return _UnboundedCoordTracker(settings, initial_frame_count)
+    return _BoundedCoordTracker(settings, initial_frame_count)
+
+
+class CoordTracker(ABC):
+    """Tracks coordinate visibility and detects high water marks.
+
+    Use `create_coord_tracker()` to instantiate the appropriate subclass.
+    """
+
+    __slots__ = (
+        "_base_coords",
+        "_current_max_indices",
+        "_frame_dim_dict",
+        "_frames_written",
+        "_needs_current_indices",
+        "_non_frame_dim_names",
+        "_non_frame_dims",
+        "_strides",
+    )
 
     def __init__(
-        self, settings: AcquisitionSettings, initial_frame_count: int = 0
+        self,
+        settings: AcquisitionSettings,
+        initial_frame_count: int = 0,
     ) -> None:
         dims = settings.dimensions
-        self._settings = settings
         self._non_frame_dims = dims[:-2]
 
-        # Compute high water marks for non-frame dimensions
-        non_frame_shape = tuple(d.count or 10000 for d in dims[:-2])
-        self._high_water_marks = high_water_marks(non_frame_shape)
         self._frames_written = initial_frame_count
         self._needs_current_indices = False  # Optimization flag
 
-        # Compute dimension strides for index calculations
-        self._strides = []
-        stride = 1
-        for dim in reversed(self._non_frame_dims):
-            self._strides.append(stride)
-            stride *= dim.count or 10000
-        self._strides.reverse()
-
-        # Initialize current max indices based on initial frame count
-        self._current_max_indices = [-1] * len(non_frame_shape)
-        if initial_frame_count > 0:
-            # Find the highest water mark we've already passed
-            for frame_num in sorted(self._high_water_marks.keys()):
-                if frame_num < initial_frame_count:
-                    self._current_max_indices = self._high_water_marks[frame_num]
-                else:
-                    break
+        # Dimension names for _indices_to_dict
+        self._non_frame_dim_names = [d.name for d in self._non_frame_dims]
+        self._frame_dim_dict = {d.name: 0 for d in dims[-2:]}
 
         # Base coords (frame dims always full range)
-        self._base_coords = {d.name: range(1) for d in dims[:-2]}
-        self._base_coords.update({d.name: range(d.count) for d in dims[-2:]})
+        self._base_coords: dict[Hashable, Sequence] = {
+            d.name: range(1) for d in dims[:-2]
+        }
+        for d in dims[-2:]:
+            self._base_coords[d.name] = range(d.count)
 
-    def _frame_to_indices(self, frame_num: int) -> list[int]:
-        """Convert linear frame index to multi-dimensional indices."""
-        indices = []
-        remaining = frame_num
-        # Iterate in reverse order (last dimension varies fastest)
-        for dim in reversed(self._non_frame_dims):
-            size = dim.count or 10000
-            indices.append(remaining % size)
-            remaining //= size
-        # Reverse to get original dimension order
-        return list(reversed(indices))
-
-    def _indices_to_dict(self, indices: list[int]) -> dict[Hashable, int]:
-        """Convert indices list to dict mapping dimension names to values."""
-        result: dict[Hashable, int] = {}
-        for i, dim in enumerate(self._non_frame_dims):
-            result[dim.name] = indices[i]
-        # Frame dims always at 0 (single plane)
-        for dim in self._settings.dimensions[-2:]:
-            result[dim.name] = 0
-        return result
+        # Initialized by subclasses
+        self._current_max_indices: list[int]
+        self._strides: list[int]
 
     def set_needs_current_indices(self, value: bool) -> None:
         """Configure whether current indices need to be computed."""
         self._needs_current_indices = value
+
+    @abstractmethod
+    def update(self) -> CoordUpdate | None:
+        """Increment frame count and return coordinate state if needed."""
+
+    @abstractmethod
+    def skip(self, frames: int) -> CoordUpdate | None:
+        """Update frame count for skipped frames, return update if HWM crossed."""
+
+    @abstractmethod
+    def _frame_to_indices(self, frame_num: int) -> list[int]:
+        """Convert linear frame index to multi-dimensional indices."""
+
+    def _build_update(self, frame_num: int, is_hwm: bool) -> CoordUpdate | None:
+        """Build a CoordUpdate if needed, or return None."""
+        if not self._needs_current_indices and not is_hwm:
+            return None
+        current_indices = self._frame_to_indices(frame_num)
+        return CoordUpdate(
+            max_coords=self.get_coords(),
+            current_indices=self._indices_to_dict(current_indices),
+            frame_number=frame_num,
+            is_high_water_mark=is_hwm,
+        )
+
+    def _indices_to_dict(self, indices: list[int]) -> dict[Hashable, int]:
+        """Convert indices list to dict mapping dimension names to values."""
+        result: dict[Hashable, int] = dict(
+            zip(self._non_frame_dim_names, indices, strict=False),
+        )
+        result.update(self._frame_dim_dict)
+        return result
+
+    def get_coords(self) -> Mapping[Hashable, Sequence]:
+        """Get mapping of dimension names to visible coordinate ranges."""
+        result = dict(self._base_coords)
+
+        for i, dim in enumerate(self._non_frame_dims):
+            max_idx = self._current_max_indices[i] + 1
+            if dim.coords:
+                result[dim.name] = [c.name for c in dim.coords[:max_idx]]
+            else:
+                result[dim.name] = range(max_idx)
+
+        return result
+
+
+class _BoundedCoordTracker(CoordTracker):
+    """CoordTracker for fully bounded dimensions."""
+
+    __slots__ = ("_high_water_marks", "_sorted_hwm_keys")
+
+    def __init__(
+        self,
+        settings: AcquisitionSettings,
+        initial_frame_count: int = 0,
+    ) -> None:
+        super().__init__(settings, initial_frame_count)
+
+        # Compute high water marks for non-frame dimensions
+        non_frame_counts = tuple(d.count for d in self._non_frame_dims)
+        self._high_water_marks = high_water_marks(non_frame_counts)
+
+        # Sorted keys for bisect range queries in skip()
+        self._sorted_hwm_keys = sorted(self._high_water_marks.keys())
+
+        # Compute dimension strides for index calculations
+        self._strides = []
+        stride = 1
+        for c in reversed(non_frame_counts):
+            stride_before = stride
+            stride *= c  # type: ignore[operator]  # count is int (bounded)
+            self._strides.append(stride_before)
+        self._strides.reverse()
+
+        # Initialize current max indices based on initial frame count
+        self._current_max_indices = [-1] * len(non_frame_counts)
+        if self._frames_written > 0:
+            # Find the highest water mark we've already passed
+            for frame_num in sorted(self._high_water_marks.keys()):
+                if frame_num < self._frames_written:
+                    self._current_max_indices = self._high_water_marks[frame_num]
+                else:
+                    break
 
     def update(self) -> CoordUpdate | None:
         """Increment frame count and return coordinate state if needed.
@@ -143,18 +224,7 @@ class _CoordTracker:
         if is_hwm:
             self._current_max_indices = self._high_water_marks[frame_num]
 
-        # Skip computation if not needed (only COORDS_EXPANDED and not HWM)
-        if not self._needs_current_indices and not is_hwm:
-            return None
-
-        # Compute full update (only when needed)
-        current_indices = self._frame_to_indices(frame_num)
-        return CoordUpdate(
-            max_coords=self.get_coords(),
-            current_indices=self._indices_to_dict(current_indices),
-            frame_number=frame_num,
-            is_high_water_mark=is_hwm,
-        )
+        return self._build_update(frame_num, is_hwm)
 
     def skip(self, frames: int) -> CoordUpdate | None:
         """Update frame count for skipped frames, return update if HWM crossed."""
@@ -163,36 +233,173 @@ class _CoordTracker:
         self._frames_written = end_idx
 
         # Check if we crossed any high water marks
-        crossed_marks = [
-            (idx, marks)
-            for idx, marks in self._high_water_marks.items()
-            if start_idx <= idx < end_idx
-        ]
+        lo = bisect.bisect_left(self._sorted_hwm_keys, start_idx)
+        hi = bisect.bisect_left(self._sorted_hwm_keys, end_idx)
 
-        if crossed_marks:
+        if lo < hi:
             # Update to the highest mark we crossed
-            _, self._current_max_indices = max(crossed_marks, key=lambda x: x[0])
+            highest_key = self._sorted_hwm_keys[hi - 1]
+            self._current_max_indices = self._high_water_marks[highest_key]
 
             # Use the end position as "current"
-            current_indices = self._frame_to_indices(end_idx - 1)
-
-            return CoordUpdate(
-                max_coords=self.get_coords(),
-                current_indices=self._indices_to_dict(current_indices),
-                frame_number=end_idx - 1,
-                is_high_water_mark=True,
-            )
+            return self._build_update(end_idx - 1, is_hwm=True)
         return None
 
-    def get_coords(self) -> Mapping[Hashable, Sequence]:
-        """Get mapping of dimension names to visible coordinate ranges."""
-        result = dict(self._base_coords)
+    def _frame_to_indices(self, frame_num: int) -> list[int]:
+        """Convert linear frame index to multi-dimensional indices."""
+        n = len(self._strides)
+        indices = [0] * n
+        remaining = frame_num
+        for j in range(n):
+            indices[j], remaining = divmod(remaining, self._strides[j])
+        return indices
 
-        for i, dim in enumerate(self._non_frame_dims):
-            max_idx = self._current_max_indices[i] + 1
-            if dim.coords:
-                result[dim.name] = [c.name for c in dim.coords[:max_idx]]
-            else:
-                result[dim.name] = range(max_idx)
 
-        return cast("Mapping[Hashable, Sequence]", result)
+class _UnboundedCoordTracker(CoordTracker):
+    """CoordTracker for streams with an unbounded first dimension."""
+
+    __slots__ = ("_inner_hwms", "_inner_product", "_max_inner_hwm_vals")
+
+    def __init__(
+        self,
+        settings: AcquisitionSettings,
+        initial_frame_count: int = 0,
+    ) -> None:
+        super().__init__(settings, initial_frame_count)
+
+        inner_dims = self._non_frame_dims[1:]
+        # Inner dims are always bounded, so count is never None
+        inner_counts = tuple(d.count for d in inner_dims)
+
+        # Product of all bounded (inner) non-frame dim counts
+        self._inner_product: int = prod(inner_counts)  # type: ignore[arg-type]
+
+        # HWMs for the inner dims only (these are bounded and precomputable)
+        self._inner_hwms = high_water_marks(inner_counts)
+
+        # Element-wise max of all inner HWM values (for full-cycle skip optimization)
+        self._max_inner_hwm_vals: list[int] | None = None
+        if self._inner_hwms:
+            max_vals = [0] * len(inner_counts)
+            for vals in self._inner_hwms.values():
+                for i, v in enumerate(vals):
+                    max_vals[i] = max(max_vals[i], v)
+            self._max_inner_hwm_vals = max_vals
+
+        # Strides for inner dims
+        self._strides = []
+        stride = 1
+        for c in reversed(inner_counts):
+            stride_before = stride
+            stride *= c  # type: ignore[operator]  # count is int (bounded)
+            self._strides.append(stride_before)
+        self._strides.reverse()
+
+        # current_max_indices: [outer_max, inner0_max, inner1_max, ...]
+        self._current_max_indices = [-1] * (1 + len(inner_counts))
+
+        if self._frames_written > 0:
+            self._init_max_indices()
+
+    def _init_max_indices(self) -> None:
+        """Set current_max_indices from initial_frame_count."""
+        fc = self._frames_written
+        self._current_max_indices[0] = (fc - 1) // self._inner_product
+
+        # If we've completed at least one full cycle, all inner dims are maxed
+        if fc >= self._inner_product:
+            for i, d in enumerate(self._non_frame_dims[1:]):
+                self._current_max_indices[i + 1] = d.count - 1  # type: ignore[operator]  # bounded
+        else:
+            # Inner dims: find highest HWM <= (fc - 1) % inner_product
+            inner_offset = (fc - 1) % self._inner_product if self._inner_product else 0
+            for frame_num in sorted(self._inner_hwms.keys()):
+                if frame_num <= inner_offset:
+                    for i, val in enumerate(self._inner_hwms[frame_num]):
+                        self._current_max_indices[i + 1] = val
+                else:
+                    break
+
+    def _check_hwm(self, frame_num: int) -> bool:
+        """Check if frame_num is a HWM. Mutates _current_max_indices in place."""
+        is_hwm = False
+        max_indices = self._current_max_indices
+
+        # Outer dim: frame_num // inner_product
+        outer_idx = frame_num // self._inner_product
+        if outer_idx > max_indices[0]:
+            max_indices[0] = outer_idx
+            is_hwm = True
+
+        # Inner dims: look up frame_num % inner_product in inner HWM table
+        inner_offset = frame_num % self._inner_product
+        if inner_offset in self._inner_hwms:
+            inner_vals = self._inner_hwms[inner_offset]
+            for i, val in enumerate(inner_vals):
+                if val > max_indices[i + 1]:
+                    max_indices[i + 1] = val
+                    is_hwm = True
+
+        return is_hwm
+
+    def update(self) -> CoordUpdate | None:
+        """Increment frame count and return coordinate state if needed."""
+        frame_num = self._frames_written
+        self._frames_written += 1
+
+        is_hwm = self._check_hwm(frame_num)
+        return self._build_update(frame_num, is_hwm)
+
+    def skip(self, frames: int) -> CoordUpdate | None:
+        """Update frame count for skipped frames, return update if HWM crossed."""
+        start_idx = self._frames_written
+        end_idx = start_idx + frames
+        self._frames_written = end_idx
+
+        is_hwm = False
+        max_indices = self._current_max_indices
+
+        # Outer dim: check if (end_idx - 1) // inner_product > current max
+        outer_end = (end_idx - 1) // self._inner_product
+        if outer_end > max_indices[0]:
+            max_indices[0] = outer_end
+            is_hwm = True
+
+        # No inner dims → only the outer dim matters
+        if not self._inner_hwms:
+            if is_hwm:
+                return self._build_update(end_idx - 1, is_hwm=True)
+            return None  # pragma: no cover
+
+        # If range spans >= inner_product, all inner HWMs are hit
+        if self._max_inner_hwm_vals is not None and (
+            end_idx - start_idx >= self._inner_product
+        ):
+            for i, val in enumerate(self._max_inner_hwm_vals):
+                if val > max_indices[i + 1]:
+                    max_indices[i + 1] = val
+                    is_hwm = True
+        else:
+            for f in range(start_idx, end_idx):
+                inner_offset = f % self._inner_product
+                if inner_offset in self._inner_hwms:
+                    for i, val in enumerate(self._inner_hwms[inner_offset]):
+                        if val > max_indices[i + 1]:
+                            max_indices[i + 1] = val
+                            is_hwm = True
+
+        if is_hwm:
+            return self._build_update(end_idx - 1, is_hwm=True)
+        return None  # pragma: no cover
+
+    def _frame_to_indices(self, frame_num: int) -> list[int]:
+        """Convert linear frame index to multi-dimensional indices."""
+        # Outer dim uses direct division (no modulo for unbounded)
+        outer_idx = frame_num // self._inner_product
+        inner_offset = frame_num % self._inner_product
+        indices = [outer_idx]
+        remaining = inner_offset
+        for stride in self._strides:
+            indices.append(remaining // stride)
+            remaining %= stride
+        return indices

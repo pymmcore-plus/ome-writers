@@ -9,6 +9,8 @@ icon: lucide/file-text
   biological image data.
 - [OME-Zarr](zarr.md) - A next-generation file format for bioimaging data based
   on the Zarr specification.
+- [Scratch Arrays](scratch.md) - Lightweight in-memory (or disk-backed) array
+  storage for testing, previewing, and real-time visualization.
 
 Selecting and output formats is as simple as changing the target
 [`AcquisitionSettings.root_path`][ome_writers.AcquisitionSettings] to end in

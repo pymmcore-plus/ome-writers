@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import threading
 import warnings
+import weakref
 from contextlib import suppress
 from dataclasses import dataclass
 from itertools import count
@@ -15,6 +16,7 @@ import numpy as np
 
 from ome_writers._backends._backend import ArrayBackend
 from ome_writers._backends._ome_xml import prepare_metadata
+from ome_writers._backends._tiff_array import FinalizedTiffArray, LiveTiffArray
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -101,7 +103,7 @@ class PositionManager:
                 first, *inner = index_dims
                 # Calculate actual size of outermost dimension
                 inner_prod = math.prod([d.count or 1 for d in inner])
-                actual_outer_size = self.thread.frames_written // inner_prod
+                actual_outer_size = max(1, self.thread.frames_written // inner_prod)
                 setattr(pixels, f"size_{first.name.lower()}", actual_outer_size)
 
             # Update plane count
@@ -307,68 +309,60 @@ class TiffBackend(ArrayBackend):
             self._finalized = True
 
     def get_arrays(self) -> list[ArrayLike]:
-        """Return zarr arrays backed by TIFF files or LiveTiffStore.
+        """Return array-like objects backed by TIFF files.
 
-        If finalized: Returns arrays backed by complete TIFF files (via aszarr).
-        If not finalized: Returns arrays backed by LiveTiffStore (live viewing).
+        If finalized and fully written: returns ``FinalizedTiffArray`` objects
+        that read through *tifffile*'s page API (supports compression).
+
+        Otherwise (live viewing, finalized-partial, or zero-frame): returns
+        ``LiveTiffArray`` objects that read raw bytes at calculated offsets
+        (requires uncompressed / contiguous writes).
 
         Returns
         -------
         list[ArrayLike]
-            List of zarr arrays (one per TIFF file)
+            List of array-like objects (one per TIFF file).
         """
-        try:
-            import zarr
-
-            from ome_writers._backends._live_tiff_store import LiveTiffStore
-        except ImportError as e:
-            raise ImportError(
-                f"{self.__class__.__name__}.get_arrays() requires zarr: "
-            ) from e
 
         if not self._position_managers:  # pragma: no cover
             raise RuntimeError("Backend not prepared. Call prepare() first.")
 
-        arrays = []
+        arrays: list[ArrayLike] = []
+        storage_dims = cast("tuple[Dimension]", self._storage_dims)
         for _, manager in sorted(self._position_managers.items()):
             if not manager.metadata_mirror.is_tiff:  # pragma: no cover
                 continue  # Skip companion-only entries
 
             path = manager.file_path
-            # Choose Store based on finalization state
+            thread = manager.thread
+            assert thread is not None, f"No WriterThread for {path}"
+
             if self._finalized:
-                # FINALIZED: Use complete TIFF file via aszarr
-                store = tifffile.TiffFile(path).aszarr()
-            else:
-                # LIVE: Use LiveTiffStore for incomplete file
-                if manager.thread is None:  # pragma: no cover
-                    raise RuntimeError(f"No WriterThread for {path}")
+                frames_written = thread.frames_written
+                shape = tuple(d.count or 1 for d in storage_dims)
+                expected_frames = math.prod(shape[:-2] or (1,))
+                if frames_written >= expected_frames and frames_written > 0:
+                    # Fully written: read via tifffile pages (compression OK)
+                    tf = tifffile.TiffFile(path)
+                    arr = FinalizedTiffArray(tf, shape, self._dtype)
+                    weakref.finalize(arr, tf.close)
+                    arrays.append(arr)
+                    continue
 
-                # Check if compression is enabled (LiveTiffStore won't work)
-                if manager.thread._compression is not None:  # pragma: no cover
-                    raise NotImplementedError(
-                        "Live viewing is not supported with compression enabled."
-                    )
-
-                storage_dims = cast("tuple[Dimension]", self._storage_dims)
-                # Calculate full shape from storage dimensions
-                # Use large default for unbounded
-                shape = tuple(d.count or 1000 for d in storage_dims)
-
-                # Chunks are single frames (1 for each non-spatial dim, full Y,X)
-                # (regardless of the settings used during for tiff writing, currently)
-                chunks = tuple(1 for _ in storage_dims[:-2]) + self._frame_shape
-
-                store = LiveTiffStore(
-                    writer_thread=manager.thread,
-                    file_path=path,
-                    shape=shape,
-                    dtype=self._dtype,
-                    chunks=chunks,
-                    fill_value=0,
+            # Everything else needs raw byte access (uncompressed)
+            if thread._compression is not None:
+                raise NotImplementedError(
+                    "Tiff viewing is not supported with compression enabled."
                 )
 
-            arrays.append(zarr.open(store, mode="r"))
+            arrays.append(
+                LiveTiffArray(
+                    writer_thread=thread,
+                    file_path=path,
+                    storage_dims=storage_dims,
+                    dtype=self._dtype,
+                )
+            )
 
         return arrays
 

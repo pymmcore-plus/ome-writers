@@ -81,8 +81,16 @@ use:
 uv run --exact --only-group <backend> pytest
 ```
 
-where `<backend>` is one of `tensorstore`, `acquire-zarr`, or `tifffile` (or any
-future added backend.)
+where `<backend>` is one of:
+
+- `tensorstore`
+- `acquire-zarr`
+- `tifffile`
+- `zarr-python`
+- `zarrs-python`
+- `scratch`
+
+(or any future added backend.)
 
 ### Pre-commit (linting and formatting)
 
