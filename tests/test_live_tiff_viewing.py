@@ -10,11 +10,7 @@ import pytest
 from ome_writers import AcquisitionSettings, Dimension, create_stream
 
 try:
-    from ome_writers._backends._tiff_array import (
-        FinalizedTiffArray,
-        LiveTiffArray,
-        _compute_strides,
-    )
+    from ome_writers._backends._tiff_array import FinalizedTiffArray, LiveTiffArray
 except ImportError:
     pytest.skip(
         "LiveTiffArray tests require tifffile dependency",
@@ -161,12 +157,12 @@ def test_live_viewing_with_compression_raises_error(tmp_path: Path) -> None:
             stream.view()
 
 
-def test_compute_strides() -> None:
+def test_compute_index_strides() -> None:
     """Test stride computation for row-major ordering."""
-    assert _compute_strides((10, 5, 2)) == (10, 2, 1)
-    assert _compute_strides((3, 4)) == (4, 1)
-    assert _compute_strides((100,)) == (1,)
-    assert _compute_strides(()) == ()
+    assert LiveTiffArray._compute_index_strides((10, 5, 2)) == (10, 2, 1)
+    assert LiveTiffArray._compute_index_strides((3, 4)) == (4, 1)
+    assert LiveTiffArray._compute_index_strides((100,)) == (1,)
+    assert LiveTiffArray._compute_index_strides(()) == ()
 
 
 def test_tiff_view_on_empty_closed_stream(tmp_path: Path) -> None:
@@ -262,7 +258,7 @@ def test_tiff_view_on_partial_finalized_compressed_stream_raises(
 
 
 def test_tiff_view_on_empty_finalized_compressed_stream(tmp_path: Path) -> None:
-    """Zero-frame finalized compressed TIFF returns expected-shape zeros."""
+    """Zero-frame finalized compressed TIFF raises (no raw byte access)."""
     settings = AcquisitionSettings(
         root_path=tmp_path / "empty_compressed.ome.tiff",
         dimensions=[
@@ -277,9 +273,8 @@ def test_tiff_view_on_empty_finalized_compressed_stream(tmp_path: Path) -> None:
     )
     stream = create_stream(settings)
     stream.close()
-    view = stream.view(dynamic_shape=False)
-    assert view.shape == tuple(d.count for d in settings.dimensions)
-    assert np.allclose(view[:], 0)
+    with pytest.raises(NotImplementedError, match="not supported with compression"):
+        stream.view(dynamic_shape=False)
 
 
 def test_unbounded_live_tiff_shape(tmp_path: Path) -> None:

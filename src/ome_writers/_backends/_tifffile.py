@@ -16,6 +16,7 @@ import numpy as np
 
 from ome_writers._backends._backend import ArrayBackend
 from ome_writers._backends._ome_xml import prepare_metadata
+from ome_writers._backends._tiff_array import FinalizedTiffArray, LiveTiffArray
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -317,14 +318,11 @@ class TiffBackend(ArrayBackend):
         ``LiveTiffArray`` objects that read raw bytes at calculated offsets
         (requires uncompressed / contiguous writes).
 
-        No zarr dependency is required.
-
         Returns
         -------
         list[ArrayLike]
             List of array-like objects (one per TIFF file).
         """
-        from ome_writers._backends._tiff_array import FinalizedTiffArray, LiveTiffArray
 
         if not self._position_managers:  # pragma: no cover
             raise RuntimeError("Backend not prepared. Call prepare() first.")
@@ -342,30 +340,21 @@ class TiffBackend(ArrayBackend):
             if self._finalized:
                 frames_written = thread.frames_written
                 shape = tuple(d.count or 1 for d in storage_dims)
+                expected_frames = math.prod(shape[:-2] or (1,))
+                if frames_written >= expected_frames and frames_written > 0:
+                    # Fully written: read via tifffile pages (compression OK)
+                    tf = tifffile.TiffFile(path)
+                    arr = FinalizedTiffArray(tf, shape, self._dtype)
+                    weakref.finalize(arr, tf.close)
+                    arrays.append(arr)
+                    continue
 
-                if frames_written > 0:
-                    expected_frames = math.prod(shape[:-2] or (1,))
-                    if frames_written >= expected_frames:
-                        # Fully written: read via tifffile pages (compression OK)
-                        tf = tifffile.TiffFile(path)
-                        arr: ArrayLike = FinalizedTiffArray(tf, shape, self._dtype)
-                        weakref.finalize(arr, tf.close)
-                        arrays.append(arr)
-                        continue
+            # Everything else needs raw byte access (uncompressed)
+            if thread._compression is not None:
+                raise NotImplementedError(
+                    "Tiff viewing is not supported with compression enabled."
+                )
 
-                    # Partially written + compressed → unsupported
-                    if thread._compression is not None:
-                        raise NotImplementedError(
-                            "Tiff viewing is not supported with compression enabled."
-                        )
-            else:
-                # Live viewing: must be uncompressed (contiguous layout)
-                if thread._compression is not None:
-                    raise NotImplementedError(
-                        "Tiff viewing is not supported with compression enabled."
-                    )
-
-            # Live, finalized-partial (uncompressed), or zero-frame
             arrays.append(
                 LiveTiffArray(
                     writer_thread=thread,
