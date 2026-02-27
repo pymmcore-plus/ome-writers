@@ -790,6 +790,9 @@ class ScratchFormat(_BaseModel):
             "`spill_to_disk` is True, otherwise a `MemoryError` will be raised."
         ),
     )
+    suffix: str = Field(
+        default="", description="File suffix to disk-backed scratch files."
+    )
     spill_to_disk: bool = Field(
         default=True,
         description="Whether to spill to disk when memory limit is exceeded, "
@@ -832,7 +835,9 @@ def _cast_format(value: Any) -> Any:
 
 
 Format: TypeAlias = Annotated[
-    OmeTiffFormat | OmeZarrFormat | ScratchFormat, BeforeValidator(_cast_format)
+    OmeTiffFormat | OmeZarrFormat | ScratchFormat,
+    BeforeValidator(_cast_format),
+    Field(discriminator="name"),
 ]
 
 
@@ -1233,6 +1238,7 @@ class AcquisitionSettings(_BaseModel):
             elif fmt == "auto":
                 # root_path & suffix-based inference
                 if root == "":
+                    # the only valid format that doesn't require a root_path is scratch
                     data["format"] = {"name": "scratch"}
                 elif suffix.endswith((".tiff", ".tif")):
                     data["format"] = {"name": "ome-tiff", "suffix": suffix}

@@ -38,7 +38,6 @@ repos:
         pass_filenames: false
 
       - id: pyright
-        stages: [manual]
         exclude: "^docs/|^tests/|^examples/"
         name: pyright
         language: system

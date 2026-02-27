@@ -43,7 +43,7 @@ def test_acquire_zarr_full_streaming_support(tmp_path: Path) -> None:
         for bit in append_bits:
             stream.append(bit)
 
-    output_data = read_array_data(f"{settings.output_path}/0")
+    output_data = read_array_data(settings.output_path)
     assert output_data.shape == (18, 128, 128)
     assert output_data.dtype == np.dtype(settings.dtype)
     assert np.array_equal(output_data.flatten(), flat_data)

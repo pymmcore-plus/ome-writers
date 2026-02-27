@@ -8,9 +8,12 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from ome_writers import AcquisitionSettings, Position, dims_from_standard_axes
-from ome_writers._array_view import AcquisitionView
-from ome_writers._stream import create_stream
+from ome_writers import (
+    AcquisitionSettings,
+    Position,
+    create_stream,
+    dims_from_standard_axes,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -45,7 +48,7 @@ def test_basic_write_and_read() -> None:
 def test_acquisition_view_compatibility() -> None:
     settings = _make_settings()
     with create_stream(settings) as stream:
-        view = AcquisitionView.from_stream(stream)
+        view = stream.view(dynamic_shape=False)
 
         frame = np.ones((8, 8), dtype="uint16") * 7
         for _ in range(6):
@@ -317,7 +320,7 @@ def test_unbounded_with_tempdir(tmp_path: Path) -> None:
 
 
 def test_acquisition_view_unbounded() -> None:
-    """AcquisitionView.from_stream skips unbounded for now, but get_arrays works."""
+    """Views work on unbounded streams."""
     dims = dims_from_standard_axes({"t": None, "c": 2, "y": 8, "x": 8})
     settings = _make_settings(dimensions=dims)
 
@@ -329,6 +332,11 @@ def test_acquisition_view_unbounded() -> None:
         # get_arrays works and shows live shape
         assert arrays[0].shape == (2, 2, 8, 8)
         assert np.all(arrays[0][0, 0] == 0)
+
+        # View works on unbounded stream
+        view = stream.view(dynamic_shape=False)
+        assert view.shape == (2, 2, 8, 8)
+        assert np.all(view[0, 0] == 0)
 
 
 def test_logical_bounds_guard() -> None:

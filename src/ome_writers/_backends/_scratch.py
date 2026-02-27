@@ -10,7 +10,7 @@ import tempfile
 import warnings
 from contextlib import suppress
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -21,10 +21,13 @@ from ome_writers._schema import ScratchFormat
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from io import IOBase
+    from typing import Any, Final, Literal
 
     from ome_writers._backends._backend import ArrayLike
     from ome_writers._router import FrameRouter
     from ome_writers._schema import AcquisitionSettings
+
+MANIFEST: Final = "manifest.json"
 
 
 class ScratchBackend(ArrayBackend):
@@ -70,7 +73,7 @@ class ScratchBackend(ArrayBackend):
         self._unbounded_axes = [i for i, d in enumerate(dims) if d.count is None]
 
         if settings.root_path:
-            self._root_path = Path(settings.root_path)
+            self._root_path = Path(settings.output_path)
             if self._root_path.exists():
                 if not settings.overwrite:
                     raise FileExistsError(
@@ -162,9 +165,31 @@ class ScratchBackend(ArrayBackend):
                 if isinstance(arr, np.memmap):
                     arr.flush()
             self._write_manifest()
+            # Release all memmap file handles so files can be deleted/overwritten.
+            # Critical on Windows where open memmaps prevent file deletion.
+            # NOTE: this is inside of _root_path check, so purely in-memory mode
+            # retains arrays for get_arrays() after finalize.
+            self._arrays.clear()
 
     def get_arrays(self) -> Sequence[ArrayLike]:
+        if self._finalized and not self._arrays and self._root_path:
+            return self._reopen_arrays()
         return [_ScratchArrayView(self, i) for i in range(len(self._arrays))]
+
+    def _reopen_arrays(self) -> Sequence[ArrayLike]:
+        """Re-open memmap files read-only from disk after finalization."""
+        assert self._root_path is not None
+        manifest = json.loads((self._root_path / MANIFEST).read_text())
+        dtype = np.dtype(manifest["dtype"])
+        return [
+            np.memmap(
+                self._root_path / f"pos_{i}.dat",
+                dtype=dtype,
+                mode="r",
+                shape=tuple(shape),
+            )
+            for i, shape in enumerate(manifest["position_shapes"])
+        ]
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -249,10 +274,8 @@ class ScratchBackend(ArrayBackend):
         """Write manifest.json alongside memmap files."""
         if self._root_path is None:
             return
-        self._settings_dump["position_shapes"] = [
-            self._logical_shapes[i] for i in range(len(self._arrays))
-        ]
-        (self._root_path / "manifest.json").write_text(json.dumps(self._settings_dump))
+        self._settings_dump["position_shapes"] = list(self._logical_shapes)
+        (self._root_path / MANIFEST).write_text(json.dumps(self._settings_dump))
 
 
 class _ScratchArrayView:
@@ -270,12 +293,18 @@ class _ScratchArrayView:
 
     @property
     def dtype(self) -> np.dtype:
-        return self._backend._arrays[self._pos_idx].dtype
+        if self._backend._arrays:
+            return self._backend._arrays[self._pos_idx].dtype
+        # After finalize, arrays are cleared; re-open to get dtype.
+        return self._backend._reopen_arrays()[self._pos_idx].dtype
 
     def __setitem__(self, key: Any, value: Any) -> None:
         raise TypeError("_ScratchArrayView is read-only")
 
     def __getitem__(self, key: Any) -> Any:
+        if not self._backend._arrays:
+            # After finalize, arrays are cleared; delegate to re-opened view.
+            return self._backend._reopen_arrays()[self._pos_idx][key]
         arr = self._backend._arrays[self._pos_idx]
         if self._backend._unbounded_axes:
             # Clip to logical shape so over-allocated backing storage is hidden
