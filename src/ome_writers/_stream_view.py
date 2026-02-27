@@ -116,10 +116,6 @@ class StreamView:
             outside the live bounds.
         """
         settings = stream._settings
-        if settings.is_unbounded:  # pragma: no cover
-            raise NotImplementedError(
-                "Creating a view on an unbounded stream is not currently supported."
-            )
 
         # Compute acquisition order permutation from settings
         # this is the permutation required to convert the storage_order arrays
@@ -141,8 +137,11 @@ class StreamView:
         for dim in settings.dimensions:
             if dim.coords:
                 full_coords[dim.name] = [getattr(c, "name", c) for c in dim.coords]
-            else:
+            elif dim.count is not None:
                 full_coords[dim.name] = range(dim.count)
+            else:
+                # Unbounded dim: placeholder; overwritten below for both modes
+                full_coords[dim.name] = range(0)
         view._coords_data = full_coords
 
         if dynamic_shape:
@@ -154,6 +153,10 @@ class StreamView:
             coords = stream._coord_tracker.get_coords()
             view._coords_data = dict(coords)
             view._shape_override = tuple(len(coords[d]) for d in view._dims)
+        elif settings.is_unbounded:
+            # dynamic_shape=False + unbounded: use current array extent
+            arr_shape = view._acq_shape(stream._backend.get_arrays()[0].shape)
+            full_coords[view._dims[0]] = range(arr_shape[0])
 
         return view
 

@@ -260,8 +260,6 @@ class OMEStream:
 
         Raises
         ------
-        NotImplementedError
-            If the stream is unbounded (i.e. has an unlimited first dimension).
         ValueError
             If the backend does not support providing a view, for whatever reason.
             (This would be a bug in the backend implementation, open an issue.)
