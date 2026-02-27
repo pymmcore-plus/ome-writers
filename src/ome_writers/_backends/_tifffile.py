@@ -103,7 +103,7 @@ class PositionManager:
                 first, *inner = index_dims
                 # Calculate actual size of outermost dimension
                 inner_prod = math.prod([d.count or 1 for d in inner])
-                actual_outer_size = self.thread.frames_written // inner_prod
+                actual_outer_size = max(1, self.thread.frames_written // inner_prod)
                 setattr(pixels, f"size_{first.name.lower()}", actual_outer_size)
 
             # Update plane count
