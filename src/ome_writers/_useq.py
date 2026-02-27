@@ -457,16 +457,28 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
             grid = None
 
         if grid:
-            for gp in grid:
-                # if this line ever raises an exception,
-                # break it into two parts:
-                # 1. create position, 2. try to add coords, suppressing errors.
-                pos_sum = pos + gp  # pyright: ignore[reportOperatorIssue]
+            for gp_idx, gp in enumerate(grid):
+                # position from relative grid plans (e.g GridRowsColumns, RandomPoints)
+                # can be added to pos, position from absolute grid plans (e.g.
+                # GridFromEdges, GridFromPolygon) should be used directly.
+                pos_sum = (
+                    pos + gp  # pyright: ignore[reportOperatorIssue]
+                    if gp.is_relative
+                    else gp
+                )
+                # When there is no row/col (e.g. RandomPoints), append an index to the
+                # name so each sub-position is unique
+                grid_row, grid_col = getattr(gp, "row", None), getattr(gp, "col", None)
+                pos_name = (
+                    name
+                    if grid_row is not None or grid_col is not None
+                    else f"{name}_{gp_idx:04d}"
+                )
                 positions.append(
                     Position(
-                        name=name,
-                        grid_row=getattr(gp, "row", None),
-                        grid_column=getattr(gp, "col", None),
+                        name=pos_name,
+                        grid_row=grid_row,
+                        grid_column=grid_col,
                         x_coord=pos_sum.x,
                         y_coord=pos_sum.y,
                         z_coord=pos_sum.z,
