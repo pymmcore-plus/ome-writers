@@ -10,6 +10,7 @@ import pytest
 from ome_writers import AcquisitionSettings, Dimension, create_stream
 
 try:
+    from ome_writers._backends import _tifffile  # noqa: F401
     from ome_writers._backends._tiff_array import FinalizedTiffArray, LiveTiffArray
 except ImportError:
     pytest.skip(
