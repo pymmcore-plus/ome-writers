@@ -59,7 +59,7 @@ def high_water_marks(shape: tuple[range | int, ...]) -> dict[int, list[int]]:
         if v_lo <= v_hi:
             arrays.append(np.arange(v_lo, v_hi + 1) * st)
 
-    if not arrays:  # pragma: no cover
+    if not arrays:
         return {}
 
     bump_indices = np.unique(np.concatenate(arrays))
@@ -69,7 +69,8 @@ def high_water_marks(shape: tuple[range | int, ...]) -> dict[int, list[int]]:
 
 
 def create_coord_tracker(
-    settings: AcquisitionSettings, initial_frame_count: int = 0
+    settings: AcquisitionSettings,
+    initial_frame_count: int = 0,
 ) -> CoordTracker:
     """Factory: return the appropriate CoordTracker subclass."""
     non_frame_dims = settings.dimensions[:-2]
@@ -96,7 +97,9 @@ class CoordTracker(ABC):
     )
 
     def __init__(
-        self, settings: AcquisitionSettings, initial_frame_count: int = 0
+        self,
+        settings: AcquisitionSettings,
+        initial_frame_count: int = 0,
     ) -> None:
         dims = settings.dimensions
         self._non_frame_dims = dims[:-2]
@@ -104,7 +107,7 @@ class CoordTracker(ABC):
         self._frames_written = initial_frame_count
         self._needs_current_indices = False  # Optimization flag
 
-        # Precompute dimension names for hot-path _indices_to_dict
+        # Dimension names for _indices_to_dict
         self._non_frame_dim_names = [d.name for d in self._non_frame_dims]
         self._frame_dim_dict = {d.name: 0 for d in dims[-2:]}
 
@@ -150,7 +153,7 @@ class CoordTracker(ABC):
     def _indices_to_dict(self, indices: list[int]) -> dict[Hashable, int]:
         """Convert indices list to dict mapping dimension names to values."""
         result: dict[Hashable, int] = dict(
-            zip(self._non_frame_dim_names, indices, strict=False)
+            zip(self._non_frame_dim_names, indices, strict=False),
         )
         result.update(self._frame_dim_dict)
         return result
@@ -175,7 +178,9 @@ class _BoundedCoordTracker(CoordTracker):
     __slots__ = ("_high_water_marks", "_sorted_hwm_keys")
 
     def __init__(
-        self, settings: AcquisitionSettings, initial_frame_count: int = 0
+        self,
+        settings: AcquisitionSettings,
+        initial_frame_count: int = 0,
     ) -> None:
         super().__init__(settings, initial_frame_count)
 
@@ -183,7 +188,7 @@ class _BoundedCoordTracker(CoordTracker):
         non_frame_counts = tuple(d.count for d in self._non_frame_dims)
         self._high_water_marks = high_water_marks(non_frame_counts)
 
-        # Sorted keys for O(log n) range queries in skip()
+        # Sorted keys for bisect range queries in skip()
         self._sorted_hwm_keys = sorted(self._high_water_marks.keys())
 
         # Compute dimension strides for index calculations
@@ -227,7 +232,7 @@ class _BoundedCoordTracker(CoordTracker):
         end_idx = start_idx + frames
         self._frames_written = end_idx
 
-        # O(log n) range query instead of O(n) scan
+        # Check if we crossed any high water marks
         lo = bisect.bisect_left(self._sorted_hwm_keys, start_idx)
         hi = bisect.bisect_left(self._sorted_hwm_keys, end_idx)
 
@@ -238,7 +243,7 @@ class _BoundedCoordTracker(CoordTracker):
 
             # Use the end position as "current"
             return self._build_update(end_idx - 1, is_hwm=True)
-        return None  # pragma: no cover
+        return None
 
     def _frame_to_indices(self, frame_num: int) -> list[int]:
         """Convert linear frame index to multi-dimensional indices."""
@@ -256,7 +261,9 @@ class _UnboundedCoordTracker(CoordTracker):
     __slots__ = ("_inner_hwms", "_inner_product", "_max_inner_hwm_vals")
 
     def __init__(
-        self, settings: AcquisitionSettings, initial_frame_count: int = 0
+        self,
+        settings: AcquisitionSettings,
+        initial_frame_count: int = 0,
     ) -> None:
         super().__init__(settings, initial_frame_count)
 
@@ -270,14 +277,13 @@ class _UnboundedCoordTracker(CoordTracker):
         # HWMs for the inner dims only (these are bounded and precomputable)
         self._inner_hwms = high_water_marks(inner_counts)
 
-        # Precompute element-wise max of all inner HWM values
+        # Element-wise max of all inner HWM values (for full-cycle skip optimization)
         self._max_inner_hwm_vals: list[int] | None = None
         if self._inner_hwms:
             max_vals = [0] * len(inner_counts)
             for vals in self._inner_hwms.values():
                 for i, v in enumerate(vals):
-                    if v > max_vals[i]:
-                        max_vals[i] = v
+                    max_vals[i] = max(max_vals[i], v)
             self._max_inner_hwm_vals = max_vals
 
         # Strides for inner dims
