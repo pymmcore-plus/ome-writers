@@ -308,30 +308,28 @@ class TiffBackend(ArrayBackend):
             self._finalized = True
 
     def get_arrays(self) -> list[ArrayLike]:
-        """Return zarr arrays backed by TIFF files or LiveTiffStore.
+        """Return array-like objects backed by TIFF files.
 
-        If finalized: Returns arrays backed by complete TIFF files (via aszarr).
-        If not finalized: Returns arrays backed by LiveTiffStore (live viewing).
+        If finalized and fully written: returns ``FinalizedTiffArray`` objects
+        that read through *tifffile*'s page API (supports compression).
+
+        Otherwise (live viewing, finalized-partial, or zero-frame): returns
+        ``LiveTiffArray`` objects that read raw bytes at calculated offsets
+        (requires uncompressed / contiguous writes).
+
+        No zarr dependency is required.
 
         Returns
         -------
         list[ArrayLike]
-            List of zarr arrays (one per TIFF file)
+            List of array-like objects (one per TIFF file).
         """
-        try:
-            import zarr
-
-            from ome_writers._backends._live_tiff_store import LiveTiffStore
-        except ImportError as e:
-            raise ImportError(
-                "zarr v3 (and therefore python>=3.11) is required for live-viewing tiff"
-                " data. Please install with 'pip install ome-writers[tifffile,zarr]'."
-            ) from e
+        from ome_writers._backends._tiff_array import FinalizedTiffArray, LiveTiffArray
 
         if not self._position_managers:  # pragma: no cover
             raise RuntimeError("Backend not prepared. Call prepare() first.")
 
-        arrays = []
+        arrays: list[ArrayLike] = []
         storage_dims = cast("tuple[Dimension]", self._storage_dims)
         for _, manager in sorted(self._position_managers.items()):
             if not manager.metadata_mirror.is_tiff:  # pragma: no cover
@@ -344,34 +342,39 @@ class TiffBackend(ArrayBackend):
             if self._finalized:
                 frames_written = thread.frames_written
                 shape = tuple(d.count or 1 for d in storage_dims)
-                if frames_written == 0:
-                    zarray = zarr.create(shape, dtype=self._dtype, fill_value=0)
-                    arrays.append(zarray)
-                    continue
 
-                expected_frames = math.prod(shape[:-2] or (1,))
-                if frames_written >= expected_frames:
-                    # Fully written: use aszarr (supports compression)
-                    tf = tifffile.TiffFile(path)
-                    zarray = zarr.open(tf.aszarr(), mode="r")
-                    weakref.finalize(zarray, tf.close)
-                    arrays.append(zarray)
-                    continue
+                if frames_written > 0:
+                    expected_frames = math.prod(shape[:-2] or (1,))
+                    if frames_written >= expected_frames:
+                        # Fully written: read via tifffile pages (compression OK)
+                        tf = tifffile.TiffFile(path)
+                        arr: ArrayLike = FinalizedTiffArray(tf, shape, self._dtype)
+                        weakref.finalize(arr, tf.close)
+                        arrays.append(arr)
+                        continue
 
-            # LiveTiffStore: live viewing OR finalized partial uncompressed
-            if thread._compression is not None:
-                raise NotImplementedError(
-                    "Tiff viewing is not supported with compression enabled."
+                    # Partially written + compressed → unsupported
+                    if thread._compression is not None:
+                        raise NotImplementedError(
+                            "Tiff viewing is not supported with compression "
+                            "enabled."
+                        )
+            else:
+                # Live viewing: must be uncompressed (contiguous layout)
+                if thread._compression is not None:
+                    raise NotImplementedError(
+                        "Tiff viewing is not supported with compression enabled."
+                    )
+
+            # Live, finalized-partial (uncompressed), or zero-frame
+            arrays.append(
+                LiveTiffArray(
+                    writer_thread=thread,
+                    file_path=path,
+                    storage_dims=storage_dims,
+                    dtype=self._dtype,
                 )
-            store = LiveTiffStore(
-                writer_thread=thread,
-                file_path=path,
-                shape=tuple(d.count or 1000 for d in storage_dims),
-                dtype=self._dtype,
-                chunks=tuple(1 for _ in storage_dims[:-2]) + self._frame_shape,
-                fill_value=0,
             )
-            arrays.append(zarr.open(store, mode="r"))
 
         return arrays
 
