@@ -54,21 +54,13 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from typing import Any, Literal, Protocol
+    from typing import Any, Literal
 
     import numpy as np
 
     from ome_writers._router import FrameRouter
     from ome_writers._schema import AcquisitionSettings
-
-    class ArrayLike(Protocol):
-        """Protocol for array-like objects supporting shape and indexing."""
-
-        @property
-        def shape(self) -> tuple[int, ...]: ...
-        def __getitem__(self, key: Any, /) -> Any: ...
-        @property
-        def dtype(self) -> Any: ...
+    from ome_writers._stream_view import ArrayLike
 
 
 class ArrayBackend(ABC):

@@ -6,16 +6,24 @@ import numpy as np
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
-    from typing import Any, SupportsIndex, TypeAlias, TypeVar
+    from typing import Any, Protocol, SupportsIndex, TypeAlias, TypeVar
 
     from typing_extensions import Self
 
-    from ome_writers._backends._backend import ArrayLike
     from ome_writers._coord_tracker import CoordUpdate
     from ome_writers._stream import OMEStream
 
     Index: TypeAlias = SupportsIndex | slice
     F = TypeVar("F", bound=Callable[..., Any])
+
+    class ArrayLike(Protocol):
+        """Protocol for array-like objects supporting shape and indexing."""
+
+        @property
+        def shape(self) -> tuple[int, ...]: ...
+        @property
+        def dtype(self) -> Any: ...
+        def __getitem__(self, key: Index | tuple[Index, ...], /) -> np.ndarray: ...
 
 
 class _SimpleSignalInstance:

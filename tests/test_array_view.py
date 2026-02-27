@@ -49,10 +49,6 @@ def test_array_view(tmp_path: Path, dim_order: str, any_backend: str) -> None:
 
     This tests all 24 permutations of (t, p, c, z) with y, x always at the end.
     """
-    if any_backend == "tifffile":
-        pytest.importorskip(
-            "zarr", reason="tifffile backend requires zarr for array view"
-        )
     if any_backend == "acquire-zarr":
         pytest.skip("acquire-zarr doesn't support read-only views")
 
