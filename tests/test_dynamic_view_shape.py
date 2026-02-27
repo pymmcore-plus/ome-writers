@@ -207,6 +207,11 @@ def test_non_live_full_shape(tmp_path: Path, first_backend: str) -> None:
 
 # ---- Unbounded stream tests ----
 
+UNBOUNDED_T_DIMS = [
+    Dimension(name="t", count=None, type="time"),
+    Dimension(name="y", count=16, type="space"),
+    Dimension(name="x", count=16, type="space"),
+]
 UNBOUNDED_TC_DIMS = [
     Dimension(name="t", count=None, type="time"),
     Dimension(name="c", count=2, type="channel"),
@@ -258,12 +263,9 @@ def test_unbounded_non_dynamic_shape() -> None:
 
 def test_unbounded_single_dim_dynamic() -> None:
     """(None, y, x) — every frame is a HWM."""
-    dims = [
-        Dimension(name="t", count=None, type="time"),
-        Dimension(name="y", count=16, type="space"),
-        Dimension(name="x", count=16, type="space"),
-    ]
-    settings = AcquisitionSettings(format="scratch", dimensions=dims, dtype="uint16")
+    settings = AcquisitionSettings(
+        format="scratch", dimensions=UNBOUNDED_T_DIMS, dtype="uint16"
+    )
 
     with create_stream(settings) as stream:
         view = stream.view(dynamic_shape=True)
@@ -278,12 +280,9 @@ def test_unbounded_single_dim_dynamic() -> None:
 
 def test_unbounded_skip_no_inner_dims() -> None:
     """skip() on (None, y, x) — no inner dims, only outer dim matters."""
-    dims = [
-        Dimension(name="t", count=None, type="time"),
-        Dimension(name="y", count=16, type="space"),
-        Dimension(name="x", count=16, type="space"),
-    ]
-    settings = AcquisitionSettings(format="scratch", dimensions=dims, dtype="uint16")
+    settings = AcquisitionSettings(
+        format="scratch", dimensions=UNBOUNDED_T_DIMS, dtype="uint16"
+    )
 
     with create_stream(settings) as stream:
         view = stream.view(dynamic_shape=True)
@@ -334,47 +333,39 @@ def test_unbounded_skip_partial_cycle() -> None:
         assert view.shape == (1, 2, 16, 16)
 
 
-def test_unbounded_mid_acquisition_full_cycle() -> None:
-    """Mid-acquisition view on unbounded stream after full inner cycle."""
+@pytest.mark.parametrize(
+    "n_frames, expected_shape, expected_t, expected_c",
+    [
+        (6, (3, 2, 16, 16), range(3), range(2)),  # full cycle
+        (1, (1, 1, 16, 16), range(1), range(1)),  # partial cycle
+    ],
+    ids=["full_cycle", "partial_cycle"],
+)
+def test_unbounded_mid_acquisition(
+    n_frames: int,
+    expected_shape: tuple[int, ...],
+    expected_t: range,
+    expected_c: range,
+) -> None:
+    """Mid-acquisition view picks up correct state from frames already written."""
     settings = AcquisitionSettings(
         format="scratch", dimensions=UNBOUNDED_TC_DIMS, dtype="uint16"
     )
     with create_stream(settings) as stream:
-        # Write 6 frames (3t * 2c) before creating view
-        for _ in range(6):
+        for _ in range(n_frames):
             stream.append(FRAME)
 
-        # Creating view mid-acquisition triggers _init_unbounded_max_indices
-        # with fc=6 >= inner_product=2 (full cycle branch)
         view = stream.view(dynamic_shape=True)
-        assert view.shape == (3, 2, 16, 16)
-        assert view.coords["t"] == range(3)
-        assert view.coords["c"] == range(2)
-
-
-def test_unbounded_mid_acquisition_partial_cycle() -> None:
-    """Mid-acquisition view on unbounded stream before full inner cycle."""
-    settings = AcquisitionSettings(
-        format="scratch", dimensions=UNBOUNDED_TC_DIMS, dtype="uint16"
-    )
-    with create_stream(settings) as stream:
-        # Write 1 frame (fc=1 < inner_product=2, partial cycle branch)
-        stream.append(FRAME)
-
-        view = stream.view(dynamic_shape=True)
-        assert view.shape == (1, 1, 16, 16)
-        assert view.coords["t"] == range(1)
-        assert view.coords["c"] == range(1)
+        assert view.shape == expected_shape
+        assert view.coords["t"] == expected_t
+        assert view.coords["c"] == expected_c
 
 
 def test_unbounded_many_frames() -> None:
     """Verify works beyond old 10000 sentinel."""
-    dims = [
-        Dimension(name="t", count=None, type="time"),
-        Dimension(name="y", count=16, type="space"),
-        Dimension(name="x", count=16, type="space"),
-    ]
-    settings = AcquisitionSettings(format="scratch", dimensions=dims, dtype="uint16")
+    settings = AcquisitionSettings(
+        format="scratch", dimensions=UNBOUNDED_T_DIMS, dtype="uint16"
+    )
     n_frames = 100
 
     with create_stream(settings) as stream:
