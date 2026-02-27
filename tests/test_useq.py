@@ -84,6 +84,8 @@ SEQ_CASES = [
             stage_positions=[
                 useq.Position(x=0.0, y=0.0, name="single_pos"),
                 useq.Position(
+                    x=0.0,
+                    y=0.0,
                     name="grid",
                     sequence=useq.MDASequence(grid_plan={"rows": 1, "columns": 2}),
                 ),
