@@ -50,6 +50,13 @@ class TiffArrayBase(abc.ABC):
 
         if not isinstance(key, tuple):
             key = (key,)
+        if len(key) > ndim:  # pragma: no cover
+            # this is only reached by directly indexing the array but all end-user and
+            # tests only access this via StreamView, which already performs this check
+            raise IndexError(
+                f"too many indices for array: array is {ndim}-dimensional, "
+                f"but {len(key)} were indexed"
+            )
         key = key + (slice(None),) * (ndim - len(key))
 
         n_index = self._n_index
@@ -60,6 +67,10 @@ class TiffArrayBase(abc.ABC):
             k = key[i]
             if isinstance(k, int):
                 v = k if k >= 0 else shape[i] + k
+                if v < 0 or v >= shape[i]:
+                    raise IndexError(
+                        f"index {k} is out of bounds for axis {i} with size {shape[i]}"
+                    )
                 idx_ranges.append([v])
             elif isinstance(k, slice):
                 idx_ranges.append(list(range(*k.indices(shape[i]))))
@@ -211,6 +222,6 @@ class FinalizedTiffArray(TiffArrayBase):
     def _read_frame(self, flat_idx: int) -> np.ndarray:
         """Read a single frame by its flat index via tifffile pages."""
         pages = self._tf.pages
-        if flat_idx < len(pages):
+        if 0 <= flat_idx < len(pages):
             return pages[flat_idx].asarray()
         return np.zeros(self._frame_shape, dtype=self._dtype_obj)  # pragma: no cover

@@ -284,7 +284,13 @@ class StreamView:
         """Get item(s) from the view using integer and slice indexing."""
         # Normalize key to full tuple with slices
         keys = key if isinstance(key, tuple) else (key,)
-        keys = keys + (slice(None),) * (self.ndim - len(keys))
+        ndim = self.ndim
+        if len(keys) > ndim:
+            raise IndexError(
+                f"too many indices for array: array is {ndim}-dimensional, "
+                f"but {len(keys)} were indexed"
+            )
+        keys = keys + (slice(None),) * (ndim - len(keys))
 
         # Strict bounds check for dynamic_shape mode
         if self._strict_bounds and (live := self._shape_override) is not None:
@@ -338,7 +344,14 @@ class StreamView:
         self, pos: SupportsIndex, key: tuple[Index, ...], kept: tuple[bool, ...]
     ) -> np.ndarray:
         # Normalize negative indices for backends like TensorStore
-        arr = self._arrays[pos]
+        pos_i = int(pos)
+        n_arrays = len(self._arrays)
+        pos_i = pos_i if pos_i >= 0 else n_arrays + pos_i
+        if pos_i < 0 or pos_i >= n_arrays:
+            raise IndexError(
+                f"Position index {pos} is out of bounds for size {n_arrays}"
+            )
+        arr = self._arrays[pos_i]
         normed_key = tuple(_norm_index(*x) for x in zip(key, arr.shape, strict=False))
         result = np.asarray(arr[normed_key] if normed_key else arr[:])
 

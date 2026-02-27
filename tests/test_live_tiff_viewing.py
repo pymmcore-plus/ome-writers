@@ -322,3 +322,77 @@ def test_unbounded_live_tiff_shape(tmp_path: Path) -> None:
 
         wait_for_frames(stream._backend, expected_count=6)
         assert arrays[0].shape == (3, 2, 16, 16)
+
+
+def test_live_view_indexing_errors(tmp_path: Path) -> None:
+    """Live TIFF view raises IndexError for malformed/out-of-range indexing."""
+    settings = AcquisitionSettings(
+        root_path=tmp_path / "live_indexing_errors",
+        dimensions=[
+            Dimension(name="t", count=3, chunk_size=1, type="time"),
+            Dimension(name="c", count=2, chunk_size=1, type="channel"),
+            Dimension(name="y", count=8, chunk_size=8, type="space"),
+            Dimension(name="x", count=8, chunk_size=8, type="space"),
+        ],
+        dtype="uint16",
+        format="tifffile",
+        overwrite=True,
+    )
+
+    with create_stream(settings) as stream:
+        view = stream.view(dynamic_shape=False)
+        for i in range(6):
+            stream.append(np.full((8, 8), i, np.uint16))
+        wait_for_frames(stream._backend, expected_count=6)
+        wait_for_pending_callbacks(stream)
+
+        with pytest.raises(IndexError):
+            _ = view[-10, 0]
+        with pytest.raises(IndexError):
+            _ = view[10, 0]
+        with pytest.raises(IndexError):
+            _ = view[0, 0, 0, 0, 0, 0]
+
+
+def test_finalized_and_multiposition_indexing_errors(tmp_path: Path) -> None:
+    """Finalized and multiposition TIFF views raise IndexError when out of bounds."""
+    finalized_settings = AcquisitionSettings(
+        root_path=tmp_path / "finalized_too_negative.ome.tiff",
+        dimensions=[
+            Dimension(name="t", count=3, chunk_size=1, type="time"),
+            Dimension(name="y", count=8, chunk_size=8, type="space"),
+            Dimension(name="x", count=8, chunk_size=8, type="space"),
+        ],
+        dtype="uint16",
+        format="tifffile",
+        compression="lzw",
+        overwrite=True,
+    )
+
+    with create_stream(finalized_settings) as stream:
+        for i in range(3):
+            stream.append(np.full((8, 8), i + 1, np.uint16))
+
+    finalized_view = stream.view(dynamic_shape=False)
+    with pytest.raises(IndexError):
+        _ = finalized_view[-10]
+
+    multipos_settings = AcquisitionSettings(
+        root_path=tmp_path / "multipos_out_of_bounds",
+        dimensions=[
+            Dimension(name="p", type="position", coords=["pos0", "pos1"]),
+            Dimension(name="t", count=1, chunk_size=1, type="time"),
+            Dimension(name="y", count=8, chunk_size=8, type="space"),
+            Dimension(name="x", count=8, chunk_size=8, type="space"),
+        ],
+        dtype="uint16",
+        format="tifffile",
+        overwrite=True,
+    )
+
+    with create_stream(multipos_settings) as stream:
+        multipos_view = stream.view(dynamic_shape=False)
+        with pytest.raises(IndexError, match="Position index"):
+            _ = multipos_view[2, 0]
+        with pytest.raises(IndexError, match="Position index"):
+            _ = multipos_view[-3, 0]
