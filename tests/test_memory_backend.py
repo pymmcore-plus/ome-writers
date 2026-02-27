@@ -320,7 +320,7 @@ def test_unbounded_with_tempdir(tmp_path: Path) -> None:
 
 
 def test_acquisition_view_unbounded() -> None:
-    """AcquisitionView.from_stream skips unbounded for now, but get_arrays works."""
+    """Views work on unbounded streams."""
     dims = dims_from_standard_axes({"t": None, "c": 2, "y": 8, "x": 8})
     settings = _make_settings(dimensions=dims)
 
@@ -332,6 +332,11 @@ def test_acquisition_view_unbounded() -> None:
         # get_arrays works and shows live shape
         assert arrays[0].shape == (2, 2, 8, 8)
         assert np.all(arrays[0][0, 0] == 0)
+
+        # View works on unbounded stream
+        view = stream.view(dynamic_shape=False)
+        assert view.shape == (2, 2, 8, 8)
+        assert np.all(view[0, 0] == 0)
 
 
 def test_logical_bounds_guard() -> None:

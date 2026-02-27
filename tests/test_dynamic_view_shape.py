@@ -203,3 +203,177 @@ def test_non_live_full_shape(tmp_path: Path, first_backend: str) -> None:
         assert view.shape == (3, 2, 16, 16)
         stream.append(FRAME)
         assert view.shape == (3, 2, 16, 16)
+
+
+# ---- Unbounded stream tests ----
+
+UNBOUNDED_T_DIMS = [
+    Dimension(name="t", count=None, type="time"),
+    Dimension(name="y", count=16, type="space"),
+    Dimension(name="x", count=16, type="space"),
+]
+UNBOUNDED_TC_DIMS = [
+    Dimension(name="t", count=None, type="time"),
+    Dimension(name="c", count=2, type="channel"),
+    Dimension(name="y", count=16, type="space"),
+    Dimension(name="x", count=16, type="space"),
+]
+
+
+def test_unbounded_dynamic_shape(tmp_path: Path, first_backend: str) -> None:
+    """Shape grows from (0,0,16,16) as frames are written with dynamic_shape."""
+    with create_stream(_settings(tmp_path, first_backend, UNBOUNDED_TC_DIMS)) as stream:
+        view = stream.view(dynamic_shape=True)
+
+        # Initial: zero for non-frame dims
+        assert view.shape == (0, 0, 16, 16)
+
+        expected = [
+            # (shape_after, t_coords, c_coords)
+            ((1, 1, 16, 16), range(1), range(1)),  # t=0, c=0 -> HWM
+            ((1, 2, 16, 16), range(1), range(2)),  # t=0, c=1 -> HWM (c grows)
+            ((2, 2, 16, 16), range(2), range(2)),  # t=1, c=0 -> HWM (t grows)
+            ((2, 2, 16, 16), range(2), range(2)),  # t=1, c=1 -> no HWM
+            ((3, 2, 16, 16), range(3), range(2)),  # t=2, c=0 -> HWM (t grows)
+        ]
+        for shape, t_range, c_range in expected:
+            stream.append(FRAME)
+            wait_for_pending_callbacks(stream)
+            assert view.shape == shape
+            assert view.coords["t"] == t_range
+            assert view.coords["c"] == c_range
+
+
+def test_unbounded_non_dynamic_shape() -> None:
+    """dynamic_shape=False uses current array extent for unbounded dims."""
+    settings = AcquisitionSettings(
+        format="scratch",
+        dimensions=UNBOUNDED_TC_DIMS,
+        dtype="uint16",
+    )
+    with create_stream(settings) as stream:
+        for _ in range(6):  # 3 timepoints * 2 channels
+            stream.append(FRAME)
+
+        view = stream.view(dynamic_shape=False)
+        assert view.shape == (3, 2, 16, 16)
+        assert view.coords["t"] == range(3)
+        assert view.coords["c"] == range(2)
+
+
+def test_unbounded_single_dim_dynamic() -> None:
+    """(None, y, x) — every frame is a HWM."""
+    settings = AcquisitionSettings(
+        format="scratch", dimensions=UNBOUNDED_T_DIMS, dtype="uint16"
+    )
+
+    with create_stream(settings) as stream:
+        view = stream.view(dynamic_shape=True)
+        assert view.shape == (0, 16, 16)
+
+        for i in range(5):
+            stream.append(FRAME)
+            wait_for_pending_callbacks(stream)
+            assert view.shape == (i + 1, 16, 16)
+            assert view.coords["t"] == range(i + 1)
+
+
+def test_unbounded_skip_no_inner_dims() -> None:
+    """skip() on (None, y, x) — no inner dims, only outer dim matters."""
+    settings = AcquisitionSettings(
+        format="scratch", dimensions=UNBOUNDED_T_DIMS, dtype="uint16"
+    )
+
+    with create_stream(settings) as stream:
+        view = stream.view(dynamic_shape=True)
+
+        stream.append(FRAME)  # t=0
+        wait_for_pending_callbacks(stream)
+        assert view.shape == (1, 16, 16)
+
+        stream.skip(frames=5)  # skip t=1..5
+        wait_for_pending_callbacks(stream)
+        assert view.shape == (6, 16, 16)
+        assert view.coords["t"] == range(6)
+
+
+def test_unbounded_skip_full_cycle() -> None:
+    """skip() spanning >= inner_product hits all inner HWMs at once."""
+    settings = AcquisitionSettings(
+        format="scratch", dimensions=UNBOUNDED_TC_DIMS, dtype="uint16"
+    )
+    with create_stream(settings) as stream:
+        view = stream.view(dynamic_shape=True)
+
+        # Skip a full cycle (inner_product=2): should max out both t and c
+        stream.skip(frames=2)
+        wait_for_pending_callbacks(stream)
+        assert view.shape == (1, 2, 16, 16)
+        assert view.coords["t"] == range(1)
+        assert view.coords["c"] == range(2)
+
+
+def test_unbounded_skip_partial_cycle() -> None:
+    """skip() spanning < inner_product scans individual frames."""
+    settings = AcquisitionSettings(
+        format="scratch", dimensions=UNBOUNDED_TC_DIMS, dtype="uint16"
+    )
+    with create_stream(settings) as stream:
+        view = stream.view(dynamic_shape=True)
+
+        # Skip 1 frame (< inner_product=2): only c=0 seen
+        stream.skip(frames=1)
+        wait_for_pending_callbacks(stream)
+        assert view.shape == (1, 1, 16, 16)
+        assert view.coords["c"] == range(1)
+
+        # Skip 1 more: c=1 seen, still t=0
+        stream.skip(frames=1)
+        wait_for_pending_callbacks(stream)
+        assert view.shape == (1, 2, 16, 16)
+
+
+@pytest.mark.parametrize(
+    "n_frames, expected_shape, expected_t, expected_c",
+    [
+        (6, (3, 2, 16, 16), range(3), range(2)),  # full cycle
+        (1, (1, 1, 16, 16), range(1), range(1)),  # partial cycle
+    ],
+    ids=["full_cycle", "partial_cycle"],
+)
+def test_unbounded_mid_acquisition(
+    n_frames: int,
+    expected_shape: tuple[int, ...],
+    expected_t: range,
+    expected_c: range,
+) -> None:
+    """Mid-acquisition view picks up correct state from frames already written."""
+    settings = AcquisitionSettings(
+        format="scratch", dimensions=UNBOUNDED_TC_DIMS, dtype="uint16"
+    )
+    with create_stream(settings) as stream:
+        for _ in range(n_frames):
+            stream.append(FRAME)
+
+        view = stream.view(dynamic_shape=True)
+        assert view.shape == expected_shape
+        assert view.coords["t"] == expected_t
+        assert view.coords["c"] == expected_c
+
+
+def test_unbounded_many_frames() -> None:
+    """Verify works beyond old 10000 sentinel."""
+    settings = AcquisitionSettings(
+        format="scratch", dimensions=UNBOUNDED_T_DIMS, dtype="uint16"
+    )
+    n_frames = 100
+
+    with create_stream(settings) as stream:
+        view = stream.view(dynamic_shape=True)
+
+        for _ in range(n_frames):
+            stream.append(FRAME)
+
+        wait_for_pending_callbacks(stream)
+        assert view.shape == (n_frames, 16, 16)
+        assert view.coords["t"] == range(n_frames)
