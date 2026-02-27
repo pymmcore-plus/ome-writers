@@ -311,9 +311,11 @@ class OMEStream:
 
         if self._coord_tracker is None:
             # Lazy init - only create when first handler registered
-            from ome_writers._coord_tracker import CoordTracker
+            from ome_writers._coord_tracker import create_coord_tracker
 
-            self._coord_tracker = CoordTracker(self._settings, self._frames_written)
+            self._coord_tracker = create_coord_tracker(
+                self._settings, self._frames_written
+            )
 
         if self._callback_executor is None:
             self._callback_executor = ThreadPoolExecutor(

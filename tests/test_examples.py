@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-SKIP_EXAMPLES = {"pymmcore_plus_example.py", "ndv_viewer_example.py"}
+SKIP_EXAMPLES = {
+    "pymmcore_plus_example.py",
+    "ndv_viewer_example.py",
+    "ndv_unbounded_example.py",
+}
 
 EXAMPLE_DIR = Path(__file__).parent.parent / "examples"
 EXAMPLES = [p for p in sorted(EXAMPLE_DIR.glob("*.py")) if p.name not in SKIP_EXAMPLES]
