@@ -135,8 +135,8 @@ SEQ_CASES = [
         ),
         expected_dim_names=["p", "t", "c", "y", "x"],  # Position dim should be created
         expected_positions=[
-            ExpectedPosition(name="0000", grid_row=0, grid_col=0, has_coords=False),
-            ExpectedPosition(name="0001", grid_row=0, grid_col=1, has_coords=False),
+            ExpectedPosition(name="0000", grid_row=0, grid_col=0),
+            ExpectedPosition(name="0001", grid_row=0, grid_col=1),
         ],
         id="grid_only_no_position",
     ),

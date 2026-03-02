@@ -369,6 +369,9 @@ def _build_positions(seq: useq.MDASequence) -> list[Position]:
                 name=f"{i:04d}",
                 grid_row=getattr(gp, "row", None),
                 grid_column=getattr(gp, "col", None),
+                x_coord=gp.x,
+                y_coord=gp.y,
+                z_coord=gp.z,
             )
             for i, gp in enumerate(seq.grid_plan)
         ]
