@@ -1235,7 +1235,8 @@ class AcquisitionSettings(_BaseModel):
             _, suffix = _ome_stem_suffix(root)
             fmt = data.get("format", "auto")
             if isinstance(fmt, dict):
-                fmt.setdefault("suffix", suffix)
+                if suffix:
+                    fmt.setdefault("suffix", suffix)
             elif fmt == "auto":
                 # root_path & suffix-based inference
                 if root == "":
