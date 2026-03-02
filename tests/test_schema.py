@@ -799,6 +799,16 @@ def test_properties_raise_without_dimensions() -> None:
             {"format": {"name": "ome-zarr"}, "root_path": "out.zarr"},
             OmeZarrFormat(suffix=".zarr"),
         ),
+        # When root_path has no extension and format is a dict, the format's
+        # default suffix should be used (not overridden with empty string).
+        (
+            {"format": {"name": "ome-tiff"}, "root_path": "/tmp/test_noext"},
+            OmeTiffFormat(),
+        ),
+        (
+            {"format": {"name": "ome-zarr"}, "root_path": "/tmp/test_noext"},
+            OmeZarrFormat(),
+        ),
     ],
 )
 def test_format_validation(kwargs: dict[str, object], instance: object) -> None:
