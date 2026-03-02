@@ -26,6 +26,7 @@ class ExpectedPosition:
     plate_col: str | None = None
     grid_row: int | None = None
     grid_col: int | None = None
+    has_coords: bool = True  # check for presence of x/y coordinates
 
 
 @dataclass
@@ -134,8 +135,8 @@ SEQ_CASES = [
         ),
         expected_dim_names=["p", "t", "c", "y", "x"],  # Position dim should be created
         expected_positions=[
-            ExpectedPosition(name="0000", grid_row=0, grid_col=0),
-            ExpectedPosition(name="0001", grid_row=0, grid_col=1),
+            ExpectedPosition(name="0000", grid_row=0, grid_col=0, has_coords=False),
+            ExpectedPosition(name="0001", grid_row=0, grid_col=1, has_coords=False),
         ],
         id="grid_only_no_position",
     ),
@@ -286,7 +287,7 @@ SEQ_CASES = [
     Case(
         seq=useq.MDASequence(
             axis_order="pgtc",
-            stage_positions=[useq.Position(x=1, y=2, z=3, name="rp_pos")],
+            stage_positions=[useq.Position(z=3, name="rp")],
             grid_plan=useq.RandomPoints(
                 num_points=3,
                 max_width=100,
@@ -298,9 +299,9 @@ SEQ_CASES = [
         ),
         expected_dim_names=["p", "c", "y", "x"],
         expected_positions=[
-            ExpectedPosition(name="rp_pos_0000"),
-            ExpectedPosition(name="rp_pos_0001"),
-            ExpectedPosition(name="rp_pos_0002"),
+            ExpectedPosition(name="rp_0000"),
+            ExpectedPosition(name="rp_0001"),
+            ExpectedPosition(name="rp_0002"),
         ],
         id="random_points_with_stage_position",
     ),
@@ -308,7 +309,7 @@ SEQ_CASES = [
     Case(
         seq=useq.MDASequence(
             axis_order="gc",
-            stage_positions=[(1, 2, 3)],
+            stage_positions=[useq.Position(x=1, y=2, z=3, name="rp")],
             grid_plan=useq.RandomPoints(
                 num_points=3,
                 max_width=100,
@@ -320,9 +321,9 @@ SEQ_CASES = [
         ),
         expected_dim_names=["p", "c", "y", "x"],
         expected_positions=[
-            ExpectedPosition(name="0_0000", grid_row=None, grid_col=None),
-            ExpectedPosition(name="0_0001", grid_row=None, grid_col=None),
-            ExpectedPosition(name="0_0002", grid_row=None, grid_col=None),
+            ExpectedPosition(name="rp_0000"),
+            ExpectedPosition(name="rp_0001"),
+            ExpectedPosition(name="rp_0002"),
         ],
         id="random_points_grid",
     ),
@@ -393,6 +394,9 @@ def test_useq_to_dims(case: Case) -> None:
         assert pos.plate_column == exp_pos.plate_col
         assert pos.grid_row == exp_pos.grid_row
         assert pos.grid_column == exp_pos.grid_col
+        if exp_pos.has_coords:
+            assert pos.x_coord is not None
+            assert pos.y_coord is not None
 
 
 # Ragged dimension test cases
