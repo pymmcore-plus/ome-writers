@@ -85,9 +85,21 @@ def _dims_from_useq(
     units = units or {}
     chunk_shapes = chunk_shapes or {}
     shard_shapes = shard_shapes or {}
+
+    # Compute sizes and used_axes, handling unbounded time plans
+    try:
+        sizes: dict[str, int | None] = dict(seq.sizes)
+        used_axes = seq.used_axes
+    except ZeroDivisionError:
+        # Unbounded time (e.g., TIntervalDuration with interval=0)
+        # NOTE: this logic will change with useq.v2
+        stripped = seq.model_copy(update={"time_plan": None})
+        sizes = dict(stripped.sizes)
+        sizes[Axis.TIME] = None
+        used_axes = stripped.used_axes + Axis.TIME
+
     dims: list[Dimension] = []
     position_dim_added = False
-    used_axes = seq.used_axes
 
     # Check if we have position-like content even if 'p' is not in used_axes
     # (e.g., grid_plan creates positions but may only show 'g' in used_axes)
@@ -112,7 +124,7 @@ def _dims_from_useq(
         # Build dimension for t, c, z
         std_axis = StandardAxis(str(ax_name))
         dim = std_axis.to_dimension(
-            count=seq.sizes[ax_name],
+            count=sizes[ax_name],
             scale=1,
             chunk_size=chunk_shapes.get(ax_name),
             shard_size_chunks=shard_shapes.get(ax_name),
@@ -180,9 +192,6 @@ def useq_to_acquisition_settings(
 
     - Position and grid axes must be adjacent in axis_order (e.g., `"pgcz"`, not
       `"pcgz"`).
-    - When both `stage_positions` and `grid_plan` are specified, position must come
-      before grid in axis_order (e.g., "pgtcz" not "gptcz"). Grid-first order is only
-      supported when using `grid_plan` alone without `stage_positions`.
     - Position subsequences may only contain a `grid_plan`, not time/channel/z-plans.
       Different positions *may* have different grid shapes.
     - If `stage_positions` is a `WellPlatePlan`, it cannot be
@@ -194,7 +203,8 @@ def useq_to_acquisition_settings(
     - All channels must have the same `do_stack` value when a z_plan is present.
     - All channels must have `acquire_every=1`. Skipping timepoints on some channels
       creates ragged dimensions.
-    - Unbounded time plans (duration-based plans with interval=0) are not supported.
+    - Unbounded time plans (duration-based with interval=0) produce a time dimension
+      with `count=None`.
 
     Parameters
     ----------
@@ -269,17 +279,6 @@ def _validate_sequence(seq: useq.MDASequence) -> None:
     """
     from useq import Axis, WellPlatePlan
 
-    # Check for unbounded dimensions (e.g., DurationInterval with interval=0)
-    try:
-        _ = seq.sizes
-    except ZeroDivisionError:
-        raise NotImplementedError(
-            "Failed to determine dimension sizes from sequence. "
-            "This usually happens when the sequence has unbounded dimensions "
-            "(e.g. time_plan with duration and interval=0). "
-            "Unbounded useq sequences are not yet supported."
-        ) from None
-
     # Check P/G adjacency in axis_order
     if Axis.POSITION in seq.axis_order and Axis.GRID in seq.axis_order:
         p_idx = seq.axis_order.index(Axis.POSITION)
@@ -330,19 +329,6 @@ def _validate_sequence(seq: useq.MDASequence) -> None:
                     )
                 if sub.grid_plan:
                     pass
-
-    # Check grid-first ordering when both positions and grid exist
-    has_both = bool(seq.stage_positions) and seq.grid_plan is not None
-    if has_both and Axis.GRID in seq.axis_order and Axis.POSITION in seq.axis_order:
-        g_idx = seq.axis_order.index(Axis.GRID)
-        p_idx = seq.axis_order.index(Axis.POSITION)
-        if g_idx < p_idx:
-            raise NotImplementedError(
-                "Grid-first ordering (grid before position in axis_order) is not "
-                "supported when both stage_positions and grid_plan are specified. "
-                "Change axis_order so position comes before grid "
-                "(e.g., 'pgtcz' instead of 'gptcz')."
-            )
 
 
 def _build_positions(seq: useq.MDASequence) -> list[Position]:
@@ -434,59 +420,66 @@ def _row_idx_to_letter(index: int) -> str:
     return name
 
 
+def _pos_with_grid_point(name: str, pos: useq.Position, gp: useq.Position) -> Position:
+    """Create a Position by combining a stage position with a grid point."""
+    # position from relative grid plans (e.g GridRowsColumns, RandomPoints)
+    # can be added to pos, position from absolute grid plans (e.g.
+    # GridFromEdges, GridFromPolygon) should be used directly.
+    pos_sum = (
+        pos + gp  # type: ignore
+        if gp.is_relative
+        else gp
+    )
+    # When there is no row/col (e.g. RandomPoints), append an index to the
+    # name so each sub-position is unique
+    grid_row, grid_col = getattr(gp, "row", None), getattr(gp, "col", None)
+    return Position(
+        name=name,
+        grid_row=grid_row,
+        grid_column=grid_col,
+        x_coord=pos_sum.x,
+        y_coord=pos_sum.y,
+        z_coord=pos_sum.z,
+    )
+
+
 def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
-    """Build positions from stage_positions with optional grid plans.
+    """Build positions from stage_positions with optional grid plans."""
+    from useq import Axis
 
-    Handles three cases:
-    - Positions with subsequence grids (use subsequence grid)
-    - Positions without subsequence but with global grid (use global grid)
-    - Positions without any grid (single position)
-
-    Always iterates position-first (grid-first with positions is not supported).
-    """
     global_grid = list(seq.grid_plan) if seq.grid_plan else None
 
+    # Detect grid-first ordering (grid before position in axis_order)
+    grid_first = (
+        global_grid is not None
+        and Axis.GRID in seq.axis_order
+        and Axis.POSITION in seq.axis_order
+        and seq.axis_order.index(Axis.GRID) < seq.axis_order.index(Axis.POSITION)
+    )
+
+    if grid_first and global_grid:
+        # Grid-first: outer loop is grid points, inner loop is positions
+        return [
+            _pos_with_grid_point(pos.name or str(p_idx), pos, gp)
+            for gp in global_grid
+            for p_idx, pos in enumerate(seq.stage_positions)
+        ]
+
+    # Position-first (default)
     positions: list[Position] = []
     for p_idx, pos in enumerate(seq.stage_positions):
-        name = pos.name if pos.name else str(p_idx)
+        name = pos.name or str(p_idx)
 
         # Determine which grid to use for this position
         # Priority: subsequence grid > global grid > no grid
         if pos.sequence and pos.sequence.grid_plan:
             grid = pos.sequence.grid_plan
-        elif global_grid:
-            grid = global_grid
         else:
-            grid = None
+            grid = global_grid or None
 
         if grid:
-            for gp_idx, gp in enumerate(grid):
-                # position from relative grid plans (e.g GridRowsColumns, RandomPoints)
-                # can be added to pos, position from absolute grid plans (e.g.
-                # GridFromEdges, GridFromPolygon) should be used directly.
-                pos_sum = (
-                    pos + gp  # pyright: ignore[reportOperatorIssue]
-                    if gp.is_relative
-                    else gp
-                )
-                # When there is no row/col (e.g. RandomPoints), append an index to the
-                # name so each sub-position is unique
-                grid_row, grid_col = getattr(gp, "row", None), getattr(gp, "col", None)
-                pos_name = (
-                    name
-                    if grid_row is not None or grid_col is not None
-                    else f"{name}_{gp_idx:04d}"
-                )
-                positions.append(
-                    Position(
-                        name=pos_name,
-                        grid_row=grid_row,
-                        grid_column=grid_col,
-                        x_coord=pos_sum.x,
-                        y_coord=pos_sum.y,
-                        z_coord=pos_sum.z,
-                    )
-                )
+            for gp in grid:
+                positions.append(_pos_with_grid_point(name, pos, gp))
         else:
             positions.append(
                 Position(

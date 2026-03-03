@@ -206,6 +206,23 @@ SEQ_CASES = [
         expected_positions=None,
         id="z_relative_positions",
     ),
+    # Grid-first ordering with both positions and grid_plan
+    Case(
+        seq=useq.MDASequence(
+            axis_order="gptcz",
+            stage_positions=[(0.0, 0.0), (10.0, 10.0)],
+            grid_plan=useq.GridRowsColumns(rows=1, columns=2),
+            channels=["DAPI"],
+        ),
+        expected_dim_names=["p", "c", "y", "x"],
+        expected_positions=[
+            ExpectedPosition(name="0", grid_row=0, grid_col=0),
+            ExpectedPosition(name="1", grid_row=0, grid_col=0),
+            ExpectedPosition(name="0", grid_row=0, grid_col=1),
+            ExpectedPosition(name="1", grid_row=0, grid_col=1),
+        ],
+        id="grid_first_with_positions",
+    ),
     # GridFromEdges as a global grid with stage positions - AbsolutePosition objects
     # cannot be added to another Position, so the code falls back to using gp directly
     Case(
@@ -500,14 +517,6 @@ RAGGED_CASES = [
     ),
     pytest.param(
         useq.MDASequence(
-            z_plan={"range": 2, "step": 1.0},
-            time_plan={"interval": 0, "duration": 3},
-        ),
-        "Unbounded useq sequences are not yet supported",
-        id="t_duration_no_interval",
-    ),
-    pytest.param(
-        useq.MDASequence(
             stage_positions=useq.WellPlatePlan(
                 plate=useq.WellPlate.from_str("96-well"),
                 a1_center_xy=(0.0, 0.0),
@@ -518,17 +527,6 @@ RAGGED_CASES = [
         ),
         "WellPlatePlan with grid_plan is not supported",
         id="well_plate_with_grid_plan",
-    ),
-    # Grid-first ordering with both positions and grid_plan
-    pytest.param(
-        useq.MDASequence(
-            axis_order="gptcz",
-            stage_positions=[(0.0, 0.0), (10.0, 10.0)],
-            grid_plan=useq.GridRowsColumns(rows=1, columns=2),
-            channels=["DAPI"],
-        ),
-        "Grid-first ordering.*is not supported",
-        id="grid_first_with_positions",
     ),
 ]
 
@@ -560,12 +558,27 @@ def test_useq_manual_units() -> None:
         },
     )
     dims = result["dimensions"]
-    assert dims is not None
 
     time_dim = next(dim for dim in dims if dim.type == "time")
     assert time_dim.unit == "minute"
     assert time_dim.scale == 1.0
     assert time_dim.count == 3
+
+
+def test_unbounded_tcz() -> None:
+    """Test unbounded time with channels and z."""
+    seq = useq.MDASequence(
+        axis_order="tcz",
+        time_plan=useq.TIntervalDuration(interval=0, duration=3),
+        channels=["DAPI", "Cy5"],
+        z_plan={"range": 2, "step": 1.0},
+    )
+    result = useq_to_acquisition_settings(seq, image_width=64, image_height=64)
+    AcquisitionSettings(**result)
+    dims = result["dimensions"]
+
+    assert [d.count for d in dims] == [None, 2, 3, 64, 64]
+    assert [d.name for d in dims] == ["t", "c", "z", "y", "x"]
 
 
 time_plans = [
