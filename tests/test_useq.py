@@ -26,7 +26,6 @@ class ExpectedPosition:
     plate_col: str | None = None
     grid_row: int | None = None
     grid_col: int | None = None
-    has_coords: bool = True  # check for presence of x/y coordinates
 
 
 @dataclass
@@ -411,9 +410,8 @@ def test_useq_to_dims(case: Case) -> None:
         assert pos.plate_column == exp_pos.plate_col
         assert pos.grid_row == exp_pos.grid_row
         assert pos.grid_column == exp_pos.grid_col
-        if exp_pos.has_coords:
-            assert pos.x_coord is not None
-            assert pos.y_coord is not None
+        assert pos.x_coord is not None
+        assert pos.y_coord is not None
 
 
 # Ragged dimension test cases

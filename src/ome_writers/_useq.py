@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from typing_extensions import deprecated
 
@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from typing import TypeAlias, TypedDict
 
     import useq
+    from useq import RelativePosition
 
     class AcquisitionSettingsDict(TypedDict):
         """Return type for useq_to_acquisition_settings."""
@@ -420,26 +421,37 @@ def _row_idx_to_letter(index: int) -> str:
     return name
 
 
-def _pos_with_grid_point(name: str, pos: useq.Position, gp: useq.Position) -> Position:
+def _pos_with_grid_point(
+    name: str, pos: useq.Position, gp: useq.Position, gp_idx: int = 0
+) -> Position:
     """Create a Position by combining a stage position with a grid point."""
-    # position from relative grid plans (e.g GridRowsColumns, RandomPoints)
-    # can be added to pos, position from absolute grid plans (e.g.
-    # GridFromEdges, GridFromPolygon) should be used directly.
-    pos_sum = (
-        pos + gp  # type: ignore
-        if gp.is_relative
-        else gp
-    )
+    # This block of code asserts (/assumes) that if we have an absolute grid plan
+    # then the position is irrelevant/overriden.
+    # This basically results from a design flaw in useq where it's possible to combine
+    # an absolute grid plan with (absolute) stage positions.  We will likely change
+    # that in the future, but is the current v1 semantics.
+    if not gp.is_relative:
+        x_coord = gp.x
+        y_coord = gp.y
+    else:
+        # relative grid points are offsets from the stage position.
+        # and the stage position is missing, we assume it to be 0 (!!!!!)
+        # that's also bad... but it's consistent.
+        x_coord = (pos.x or 0) + cast("RelativePosition", gp).x
+        y_coord = (pos.y or 0) + cast("RelativePosition", gp).y
+
     # When there is no row/col (e.g. RandomPoints), append an index to the
     # name so each sub-position is unique
     grid_row, grid_col = getattr(gp, "row", None), getattr(gp, "col", None)
+    if grid_row is None and grid_col is None:
+        name = f"{name}_{gp_idx:04d}" if name else f"{gp_idx:04d}"
     return Position(
         name=name,
         grid_row=grid_row,
         grid_column=grid_col,
-        x_coord=pos_sum.x,
-        y_coord=pos_sum.y,
-        z_coord=pos_sum.z,
+        x_coord=x_coord,
+        y_coord=y_coord,
+        z_coord=pos.z,
     )
 
 
@@ -478,8 +490,8 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
             grid = global_grid or None
 
         if grid:
-            for gp in grid:
-                positions.append(_pos_with_grid_point(name, pos, gp))
+            for gp_idx, gp in enumerate(grid):
+                positions.append(_pos_with_grid_point(name, pos, gp, gp_idx))
         else:
             positions.append(
                 Position(
