@@ -303,7 +303,10 @@ SEQ_CASES = [
     Case(
         seq=useq.MDASequence(
             axis_order="pgtc",
-            stage_positions=[useq.Position(z=3, name="rp")],
+            stage_positions=[
+                useq.Position(x=1, y=2, z=3, name="rp"),
+                useq.Position(x=11, y=12, z=4, name="rp"),
+            ],
             grid_plan=useq.RandomPoints(
                 num_points=3,
                 max_width=100,
@@ -315,9 +318,12 @@ SEQ_CASES = [
         ),
         expected_dim_names=["p", "c", "y", "x"],
         expected_positions=[
-            ExpectedPosition(name="rp_0000"),
-            ExpectedPosition(name="rp_0001"),
-            ExpectedPosition(name="rp_0002"),
+            ExpectedPosition(name="rp_p0000_g0000"),
+            ExpectedPosition(name="rp_p0000_g0001"),
+            ExpectedPosition(name="rp_p0000_g0002"),
+            ExpectedPosition(name="rp_p0001_g0000"),
+            ExpectedPosition(name="rp_p0001_g0001"),
+            ExpectedPosition(name="rp_p0001_g0002"),
         ],
         id="random_points_with_stage_position",
     ),
@@ -337,9 +343,9 @@ SEQ_CASES = [
         ),
         expected_dim_names=["p", "c", "y", "x"],
         expected_positions=[
-            ExpectedPosition(name="rp_0000"),
-            ExpectedPosition(name="rp_0001"),
-            ExpectedPosition(name="rp_0002"),
+            ExpectedPosition(name="rp_g0000"),
+            ExpectedPosition(name="rp_g0001"),
+            ExpectedPosition(name="rp_g0002"),
         ],
         id="random_points_grid",
     ),
@@ -678,7 +684,7 @@ def test_random_points_subsequence_unique_names() -> None:
     # RandomPoints has no row/col — names must be unique via the index suffix
     assert pos_dim.coords is not None
     names = [p.name for p in pos_dim.coords]
-    assert names == ["grid_0000", "grid_0001", "grid_0002", "grid_0003"]
+    assert names == ["grid_g0000", "grid_g0001", "grid_g0002", "grid_g0003"]
     assert all(p.grid_row is None and p.grid_column is None for p in pos_dim.coords)
 
 

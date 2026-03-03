@@ -422,7 +422,11 @@ def _row_idx_to_letter(index: int) -> str:
 
 
 def _pos_with_grid_point(
-    name: str, pos: useq.Position, gp: useq.Position, gp_idx: int = 0
+    name: str,
+    pos: useq.Position,
+    gp: useq.Position,
+    gp_idx: int = 0,
+    pos_idx: int | None = None,
 ) -> Position:
     """Create a Position by combining a stage position with a grid point."""
     # This block of code asserts (/assumes) that if we have an absolute grid plan
@@ -444,7 +448,11 @@ def _pos_with_grid_point(
     # name so each sub-position is unique
     grid_row, grid_col = getattr(gp, "row", None), getattr(gp, "col", None)
     if grid_row is None and grid_col is None:
-        name = f"{name}_{gp_idx:04d}" if name else f"{gp_idx:04d}"
+        if pos_idx is not None:
+            suffix = f"p{pos_idx:04d}_g{gp_idx:04d}"
+            name = f"{name}_{suffix}" if name else suffix
+        else:
+            name = f"{name}_g{gp_idx:04d}" if name else f"{gp_idx:04d}"
     return Position(
         name=name,
         grid_row=grid_row,
@@ -479,6 +487,7 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
 
     # Position-first (default)
     positions: list[Position] = []
+    num_pos = len(seq.stage_positions)
     for p_idx, pos in enumerate(seq.stage_positions):
         name = pos.name or str(p_idx)
 
@@ -491,7 +500,11 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
 
         if grid:
             for gp_idx, gp in enumerate(grid):
-                positions.append(_pos_with_grid_point(name, pos, gp, gp_idx))
+                positions.append(
+                    _pos_with_grid_point(
+                        name, pos, gp, gp_idx, p_idx if num_pos > 1 else None
+                    )
+                )
         else:
             positions.append(
                 Position(
