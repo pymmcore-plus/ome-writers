@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pytest
@@ -19,8 +19,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _make_settings(**kwargs: object) -> AcquisitionSettings:
-    defaults = {
+def _make_settings(**kwargs: Any) -> AcquisitionSettings:
+    defaults: dict[str, Any] = {
         "format": "scratch",
         "dimensions": dims_from_standard_axes({"t": 3, "c": 2, "y": 8, "x": 8}),
         "dtype": "uint16",
