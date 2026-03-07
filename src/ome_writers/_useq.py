@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from typing_extensions import deprecated
 
@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from typing import TypeAlias, TypedDict
 
     import useq
+    from useq import RelativePosition
 
     class AcquisitionSettingsDict(TypedDict):
         """Return type for useq_to_acquisition_settings."""
@@ -355,6 +356,9 @@ def _build_positions(seq: useq.MDASequence) -> list[Position]:
                 name=f"{i:04d}",
                 grid_row=getattr(gp, "row", None),
                 grid_column=getattr(gp, "col", None),
+                x_coord=gp.x,
+                y_coord=gp.y,
+                z_coord=gp.z,
             )
             for i, gp in enumerate(seq.grid_plan)
         ]
@@ -417,19 +421,45 @@ def _row_idx_to_letter(index: int) -> str:
     return name
 
 
-def _pos_with_grid_point(name: str, pos: useq.Position, gp: useq.Position) -> Position:
+def _pos_with_grid_point(
+    name: str,
+    pos: useq.Position,
+    gp: useq.Position,
+    gp_idx: int = 0,
+    pos_idx: int | None = None,
+) -> Position:
     """Create a Position by combining a stage position with a grid point."""
-    # if this line ever raises an exception,
-    # break it into two parts:
-    # 1. create position, 2. try to add coords, suppressing errors.
-    pos_sum = pos + gp  # type: ignore
+    # This block of code asserts (/assumes) that if we have an absolute grid plan
+    # then the position is irrelevant/overriden.
+    # This basically results from a design flaw in useq where it's possible to combine
+    # an absolute grid plan with (absolute) stage positions.  We will likely change
+    # that in the future, but is the current v1 semantics.
+    if not gp.is_relative:
+        x_coord = gp.x
+        y_coord = gp.y
+    else:
+        # relative grid points are offsets from the stage position.
+        # and the stage position is missing, we assume it to be 0 (!!!!!)
+        # that's also bad... but it's consistent.
+        x_coord = (pos.x or 0) + cast("RelativePosition", gp).x
+        y_coord = (pos.y or 0) + cast("RelativePosition", gp).y
+
+    # When there is no row/col (e.g. RandomPoints), append an index to the
+    # name so each sub-position is unique
+    grid_row, grid_col = getattr(gp, "row", None), getattr(gp, "col", None)
+    if grid_row is None and grid_col is None:
+        if pos_idx is not None:
+            suffix = f"p{pos_idx:04d}_g{gp_idx:04d}"
+            name = f"{name}_{suffix}" if name else suffix
+        else:
+            name = f"{name}_g{gp_idx:04d}" if name else f"{gp_idx:04d}"
     return Position(
         name=name,
-        grid_row=getattr(gp, "row", None),
-        grid_column=getattr(gp, "col", None),
-        x_coord=pos_sum.x,
-        y_coord=pos_sum.y,
-        z_coord=pos_sum.z,
+        grid_row=grid_row,
+        grid_column=grid_col,
+        x_coord=x_coord,
+        y_coord=y_coord,
+        z_coord=pos.z,
     )
 
 
@@ -457,21 +487,24 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
 
     # Position-first (default)
     positions: list[Position] = []
+    num_pos = len(seq.stage_positions)
     for p_idx, pos in enumerate(seq.stage_positions):
-        name = pos.name if pos.name else str(p_idx)
+        name = pos.name or str(p_idx)
 
         # Determine which grid to use for this position
         # Priority: subsequence grid > global grid > no grid
         if pos.sequence and pos.sequence.grid_plan:
             grid = pos.sequence.grid_plan
-        elif global_grid:
-            grid = global_grid
         else:
-            grid = None
+            grid = global_grid or None
 
         if grid:
-            for gp in grid:
-                positions.append(_pos_with_grid_point(name, pos, gp))
+            for gp_idx, gp in enumerate(grid):
+                positions.append(
+                    _pos_with_grid_point(
+                        name, pos, gp, gp_idx, p_idx if num_pos > 1 else None
+                    )
+                )
         else:
             positions.append(
                 Position(
