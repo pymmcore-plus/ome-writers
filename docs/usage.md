@@ -37,7 +37,12 @@ with create_stream(settings) as stream:
 As you can see, the [`Dimension`][ome_writers.Dimension] objects are a key part of the
 `AcquisitionSettings`, describing the shape and chunking of each
 dimension in the dataset, along with other critical metadata. So it pays to understand
-the `Dimension` class well.
+the `Dimension` class well. Note that the `coords` field on a `Dimension`
+can hold rich objects like [`Position`][ome_writers.Position] or
+[`Channel`][ome_writers.Channel] — not just simple strings or counts —
+enabling you to attach grid layout, stage coordinates, wavelength info,
+and more (see [Rich Channel Metadata](#rich-channel-metadata) and
+[Multiple Positions](#multiple-positions) below).
 
 !!! example "Shorthand for standard axis names"
     The [`dims_from_standard_axes`][ome_writers.dims_from_standard_axes] helper function
@@ -180,8 +185,14 @@ See the [single 5D image example](./examples/single_5d_image.md).
 
 ### Multiple Positions
 
+Positions represent any spatial concept beyond XYZ — tiles in a grid,
+fields of view, angles, etc. Each position becomes its own image in
+the output dataset (since neither OME-TIFF nor OME-Zarr support more
+than 5 dimensions in a single image).
+
+The simplest form uses plain strings for position names:
+
 ```python
-# for each time point, visit each position, and for each channel, acquire a 3D stack:
 dimensions=[
     Dimension(name="t", count=2, chunk_size=1, type="time"),
     Dimension(name="p", type="position", coords=["Pos0", "Pos1"]),
@@ -192,11 +203,79 @@ dimensions=[
 ]
 ```
 
-At this time, *neither* OME-TIFF *nor* OME-Zarr support more than
-5 dimensions in a single image. So these datasets will be composed
-of multiple 5D images, one per position.
+Whenever you want to attach more than just a name to each position, you can
+use [`Position`][ome_writers.Position] objects to include information such as
+grid layout, stage coordinates, or plate row/column:
+
+```python
+from ome_writers import Position
+
+# a 3x3 tiled grid acquisition:
+dimensions=[
+    Dimension(name="t", count=2, chunk_size=1, type="time"),
+    Dimension(
+        name="p",
+        type="position",
+        coords=[
+            Position(
+                name=f"Tile_r{r}_c{c}",
+                grid_row=r,
+                grid_column=c,
+                x_coord=c * 512.0,  # stage X in µm
+                y_coord=r * 512.0,  # stage Y in µm
+            )
+            for r in range(3)
+            for c in range(3)
+        ],
+    ),
+    Dimension(name="c", count=3, chunk_size=1, type="channel"),
+    Dimension(name="z", count=4, chunk_size=1, type="space", scale=5, unit="um"),
+    Dimension(name="y", count=512, chunk_size=256, type="space", scale=2, unit="um"),
+    Dimension(name="x", count=512, chunk_size=256, type="space", scale=2, unit="um"),
+]
+```
+
+The order of positions in `coords` should match your acquisition
+traversal order (the order in which you visit each position during
+the experiment).
 
 See the [multi-position example](./examples/multiposition.md).
+
+### Rich Channel Metadata
+
+Similar to positions, channels can be specified as plain strings or
+as [`Channel`][ome_writers.Channel] objects with additional metadata:
+
+```python
+from ome_writers import Channel
+
+dimensions=[
+    Dimension(name="t", count=2, chunk_size=1, type="time"),
+    Dimension(
+        name="c",
+        type="channel",
+        coords=[
+            Channel(
+                name="Widefield Green",
+                fluorophore="EGFP",
+                excitation_wavelength_nm=488,
+                emission_wavelength_nm=525,
+                color="#00FF00",  # can parse string, tuple, etc...
+            ),
+            Channel(
+                name="Widefield Red",
+                fluorophore="mCherry", 
+                excitation_wavelength_nm=561, 
+                emission_wavelength_nm=610,
+                color="#FF0000", 
+            ),
+        ],
+    ),
+    Dimension(name="z", count=4, chunk_size=1, type="space", scale=.5, unit="um"),
+    Dimension(name="y", count=2048, chunk_size=512, type="space", scale=.1, unit="um"),
+    Dimension(name="x", count=2048, chunk_size=512, type="space", scale=.1, unit="um"),
+]
+```
 
 ### Multi-well plates (HCS)
 
