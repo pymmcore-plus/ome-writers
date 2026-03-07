@@ -7,13 +7,28 @@ import warnings
 import weakref
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Final, Literal, NoReturn, TypeAlias
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Final,
+    Literal,
+    NoReturn,
+    TypeAlias,
+    overload,
+)
 
 from ome_writers._coord_tracker import CoordUpdate
 from ome_writers._router import FrameRouter
+from ome_writers._schema import (
+    AcquisitionSettings,
+    Compression,
+    Dimension,
+    Format,
+    Plate,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     import numpy as np
 
@@ -464,7 +479,32 @@ AVAILABLE_BACKENDS: dict[str, BackendMetadata] = {
 }
 
 
-def create_stream(settings: AcquisitionSettings) -> OMEStream:
+@overload
+def create_stream(
+    *,
+    root_path: str,
+    dimensions: Sequence[Dimension | dict],
+    dtype: str,
+    overwrite: bool = False,
+    format: Format | dict | str = "auto",
+    compression: Compression | dict | str | None = None,
+    storage_order: Literal["acquisition", "ome"] | Sequence[str] = (),
+    plate: Plate | dict | None = None,
+) -> OMEStream: ...
+@overload
+def create_stream(settings: AcquisitionSettings, /) -> OMEStream: ...
+def create_stream(
+    settings: AcquisitionSettings | None = None,
+    /,
+    root_path: str = "",
+    dimensions: Sequence[Dimension | dict] = (),
+    dtype: str = "",
+    overwrite: bool = False,
+    format: Format | dict | str = "auto",
+    compression: Compression | dict | str | None = None,
+    storage_order: Literal["acquisition", "ome"] | Sequence[str] = (),
+    plate: Plate | dict | None = None,
+) -> OMEStream:
     """Create a stream for writing OME-TIFF or OME-ZARR data.
 
     !!! warning
@@ -478,6 +518,33 @@ def create_stream(settings: AcquisitionSettings) -> OMEStream:
     ----------
     settings : AcquisitionSettings
         Acquisition settings containing array configuration, path, backend, etc.
+
+    root_path : str
+        (Keyword only) Root path for the acquisition.  Meaning depends on backend
+        and format - for file-based backends this is typically a file path, but for
+        object storage backends this could be a bucket or prefix.
+    dimensions : Sequence[Dimension | dict]
+        (Keyword only) Sequence of dimensions in the acquisition, in order.  Each
+        dimension can be specified as a `Dimension` object or a dict that can be
+        parsed into a `Dimension`.
+    dtype : str
+        (Keyword only) Data type of the pixel data, e.g. "uint16".
+    overwrite : bool
+        (Keyword only) Whether to overwrite existing data at the target location.  If
+        False and data already exists, an error will be raised.  If True, existing data
+        will be deleted or overwritten according to backend capabilities.
+    format : Format | dict | str
+        (Keyword only) Desired format and/or backend settings.
+    compression : Compression | dict | str | None
+        (Keyword only) Compression algorithm.
+    storage_order : Literal["acquisition", "ome"] | Sequence[str]
+        (Keyword only) Desired storage order of dimensions.
+    plate : Plate | dict | None
+        (Keyword only) Plate configuration if writing plate data.
+
+
+    Alternatively, you can specify settings via individual parameters.  If `settings`
+    is provided, these parameters are ignored.
 
     Returns
     -------
@@ -505,6 +572,36 @@ def create_stream(settings: AcquisitionSettings) -> OMEStream:
     ...     for i in range(20):  # 10 timepoints x 2 channels
     ...         stream.append(np.zeros((512, 512), dtype=np.uint16))
     """
+    if settings is None:
+        settings = AcquisitionSettings(
+            root_path=root_path,
+            dimensions=dimensions,
+            dtype=dtype,
+            overwrite=overwrite,
+            format=format,
+            compression=compression,
+            plate=plate,
+            storage_order=storage_order or "ome",
+        )
+    elif any(
+        [
+            root_path,
+            dimensions,
+            dtype,
+            overwrite,
+            format != "auto",
+            compression is not None,
+            storage_order,
+            plate is not None,
+        ]
+    ):
+        warnings.warn(
+            "Both settings object and individual parameters provided to "
+            "create_stream(). Individual parameters will be ignored in favor of "
+            "settings object.",
+            stacklevel=2,
+        )
+
     settings.validate_stream_ready()  # raises ValueError if settings are incomplete
 
     # rather than making AcquisitionSettings a frozen model,
