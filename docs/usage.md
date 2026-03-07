@@ -186,7 +186,7 @@ See the [single 5D image example](./examples/single_5d_image.md).
 ### Multiple Positions
 
 Positions represent any spatial concept beyond XYZ — tiles in a grid,
-fields of view, angles, etc. Each position becomes its own image in
+fields of view, etc. Each position becomes its own image in
 the output dataset (since neither OME-TIFF nor OME-Zarr support more
 than 5 dimensions in a single image).
 
