@@ -12,11 +12,10 @@
 
 import sys
 
-import numpy as np
 import useq
 from pymmcore_plus import CMMCorePlus
 
-from ome_writers import AcquisitionSettings, create_stream, useq_to_acquisition_settings
+from ome_writers import AcquisitionSettings, Dimension
 
 # Initialize pymmcore-plus core and load system configuration (null = demo config)
 core = CMMCorePlus()
@@ -42,51 +41,40 @@ seq = useq.MDASequence(
 # Derive format/backend from command line argument (default: auto)
 FORMAT = "auto" if len(sys.argv) < 2 else sys.argv[1]
 
-image_width = core.getImageWidth()
-image_height = core.getImageHeight()
-pixel_size_um = core.getPixelSizeUm()
-
+# Create AcquisitionSettings with just user preferences (chunk sizes, compression,
+# format, etc.). Dimensions, dtype, and image sizes are filled in automatically
+# by pymmcore-plus when running the MDA via core.mda.run(seq, output=settings).
 settings = AcquisitionSettings(
     root_path="example_pymmcore_plus",
-    # use useq_to_acquisition_settings to convert MDASequence to a dictionary
-    # of kwargs that can be passed to `ome_writers.AcquisitionSettings`
-    # (currently, it will populate `dimensions` and `plate` fields)
-    **useq_to_acquisition_settings(
-        seq,
-        image_width=image_width,
-        image_height=image_height,
-        pixel_size_um=pixel_size_um,
-        chunk_shapes={"z": 4, "y": image_width, "x": image_height},
-    ),
-    dtype=f"uint{core.getImageBitDepth()}",
+    dimensions=[
+        Dimension(name="z", chunk_size=4),
+    ],
     overwrite=True,
     format=FORMAT,
 )
 
-# Open the stream and run the sequence
-with create_stream(settings) as stream:
-    # Connect frameReady event to append frames to the stream
-    @core.mda.events.frameReady.connect
-    def _on_frame(frame: np.ndarray, event: useq.MDAEvent, metadata: dict) -> None:
-        stream.append(frame)
-
-    # Tell pymmcore-plus to run the useq.MDASequence
-    core.mda.run(seq)
+# Run the MDA — pymmcore-plus derives dimensions from the sequence and camera,
+# merges in user-provided dimension overrides (e.g. chunk_size), and writes data.
+core.mda.run(seq, output=settings)
 
 
 if settings.format.name == "ome-zarr":
     import yaozarrs
 
-    yaozarrs.validate_zarr_store(settings.output_path)
-    print("✓ Zarr store is valid")
+    yaozarrs.validate_zarr_store(settings.root_path + ".ome.zarr")
+    print("Zarr store is valid")
 
 if settings.format.name == "ome-tiff":
     from pathlib import Path
 
     from ome_types import from_tiff
 
-    output_path = Path(settings.output_path)
-    files = [output_path] if output_path.is_file() else output_path.glob("*.tiff")
+    output_path = Path(settings.root_path)
+    # single-position -> file, multi-position -> directory of .tiff files
+    if output_path.with_suffix(".ome.tiff").is_file():
+        files = [output_path.with_suffix(".ome.tiff")]
+    else:
+        files = list(output_path.glob("*.tiff"))
     for file in files:
         from_tiff(str(file))
-        print(f"✓ TIFF file {file.name} is valid")
+        print(f"TIFF file {file.name} is valid")

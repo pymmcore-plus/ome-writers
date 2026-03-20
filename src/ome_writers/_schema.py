@@ -546,15 +546,35 @@ def _validate_coords_by_type(
     return coords
 
 
-def _validate_dims_list(dims: tuple[Dimension, ...]) -> tuple[Dimension, ...]:
-    """Validate dimensions list for AcquisitionSettings."""
+def _validate_dims_basic(dims: tuple[Dimension, ...]) -> tuple[Dimension, ...]:
+    """Validate dimensions list for AcquisitionSettings.
+
+    This performs only basic validation (unique names). Structural validation
+    (spatial dims at end, count constraints, etc.) is deferred to
+    ``_validate_dims_stream_ready`` which is called from ``validate_stream_ready``.
+    """
+    # ensure all dimension names are unique
+    name_counts: dict[str, int] = {}
+    for dim in dims:
+        name_counts.setdefault(dim.name, 0)
+        name_counts[dim.name] += 1
+
+    if dupe_names := [name for name, count in name_counts.items() if count > 1]:
+        raise ValueError(f"Dimension names must be unique, duplicates: {dupe_names}")
+
+    return tuple(dims)
+
+
+def _validate_dims_stream_ready(dims: tuple[Dimension, ...]) -> None:
+    """Validate full structural requirements for dimensions.
+
+    This is called from ``validate_stream_ready`` to enforce strict constraints
+    before stream creation. Raises ``ValueError`` if any constraint is violated.
+    """
     # ensure at most one position dimension and 2-5 non-position dimensions.
     has_pos = False
     n_dims = 0
-    name_counts: dict[str, int] = {}
     for idx, dim in enumerate(dims):
-        name_counts.setdefault(dim.name, 0)
-        name_counts[dim.name] += 1
         if dim.type == "position":
             if has_pos:
                 raise ValueError("Only one position dimension is allowed.")
@@ -575,10 +595,6 @@ def _validate_dims_list(dims: tuple[Dimension, ...]) -> tuple[Dimension, ...]:
             f"OME-TIFF, got {n_dims}."
         )
 
-    # ensure all dimension names are unique
-    if dupe_names := [name for name, count in name_counts.items() if count > 1]:
-        raise ValueError(f"Dimension names must be unique, duplicates: {dupe_names}")
-
     # ensure at least 2 spatial dimensions at the end
     for dim in dims[-2:]:
         if dim.type not in {"space", None}:
@@ -594,15 +610,29 @@ def _validate_dims_list(dims: tuple[Dimension, ...]) -> tuple[Dimension, ...]:
                 )
             dim.type = "space"
 
-    return tuple(dims)
+
+def _has_complete_dims(dims: tuple[Dimension, ...]) -> bool:
+    """Check if dimensions have the full structure required for stream creation.
+
+    Returns True if dimensions have at least 2 non-position dims and
+    the last two are spatial (or untyped). This is used to guard model
+    validators that assume complete dimension structure.
+    """
+    if len(dims) < 2:
+        return False
+    n_non_pos = sum(1 for d in dims if d.type != "position")
+    if n_non_pos < 2:
+        return False
+    for dim in dims[-2:]:
+        if dim.type not in {"space", None}:
+            return False
+    return True
 
 
 DimensionList: TypeAlias = Annotated[
     tuple[Dimension, ...],
-    AfterValidator(_validate_dims_list),
-    # included for the schema, but added *after* the AfterValidator for now...
-    # because I prefer the error message the user receives from from _validate_dims_list
-    Len(min_length=2, max_length=6),
+    AfterValidator(_validate_dims_basic),
+    Len(min_length=1),
 ]
 """Assembled list of Dimensions."""
 
@@ -1109,6 +1139,8 @@ class AcquisitionSettings(_BaseModel):
             raise ValueError("settings.dimensions must be set before creating a stream")
         if not self.dtype:
             raise ValueError("settings.dtype must be set before creating a stream")
+        # Perform strict structural validation on dimensions
+        _validate_dims_stream_ready(self.dimensions)
         return True
 
     @model_validator(mode="after")
@@ -1137,7 +1169,7 @@ class AcquisitionSettings(_BaseModel):
     @model_validator(mode="after")
     def _validate_storage_order(self) -> AcquisitionSettings:
         """Validate storage_order value."""
-        if not self.dimensions:
+        if not self.dimensions or not _has_complete_dims(self.dimensions):
             return self
         if isinstance(self.storage_order, list):
             # manual sort orders are still not allowed to permute the last 2 dims
@@ -1160,7 +1192,7 @@ class AcquisitionSettings(_BaseModel):
     @model_validator(mode="after")
     def _validate_plate_positions(self) -> AcquisitionSettings:
         """Validate plate mode requirements."""
-        if not self.dimensions:
+        if not self.dimensions or not _has_complete_dims(self.dimensions):
             return self
         if self.plate is not None:
             # Ensure there is a position dimension
@@ -1206,7 +1238,7 @@ class AcquisitionSettings(_BaseModel):
     @model_validator(mode="after")
     def _warn_chunk_buffer_memory(self) -> AcquisitionSettings:
         """Warn if chunk buffering may use excessive memory (Windows only)."""
-        if not self.dimensions:
+        if not self.dimensions or not _has_complete_dims(self.dimensions):
             return self
         warn_if_high_memory_usage(self)
         return self

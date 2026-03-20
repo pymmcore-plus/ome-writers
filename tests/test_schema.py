@@ -33,7 +33,7 @@ def test_schema_unique_dimension_names() -> None:
 def test_schema_unlimited_first_only() -> None:
     """Test that only first dimension can be unlimited (count=None)."""
     # First dimension unlimited - OK
-    AcquisitionSettings(
+    settings_ok = AcquisitionSettings(
         root_path="test.zarr",
         dimensions=[
             Dimension(name="t", count=None),
@@ -42,21 +42,23 @@ def test_schema_unlimited_first_only() -> None:
         ],
         dtype="uint16",
     )
+    settings_ok.validate_stream_ready()
 
-    # Second dimension unlimited - error
+    # Second dimension unlimited - error at stream-ready time
+    settings_bad = AcquisitionSettings(
+        root_path="test.zarr",
+        dimensions=[
+            Dimension(name="t", count=10),
+            Dimension(name="c", count=None),
+            Dimension(name="y", count=64, type="space"),
+            Dimension(name="x", count=64, type="space"),
+        ],
+        dtype="uint16",
+    )
     with pytest.raises(
-        ValidationError, match=" Only the first dimension may be unbounded"
+        ValueError, match="Only the first dimension may be unbounded"
     ):
-        AcquisitionSettings(
-            root_path="test.zarr",
-            dimensions=[
-                Dimension(name="t", count=10),
-                Dimension(name="c", count=None),
-                Dimension(name="y", count=64, type="space"),
-                Dimension(name="x", count=64, type="space"),
-            ],
-            dtype="uint16",
-        )
+        settings_bad.validate_stream_ready()
 
 
 def test_plate_metadata() -> None:
@@ -351,83 +353,119 @@ def test_standard_axis_methods() -> None:
 
 
 def test_multiple_position_dimensions_error() -> None:
-    """Test that only one position dimension is allowed."""
+    """Test that only one position dimension is allowed (caught at stream-ready)."""
+    settings = AcquisitionSettings(
+        root_path="test.zarr",
+        dimensions=[
+            Dimension(name="p", type="position", coords=[Position(name="p1")]),
+            Dimension(name="p2", type="position", coords=[Position(name="p2")]),
+            Dimension(name="y", count=64, type="space"),
+            Dimension(name="x", count=64, type="space"),
+        ],
+        dtype="uint16",
+    )
     with pytest.raises(ValueError, match="Only one position dimension is allowed"):
-        AcquisitionSettings(
-            root_path="test.zarr",
-            dimensions=[
-                Dimension(name="p", type="position", coords=[Position(name="p1")]),
-                Dimension(name="p2", type="position", coords=[Position(name="p2")]),
-                Dimension(name="y", count=64, type="space"),
-                Dimension(name="x", count=64, type="space"),
-            ],
-            dtype="uint16",
-        )
+        settings.validate_stream_ready()
 
 
 def test_too_few_dimensions_error() -> None:
-    """Test that at least 2 dimensions are required."""
+    """Test that at least 2 dimensions are required (caught at stream-ready)."""
+    settings = AcquisitionSettings(
+        root_path="test.zarr",
+        dimensions=[
+            Dimension(name="x", count=64, type="space"),
+        ],
+        dtype="uint16",
+    )
     with pytest.raises(
         ValueError, match="At least 2 non-position dimensions are required"
     ):
-        AcquisitionSettings(
-            root_path="test.zarr",
-            dimensions=[
-                Dimension(name="x", count=64, type="space"),
-            ],
-            dtype="uint16",
-        )
+        settings.validate_stream_ready()
 
 
 def test_too_many_dimensions_error() -> None:
-    """Test that at most 5 non-position dimensions are allowed."""
+    """At most 5 non-position dims are allowed (caught at stream-ready)."""
+    settings = AcquisitionSettings(
+        root_path="test.zarr",
+        dimensions=[
+            Dimension(name="t", count=10),
+            Dimension(name="c", count=3),
+            Dimension(name="z", count=20),
+            Dimension(name="a", count=2),
+            Dimension(name="y", count=64, type="space"),
+            Dimension(name="x", count=64, type="space"),
+        ],
+        dtype="uint16",
+    )
     with pytest.raises(
         ValueError, match="At most 5 non-position dimensions are allowed"
     ):
-        AcquisitionSettings(
-            root_path="test.zarr",
-            dimensions=[
-                Dimension(name="t", count=10),
-                Dimension(name="c", count=3),
-                Dimension(name="z", count=20),
-                Dimension(name="a", count=2),
-                Dimension(name="y", count=64, type="space"),
-                Dimension(name="x", count=64, type="space"),
-            ],
-            dtype="uint16",
-        )
+        settings.validate_stream_ready()
 
 
 def test_last_two_must_be_spatial() -> None:
-    """Test that the last two dimensions must be spatial."""
+    """Test that the last two dimensions must be spatial (caught at stream-ready)."""
+    settings = AcquisitionSettings(
+        root_path="test.zarr",
+        dimensions=[
+            Dimension(name="y", count=64, type="space"),
+            Dimension(name="x", count=64, type="space"),
+            Dimension(name="t", count=10, type="time"),
+        ],
+        dtype="uint16",
+    )
     with pytest.raises(
         ValueError, match="The last two dimensions must be spatial dimensions"
     ):
-        AcquisitionSettings(
-            root_path="test.zarr",
-            dimensions=[
-                Dimension(name="y", count=64, type="space"),
-                Dimension(name="x", count=64, type="space"),
-                Dimension(name="t", count=10, type="time"),
-            ],
-            dtype="uint16",
-        )
+        settings.validate_stream_ready()
+
+
+def test_partial_dimensions_construction() -> None:
+    """Partial dims (no y/x, no counts) can be constructed."""
+    settings = AcquisitionSettings(
+        root_path="test.zarr",
+        dimensions=[
+            Dimension(name="t", chunk_size=1, type="time"),
+            Dimension(name="z", chunk_size=512, type="space", unit="micrometer"),
+        ],
+        compression="blosc-zstd",
+    )
+    assert len(settings.dimensions) == 2
+    assert settings.dimensions[0].chunk_size == 1
+    assert settings.dimensions[1].chunk_size == 512
+    assert settings.compression == "blosc-zstd"
+
+
+def test_partial_dimensions_fail_at_stream_ready() -> None:
+    """Partial dims fail validate_stream_ready (not enough spatial dims)."""
+    settings = AcquisitionSettings(
+        root_path="test.zarr",
+        dimensions=[
+            Dimension(name="t", chunk_size=1, type="time"),
+        ],
+        dtype="uint16",
+    )
+    with pytest.raises(
+        ValueError, match="At least 2 non-position dimensions are required"
+    ):
+        settings.validate_stream_ready()
 
 
 def test_non_xy_dimension_type_none_warning() -> None:
-    """Test warning when non-x/y dimension has type=None."""
+    """Test warning when non-x/y dimension has type=None (caught at stream-ready)."""
     # if the last two dimension are not x/y, and type is None, a warning is issued
     # and type is set to 'space'
+    settings = AcquisitionSettings(
+        root_path="test.zarr",
+        dimensions=[
+            Dimension(name="custom1", count=64),  # type=None, non-standard name
+            Dimension(name="custom2", count=64),
+        ],
+        dtype="uint16",
+    )
     with pytest.warns(UserWarning, match="expected to have type='space'"):
-        settings = AcquisitionSettings(
-            root_path="test.zarr",
-            dimensions=[
-                Dimension(name="custom1", count=64),  # type=None, non-standard name
-                Dimension(name="custom2", count=64),
-            ],
-            dtype="uint16",
-        )
-        assert [d.type for d in settings.dimensions] == ["space", "space"]
+        settings.validate_stream_ready()
+    assert [d.type for d in settings.dimensions] == ["space", "space"]
 
 
 def test_tiff_backend_format(tiff_backend: str) -> None:
