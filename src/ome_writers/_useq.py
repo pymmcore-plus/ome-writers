@@ -453,10 +453,18 @@ def _pos_with_grid_point(
             name = f"{name}_{suffix}" if name else suffix
         else:
             name = f"{name}_g{gp_idx:04d}" if name else f"{gp_idx:04d}"
+    plate_row = getattr(pos, "plate_row", None)
+    plate_col = getattr(pos, "plate_col", None)
+    # When positions have plate info, use fov-style naming (like WellPlatePlan)
+    # so each grid point gets a unique name within the well
+    if plate_row is not None and plate_col is not None:
+        name = f"fov{gp_idx}"
     return Position(
         name=name,
         grid_row=grid_row,
         grid_column=grid_col,
+        plate_row=_row_idx_to_letter(plate_row) if plate_row is not None else None,
+        plate_column=str(plate_col + 1) if plate_col is not None else None,
         x_coord=x_coord,
         y_coord=y_coord,
         z_coord=pos.z,
@@ -498,6 +506,8 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
         else:
             grid = global_grid or None
 
+        plate_row = getattr(pos, "plate_row", None)
+        plate_col = getattr(pos, "plate_col", None)
         if grid:
             for gp_idx, gp in enumerate(grid):
                 positions.append(
@@ -514,6 +524,8 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
                     z_coord=pos.z,
                     grid_column=pos.col,
                     grid_row=pos.row,
+                    plate_row=_row_idx_to_letter(plate_row) if plate_row is not None else None,
+                    plate_column=str(plate_col + 1) if plate_col is not None else None,
                 )
             )
 
@@ -521,16 +533,33 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
 
 
 def _plate_from_useq(seq: useq.MDASequence) -> Plate | None:
-    """Convert a useq WellPlatePlan to an ome-writers Plate."""
+    """Convert a useq WellPlatePlan or plate-annotated positions to a Plate."""
     import useq
 
     useq_plate = seq.stage_positions
-    if not isinstance(useq_plate, useq.WellPlatePlan):
-        return None
+    if isinstance(useq_plate, useq.WellPlatePlan):
+        plate = useq_plate.plate
+        return Plate(
+            row_names=[_row_idx_to_letter(i) for i in range(plate.rows)],
+            column_names=[str(i + 1) for i in range(plate.columns)],
+            name=plate.name or None,
+        )
 
-    plate = useq_plate.plate
-    return Plate(
-        row_names=[_row_idx_to_letter(i) for i in range(plate.rows)],
-        column_names=[str(i + 1) for i in range(plate.columns)],
-        name=plate.name or None,
-    )
+    # Check if positions have plate_row/plate_col annotations
+    if useq_plate:
+        rows: set[int] = set()
+        cols: set[int] = set()
+        for p in useq_plate:
+            pr = getattr(p, "plate_row", None)
+            pc = getattr(p, "plate_col", None)
+            if pr is not None:
+                rows.add(pr)
+            if pc is not None:
+                cols.add(pc)
+        if rows and cols:
+            return Plate(
+                row_names=[_row_idx_to_letter(r) for r in sorted(rows)],
+                column_names=[str(c + 1) for c in sorted(cols)],
+            )
+
+    return None
