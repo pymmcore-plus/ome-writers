@@ -420,6 +420,20 @@ def _row_idx_to_letter(index: int) -> str:
     return name
 
 
+def _plate_row_to_str(value: int | str | None) -> str | None:
+    """Convert plate_row to string: int -> letter, str -> as-is, None -> None."""
+    if value is None:
+        return None
+    return _row_idx_to_letter(value) if isinstance(value, int) else str(value)
+
+
+def _plate_col_to_str(value: int | str | None) -> str | None:
+    """Convert plate_col to string: int -> 1-based str, str -> as-is, None -> None."""
+    if value is None:
+        return None
+    return str(value + 1) if isinstance(value, int) else str(value)
+
+
 def _pos_with_grid_point(
     name: str,
     pos: useq.Position,
@@ -462,8 +476,8 @@ def _pos_with_grid_point(
         name=name,
         grid_row=grid_row,
         grid_column=grid_col,
-        plate_row=_row_idx_to_letter(plate_row) if plate_row is not None else None,
-        plate_column=str(plate_col + 1) if plate_col is not None else None,
+        plate_row=_plate_row_to_str(plate_row),
+        plate_column=_plate_col_to_str(plate_col),
         x_coord=x_coord,
         y_coord=y_coord,
         z_coord=pos.z,
@@ -523,8 +537,8 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
                     z_coord=pos.z,
                     grid_column=pos.col,
                     grid_row=pos.row,
-                    plate_row=_row_idx_to_letter(plate_row) if plate_row is not None else None,
-                    plate_column=str(plate_col + 1) if plate_col is not None else None,
+                    plate_row=_plate_row_to_str(plate_row),
+                    plate_column=_plate_col_to_str(plate_col),
                 )
             )
 
@@ -546,19 +560,19 @@ def _plate_from_useq(seq: useq.MDASequence) -> Plate | None:
 
     # Check if positions have plate_row/plate_col annotations
     if useq_plate:
-        rows: set[int] = set()
-        cols: set[int] = set()
+        row_names: set[str] = set()
+        col_names: set[str] = set()
         for p in useq_plate:
             pr = getattr(p, "plate_row", None)
             pc = getattr(p, "plate_col", None)
             if pr is not None:
-                rows.add(pr)
+                row_names.add(_plate_row_to_str(pr))  # type: ignore[arg-type]
             if pc is not None:
-                cols.add(pc)
-        if rows and cols:
+                col_names.add(_plate_col_to_str(pc))  # type: ignore[arg-type]
+        if row_names and col_names:
             return Plate(
-                row_names=[_row_idx_to_letter(r) for r in sorted(rows)],
-                column_names=[str(c + 1) for c in sorted(cols)],
+                row_names=sorted(row_names),
+                column_names=sorted(col_names),
             )
 
     return None
