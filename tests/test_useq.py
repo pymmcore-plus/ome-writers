@@ -153,10 +153,10 @@ SEQ_CASES = [
         ),
         expected_dim_names=["p", "t", "c", "y", "x"],
         expected_positions=[
-            ExpectedPosition("fov0", "A", "1", grid_row=0, grid_col=0),
-            ExpectedPosition("fov1", "A", "1", grid_row=0, grid_col=1),
-            ExpectedPosition("fov0", "B", "2", grid_row=0, grid_col=0),
-            ExpectedPosition("fov1", "B", "2", grid_row=0, grid_col=1),
+            ExpectedPosition("0000", "A", "1", grid_row=0, grid_col=0),
+            ExpectedPosition("0001", "A", "1", grid_row=0, grid_col=1),
+            ExpectedPosition("0000", "B", "2", grid_row=0, grid_col=0),
+            ExpectedPosition("0001", "B", "2", grid_row=0, grid_col=1),
         ],
         id="well_plate_with_points",
     ),
@@ -716,11 +716,11 @@ def test_well_plate_fov_folder_names(tmp_path: Path, zarr_backend: str) -> None:
         for _ in seq:
             stream.append(dummy_frame)
 
-    # Check that zarr folders have the expected "fov0", "fov1" names
+    # Check that zarr folders have the expected names from useq's name_pattern
     # For WellPlatePlan with plate layout, the structure should be:
-    # test_fov_names.ome.zarr/A/1/fov0/, A/1/fov1/, B/2/fov0/, B/2/fov1/
+    # test_fov_names.ome.zarr/A/1/0000/, A/1/0001/, B/2/0000/, B/2/0001/
     zarr_root = tmp_path / "test_fov_names.ome.zarr"
-    assert (zarr_root / "A" / "1" / "fov0").exists(), "Expected fov0 in well A1"
-    assert (zarr_root / "A" / "1" / "fov1").exists(), "Expected fov1 in well A1"
-    assert (zarr_root / "B" / "2" / "fov0").exists(), "Expected fov0 in well B2"
-    assert (zarr_root / "B" / "2" / "fov1").exists(), "Expected fov1 in well B2"
+    assert (zarr_root / "A" / "1" / "0000").exists(), "Expected 0000 in well A1"
+    assert (zarr_root / "A" / "1" / "0001").exists(), "Expected 0001 in well A1"
+    assert (zarr_root / "B" / "2" / "0000").exists(), "Expected 0000 in well B2"
+    assert (zarr_root / "B" / "2" / "0001").exists(), "Expected 0001 in well B2"

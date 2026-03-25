@@ -394,12 +394,11 @@ def _build_well_plate_positions(plate_plan: useq.WellPlatePlan) -> list[Position
         plate_column = str(col_idx + 1)
         for fov_idx, well_pos in enumerate(well_positions):
             pos = next(plate_iter)  # grab the next AbsolutePosition in the outer loop
-            # NOTE: the pos.name is a useq's auto-generated name, either WellName_fovN
-            # for multi-fovs (e.g. A1_0000, etc) or just WellName for single fov
-            # (e.g. A1, B3, etc). We replace it with `fov{fov_idx}.
+            # Use the grid point's name from useq (set by name_pattern)
+            fov_name = getattr(well_pos, "name", None) or f"{fov_idx:04d}"
             positions.append(
                 Position(
-                    name=f"fov{fov_idx}",
+                    name=fov_name,
                     plate_row=plate_row,
                     plate_column=plate_column,
                     grid_row=getattr(well_pos, "row", None),
@@ -455,10 +454,10 @@ def _pos_with_grid_point(
             name = f"{name}_g{gp_idx:04d}" if name else f"{gp_idx:04d}"
     plate_row = getattr(pos, "plate_row", None)
     plate_col = getattr(pos, "plate_col", None)
-    # When positions have plate info, use fov-style naming (like WellPlatePlan)
-    # so each grid point gets a unique name within the well
+    # When positions have plate info, use the grid point's name from useq
+    # (set by grid plan's name_pattern, e.g., "0000000")
     if plate_row is not None and plate_col is not None:
-        name = f"fov{gp_idx}"
+        name = getattr(gp, "name", None) or f"{gp_idx:04d}"
     return Position(
         name=name,
         grid_row=grid_row,
