@@ -147,6 +147,14 @@ def _dims_from_useq(
             dim.coords = [Channel(name=c.config) for c in seq.channels]
         dims.append(dim)
 
+    if pixel_size_um and pixel_size_um <= 0:  # pragma: no cover
+        warnings.warn(
+            f"Invalid {pixel_size_um=}. Must be positive. Ignoring pixel size.",
+            UserWarning,
+            stacklevel=2,
+        )
+        pixel_size_um = None
+
     dims.extend(
         [
             StandardAxis.Y.to_dimension(
