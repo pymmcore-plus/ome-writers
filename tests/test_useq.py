@@ -84,6 +84,8 @@ SEQ_CASES = [
             stage_positions=[
                 useq.Position(x=0.0, y=0.0, name="single_pos"),
                 useq.Position(
+                    x=0.0,
+                    y=0.0,
                     name="grid",
                     sequence=useq.MDASequence(grid_plan={"rows": 1, "columns": 2}),
                 ),
@@ -220,10 +222,91 @@ SEQ_CASES = [
         ],
         id="grid_first_with_positions",
     ),
-    # RandomPoints grid - row/col are None
+    # GridFromEdges as a global grid with stage positions - AbsolutePosition objects
+    # cannot be added to another Position, so the code falls back to using gp directly
     Case(
         seq=useq.MDASequence(
-            axis_order="gc",
+            axis_order="pgtc",
+            stage_positions=[(None, None, 3)],
+            grid_plan=useq.GridFromEdges(
+                fov_width=50.0,
+                fov_height=50.0,
+                left=0.0,
+                right=100.0,
+                top=0.0,
+                bottom=100.0,
+            ),
+            channels=["DAPI"],
+        ),
+        expected_dim_names=["p", "c", "y", "x"],
+        expected_positions=[
+            ExpectedPosition(name="0", grid_row=0, grid_col=0),
+            ExpectedPosition(name="0", grid_row=0, grid_col=1),
+            ExpectedPosition(name="0", grid_row=1, grid_col=1),
+            ExpectedPosition(name="0", grid_row=1, grid_col=0),
+        ],
+        id="grid_from_edges_with_stage_positions",
+    ),
+    # GridFromEdges as a subsequence grid - generates AbsolutePosition objects
+    Case(
+        seq=useq.MDASequence(
+            axis_order="pgtc",
+            stage_positions=[
+                useq.Position(x=0.0, y=0.0, name="single_pos"),
+                useq.Position(
+                    z=3.0,
+                    name="grid",
+                    sequence=useq.MDASequence(
+                        grid_plan=useq.GridFromEdges(
+                            fov_width=50.0,
+                            fov_height=50.0,
+                            left=0.0,
+                            right=100.0,
+                            top=0.0,
+                            bottom=50.0,
+                        )
+                    ),
+                ),
+            ],
+            channels=["DAPI"],
+        ),
+        expected_dim_names=["p", "c", "y", "x"],
+        expected_positions=[
+            ExpectedPosition(name="single_pos"),
+            ExpectedPosition(name="grid", grid_row=0, grid_col=0),
+            ExpectedPosition(name="grid", grid_row=0, grid_col=1),
+        ],
+        id="position_subsequences_grid_from_edges",
+    ),
+    # GridFromPolygon with stage position
+    Case(
+        seq=useq.MDASequence(
+            axis_order="pgtc",
+            stage_positions=[useq.Position(z=3, name="poly")],
+            grid_plan=useq.GridFromPolygon(
+                fov_width=50.0,
+                fov_height=50.0,
+                vertices=[(0, 0), (100, 0), (100, 100), (0, 100)],
+            ),
+            channels=["DAPI"],
+        ),
+        expected_dim_names=["p", "c", "y", "x"],
+        expected_positions=[
+            ExpectedPosition(name="poly", grid_row=0, grid_col=0),
+            ExpectedPosition(name="poly", grid_row=0, grid_col=1),
+            ExpectedPosition(name="poly", grid_row=1, grid_col=1),
+            ExpectedPosition(name="poly", grid_row=1, grid_col=0),
+        ],
+        id="grid_from_polygon_with_stage_position",
+    ),
+    # RandomPoints with a stage position - row/col are None, names get index suffix
+    Case(
+        seq=useq.MDASequence(
+            axis_order="pgtc",
+            stage_positions=[
+                useq.Position(x=1, y=2, z=3, name="rp"),
+                useq.Position(x=11, y=12, z=4, name="rp"),
+            ],
             grid_plan=useq.RandomPoints(
                 num_points=3,
                 max_width=100,
@@ -235,9 +318,34 @@ SEQ_CASES = [
         ),
         expected_dim_names=["p", "c", "y", "x"],
         expected_positions=[
-            ExpectedPosition(name="0000", grid_row=None, grid_col=None),
-            ExpectedPosition(name="0001", grid_row=None, grid_col=None),
-            ExpectedPosition(name="0002", grid_row=None, grid_col=None),
+            ExpectedPosition(name="rp_p0000_g0000"),
+            ExpectedPosition(name="rp_p0000_g0001"),
+            ExpectedPosition(name="rp_p0000_g0002"),
+            ExpectedPosition(name="rp_p0001_g0000"),
+            ExpectedPosition(name="rp_p0001_g0001"),
+            ExpectedPosition(name="rp_p0001_g0002"),
+        ],
+        id="random_points_with_stage_position",
+    ),
+    # RandomPoints grid - row/col are None
+    Case(
+        seq=useq.MDASequence(
+            axis_order="gc",
+            stage_positions=[useq.Position(x=1, y=2, z=3, name="rp")],
+            grid_plan=useq.RandomPoints(
+                num_points=3,
+                max_width=100,
+                max_height=100,
+                shape="ellipse",
+                random_seed=42,
+            ),
+            channels=["DAPI"],
+        ),
+        expected_dim_names=["p", "c", "y", "x"],
+        expected_positions=[
+            ExpectedPosition(name="rp_g0000"),
+            ExpectedPosition(name="rp_g0001"),
+            ExpectedPosition(name="rp_g0002"),
         ],
         id="random_points_grid",
     ),
@@ -308,6 +416,8 @@ def test_useq_to_dims(case: Case) -> None:
         assert pos.plate_column == exp_pos.plate_col
         assert pos.grid_row == exp_pos.grid_row
         assert pos.grid_column == exp_pos.grid_col
+        assert pos.x_coord is not None
+        assert pos.y_coord is not None
 
 
 # Ragged dimension test cases
@@ -536,6 +646,46 @@ def test_useq_plans_combination(
     result = useq_to_acquisition_settings(seq, image_width=64, image_height=64)
     settings = AcquisitionSettings(**result, root_path="", dtype="u2")
     assert settings.num_frames == len(list(seq))
+
+
+def test_random_points_subsequence_unique_names() -> None:
+    """Test that RandomPoints as a position subsequence produces unique position names.
+
+    RandomPoints generates positions without row/col attributes (both are None).
+    When used as a subsequence grid for a stage position, all sub-positions would
+    otherwise share the parent position name with no grid key to distinguish them.
+    _build_stage_positions_plan appends a positional index (e.g. 'grid_0000') to
+    make each sub-position name unique.
+    """
+    seq = useq.MDASequence(
+        axis_order="pgtc",
+        stage_positions=[
+            useq.Position(
+                x=100.0,
+                y=200.0,
+                z=0.0,
+                name="grid",
+                sequence=useq.MDASequence(
+                    grid_plan=useq.RandomPoints(
+                        num_points=4,
+                        max_width=50.0,
+                        max_height=50.0,
+                        random_seed=7,
+                    )
+                ),
+            )
+        ],
+        channels=["DAPI"],
+    )
+    result = useq_to_acquisition_settings(seq, image_width=64, image_height=64)
+    settings = AcquisitionSettings(**result, root_path="", dtype="u2")
+    assert settings.num_frames == len(list(seq))
+    pos_dim = next(d for d in result["dimensions"] if d.type == "position")
+    # RandomPoints has no row/col — names must be unique via the index suffix
+    assert pos_dim.coords is not None
+    names = [p.name for p in pos_dim.coords]
+    assert names == ["grid_g0000", "grid_g0001", "grid_g0002", "grid_g0003"]
+    assert all(p.grid_row is None and p.grid_column is None for p in pos_dim.coords)
 
 
 def test_well_plate_fov_folder_names(tmp_path: Path, zarr_backend: str) -> None:
