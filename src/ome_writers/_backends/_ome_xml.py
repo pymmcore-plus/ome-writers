@@ -398,6 +398,8 @@ def _build_plates(settings: AcquisitionSettings) -> list[ome.Plate]:
         # that positions with with plate_row/plate_column that aren't represented
         # in the plate definition will be skipped from the metadata.
         # So here we just skip them here silently.
+        if pos.plate_row is None or pos.plate_column is None:
+            continue
         key = (pos.plate_row, pos.plate_column)
         if key in valid_keys:
             wells_map.setdefault(key, []).append((idx, pos))

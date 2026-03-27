@@ -36,12 +36,7 @@ def test_example_runs(example_path: Path, tmp_path: Path, any_backend: str) -> N
     """Test that each example script runs without error."""
     code = example_path.read_text()
     with _chdir_argv(tmp_path, [str(example_path), any_backend]):
-        try:
-            exec(code, {"sys": sys_module, "__name__": "__main__"})
-        except NotImplementedError as e:
-            if "does not support settings" in str(e):
-                pytest.xfail(f"Example {example_path.name} uses unsupported settings.")
-            raise
+        exec(code, {"sys": sys_module, "__name__": "__main__"})
 
     # Validate that example created output files (use rglob for subdirectories)
     # By convention, all examples should create outputs starting with "example_"

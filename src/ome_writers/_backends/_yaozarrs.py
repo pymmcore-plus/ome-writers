@@ -348,7 +348,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
     def get_arrays(self) -> Sequence[ArrayLike]:
         """Return array-like objects for each position."""
         if self._arrays:
-            return self._arrays  # type: ignore[return-value]
+            return self._arrays  # type: ignore
         if self._finalized and self._root and self._image_group_paths:
             return self._reopen_arrays()
         raise RuntimeError("Backend not prepared. Call prepare() first.")
@@ -494,7 +494,7 @@ def _open_any_zarr_readonly(path: Path) -> ArrayLike:
         import tensorstore as ts
 
         spec = {"driver": "zarr3", "kvstore": {"driver": "file", "path": str(path)}}
-        return ts.open(spec, read=True, write=False).result()  # type: ignore[return-value]
+        return ts.open(spec, read=True, write=False).result()  # type: ignore
 
     with suppress(ImportError):
         import zarr
