@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -264,13 +263,7 @@ def test_cases(
 
     # -------------- Write out all frames --------------
 
-    try:
-        write_encoded_data(settings, real_unbounded_count=UNBOUNDED_FRAME_COUNT)
-    except NotImplementedError as e:
-        if re.match("Backend .* does not support settings", str(e)):
-            pytest.xfail(f"Backend does not support this configuration: {e}")
-            return
-        raise
+    write_encoded_data(settings, real_unbounded_count=UNBOUNDED_FRAME_COUNT)
 
     if settings.format.name == "ome-tiff":
         _assert_valid_ome_tiff(settings)
