@@ -26,7 +26,6 @@ class AcquireZarrBackend(YaozarrsBackend):
     - acquire-zarr: High-performance sequential writes for array data
 
     Requirements:
-    - storage_order="acquisition" (sequential writes only)
     - Root path must end with .zarr
     """
 
@@ -42,16 +41,6 @@ class AcquireZarrBackend(YaozarrsBackend):
         self._zarr_json_backup: dict[Path, bytes] = {}
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
-        if settings.storage_index_permutation is not None:
-            return (
-                "AcquireZarrBackend does not support permuted storage order. "
-                "Data must be written in acquisition order."
-            )
-        if len(settings.array_storage_dimensions) < 3:
-            return (
-                "AcquireZarrBackend requires at least 3 dimensions. "
-                "2D images are not currently supported."
-            )
         try:
             self._resolve_compression(settings.compression)
         except ValueError as e:
@@ -90,11 +79,18 @@ class AcquireZarrBackend(YaozarrsBackend):
             self._zarr_json_backup[zarr_json] = zarr_json.read_bytes()
 
         # Create acquire-zarr stream
-        ndims = len(settings.array_storage_dimensions)
+        # Dimensions are passed in acquisition order; storage_dimension_order
+        # tells acquire-zarr how to rearrange them on disk when they differ.
+        acq_dims = settings.array_dimensions
+        ndims = len(acq_dims)
         az_dims = [
             _to_acquire_dim(dim, frame_dim=(i >= ndims - 2))
-            for i, dim in enumerate(settings.array_storage_dimensions)
+            for i, dim in enumerate(acq_dims)
         ]
+
+        storage_dim_order: list[str] | None = None
+        if settings.storage_index_permutation is not None:
+            storage_dim_order = [d.name for d in settings.array_storage_dimensions]
 
         compression_settings = self._resolve_compression(settings.compression)
         self._stream = az.ZarrStream(
@@ -105,6 +101,7 @@ class AcquireZarrBackend(YaozarrsBackend):
                         dimensions=az_dims,
                         data_type=settings.dtype,
                         compression=compression_settings,
+                        storage_dimension_order=storage_dim_order,
                     )
                     for key in self._az_pos_keys
                 ],
@@ -241,7 +238,7 @@ def _to_acquire_dim(dim: Dimension, frame_dim: bool) -> az.Dimension:
     return az.Dimension(
         name=dim.name,
         kind=kind,
-        array_size_px=dim.count or 1,
+        array_size_px=dim.count or 0,
         chunk_size_px=chunk_size,
         shard_size_chunks=dim.shard_size_chunks or 1,
     )
