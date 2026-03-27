@@ -44,7 +44,7 @@ zarrs-python = [
     "ome-writers[zarr-python]",
     "zarrs>=0.2.1; python_version >= '3.11'",
 ]
-acquire-zarr = ["acquire-zarr>=0.6.0; python_version < '3.14'"]
+acquire-zarr = ["acquire-zarr>=0.7.0"]
 tifffile = [
     "tifffile>=2024.8.30",
     "imagecodecs>=2024.9.22",
