@@ -283,15 +283,15 @@ class TiffBackend(ArrayBackend):
                     extra_kwargs[key] = value
 
             # meta_with_idx = {**frame_metadata, "storage_index": index}
-            annotation = ome.MapAnnotation(value=ome.Map.model_validate(extra_kwargs))
-            map_annotations.append(annotation)
-            planes = images[position_index].pixels.planes
-            planes.append(
-                ome.Plane(
-                    **plane_kwargs,
-                    annotation_refs=[ome.AnnotationRef(id=annotation.id)],
+            annotation_refs: list[ome.AnnotationRef] = []
+            if extra_kwargs:
+                annotation = ome.MapAnnotation(
+                    value=ome.Map.model_validate(extra_kwargs)
                 )
-            )
+                map_annotations.append(annotation)
+                annotation_refs.append(ome.AnnotationRef(id=annotation.id))
+            planes = images[position_index].pixels.planes
+            planes.append(ome.Plane(**plane_kwargs, annotation_refs=annotation_refs))
             mirror.mark_dirty()
 
     def finalize(self) -> None:

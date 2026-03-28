@@ -436,6 +436,42 @@ def test_frame_metadata_single_position(tmp_path: Path, tiff_backend: str) -> No
     assert planes[0].annotation_refs[0].id == map_annots[0].id
 
 
+def test_frame_metadata_plane_keys_only(tmp_path: Path, tiff_backend: str) -> None:
+    """Don't write empty map annotations if frame_metadata only contains plane keys."""
+    root = tmp_path / "plane_only.ome.tiff"
+    settings = AcquisitionSettings(
+        root_path=root,
+        dimensions=[
+            Dimension(name="t", count=2, type="time"),
+            Dimension(name="y", count=16, type="space"),
+            Dimension(name="x", count=16, type="space"),
+        ],
+        dtype="uint16",
+        format=tiff_backend,
+    )
+
+    with create_stream(settings) as stream:
+        for t in range(2):
+            frame = np.zeros((16, 16), dtype=np.uint16)
+            stream.append(
+                frame,
+                frame_metadata={"delta_t": t * 1.0, "exposure_time": 0.05},
+            )
+
+    ome_obj = from_tiff(str(root))
+    planes = ome_obj.images[0].pixels.planes
+    assert len(planes) == 2
+    assert planes[0].delta_t == 0.0
+    assert planes[1].delta_t == 1.0
+    assert planes[0].exposure_time == 0.05
+
+    # No extra keys beyond plane keys, so no annotations should exist
+    sa = ome_obj.structured_annotations
+    assert sa is None or len(sa.map_annotations) == 0
+    for plane in planes:
+        assert len(plane.annotation_refs) == 0
+
+
 def test_frame_metadata_multiposition(tmp_path: Path, tiff_backend: str) -> None:
     """Test frame_metadata is position-specific for multi-position."""
     root = tmp_path / "multipos.ome.tiff"
