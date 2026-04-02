@@ -37,7 +37,7 @@ jobs:
       bench: ${{ steps.filter.outputs.bench }}
     steps:
       - uses: actions/checkout@v6
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         id: filter
         with:
           filters: |
@@ -147,7 +147,7 @@ jobs:
           update_existing: true
 
       - name: Upload coverage
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: covreport-${{ matrix.platform }}-py${{ matrix.python-version }}-${{ matrix.group }}-${{ matrix.resolution }}
           path: ./.coverage*
@@ -181,7 +181,7 @@ jobs:
 
     steps:
       - name: Download built artifact to dist/
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: Packages
           path: dist
