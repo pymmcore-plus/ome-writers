@@ -724,3 +724,60 @@ def test_well_plate_fov_folder_names(tmp_path: Path, zarr_backend: str) -> None:
     assert (zarr_root / "A" / "1" / "fov1").exists(), "Expected fov1 in well A1"
     assert (zarr_root / "B" / "2" / "fov0").exists(), "Expected fov0 in well B2"
     assert (zarr_root / "B" / "2" / "fov1").exists(), "Expected fov1 in well B2"
+
+
+def test_plate_from_position_annotations() -> None:
+    """Test that Plate is inferred from positions with plate_row/plate_col."""
+    seq = useq.MDASequence(
+        stage_positions=[
+            useq.Position(x=0, y=0, name="A1_fov0", plate_row=0, plate_col=0),
+            useq.Position(x=1, y=0, name="A1_fov1", plate_row=0, plate_col=0),
+            useq.Position(x=0, y=9, name="B2_fov0", plate_row=1, plate_col=1),
+        ],
+        channels=["DAPI"],
+    )
+    result = useq_to_acquisition_settings(seq, image_width=64, image_height=64)
+
+    # Plate should be inferred from annotations
+    plate = result["plate"]
+    assert plate is not None
+    assert plate.row_names == ["A", "B"]
+    assert plate.column_names == ["1", "2"]
+
+    # Positions should carry plate info
+    pos_dim = next(d for d in result["dimensions"] if d.type == "position")
+    assert pos_dim.coords is not None
+    assert pos_dim.coords[0].plate_row == "A"
+    assert pos_dim.coords[0].plate_column == "1"
+    assert pos_dim.coords[2].plate_row == "B"
+    assert pos_dim.coords[2].plate_column == "2"
+
+
+def test_plate_from_position_annotations_zarr(
+    tmp_path: Path, zarr_backend: str
+) -> None:
+    """Test ome-zarr well plate structure from positions with plate annotations."""
+    seq = useq.MDASequence(
+        stage_positions=[
+            useq.Position(x=0, y=0, name="fov0", plate_row=0, plate_col=0),
+            useq.Position(x=1, y=0, name="fov1", plate_row=0, plate_col=0),
+            useq.Position(x=0, y=9, name="fov0", plate_row=1, plate_col=1),
+        ],
+        channels=["DAPI"],
+    )
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "test_plate_annot.ome.zarr"),
+        **useq_to_acquisition_settings(seq, image_width=64, image_height=64),
+        dtype="uint16",
+        format=zarr_backend,
+    )
+
+    dummy_frame = np.zeros((64, 64), dtype="uint16")
+    with create_stream(settings) as stream:
+        for _ in seq:
+            stream.append(dummy_frame)
+
+    zarr_root = tmp_path / "test_plate_annot.ome.zarr"
+    assert (zarr_root / "A" / "1" / "fov0").exists()
+    assert (zarr_root / "A" / "1" / "fov1").exists()
+    assert (zarr_root / "B" / "2" / "fov0").exists()

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from typing_extensions import deprecated
 
@@ -12,7 +12,6 @@ if TYPE_CHECKING:
     from typing import TypeAlias, TypedDict
 
     import useq
-    from useq import RelativePosition
 
     class AcquisitionSettingsDict(TypedDict):
         """Return type for useq_to_acquisition_settings."""
@@ -73,9 +72,16 @@ def _dims_from_useq(
 ) -> list[Dimension]:
     try:
         from useq import Axis, MDASequence
+        from useq import Position as _UseqPos
     except ImportError:
-        # if we can't import useq, it can't be an instance of MDASequence
         raise ValueError("seq must be a useq.MDASequence") from None
+
+    # useq-schema >=0.9.2 added plate_row/plate_col/grid_row/grid_col to Position
+    if "plate_row" not in _UseqPos.model_fields:  # pragma: no cover
+        raise ImportError(
+            "useq-schema >= 0.9.2 is required (Position must have 'plate_row'). "
+            "Please upgrade: pip install 'useq-schema>=0.9.2'"
+        )
 
     if not isinstance(seq, MDASequence):  # pragma: no cover
         raise ValueError("seq must be a useq.MDASequence")
@@ -264,17 +270,15 @@ def useq_to_acquisition_settings(
     )
     ```
     """  # noqa: E501
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
-        dims = _dims_from_useq(
-            seq=seq,
-            image_width=image_width,
-            image_height=image_height,
-            units=units,
-            pixel_size_um=pixel_size_um,
-            chunk_shapes=chunk_shapes,
-            shard_shapes=shard_shapes,
-        )
+    dims = _dims_from_useq(
+        seq=seq,
+        image_width=image_width,
+        image_height=image_height,
+        units=units,
+        pixel_size_um=pixel_size_um,
+        chunk_shapes=chunk_shapes,
+        shard_shapes=shard_shapes,
+    )
     return {"dimensions": dims, "plate": _plate_from_useq(seq)}
 
 
@@ -336,8 +340,6 @@ def _validate_sequence(seq: useq.MDASequence) -> None:
                         "different dimensionality. Found dimension sizes (t,c,z): "
                         "Position subsequences may only contain grid_plan."
                     )
-                if sub.grid_plan:
-                    pass
 
 
 def _build_positions(seq: useq.MDASequence) -> list[Position]:
@@ -358,12 +360,12 @@ def _build_positions(seq: useq.MDASequence) -> list[Position]:
         return _build_stage_positions_plan(seq)
 
     # Case 3: Grid plan only (no stage_positions)
-    elif seq.grid_plan is not None:
+    if seq.grid_plan is not None:
         return [
             Position(
                 name=f"{i:04d}",
-                grid_row=getattr(gp, "row", None),
-                grid_column=getattr(gp, "col", None),
+                grid_row=gp.grid_row,
+                grid_column=gp.grid_col,
                 x_coord=gp.x,
                 y_coord=gp.y,
                 z_coord=gp.z,
@@ -378,44 +380,27 @@ def _build_well_plate_positions(plate_plan: useq.WellPlatePlan) -> list[Position
     """Return Positions in WellPlatePlan in order of visit."""
     from useq import RelativePosition
 
-    # iterating over plate_plan yields AbsolutePosition objects for every
-    # field of view, for every well, with absolute offsets applied.
-    # it's 1-to-1 with the Positions we want to create...
-    # however, their row/column provenance is not preserved,
-    # So we do our own iteration of selected_well_indices to get that info.
-    plate_iter = iter(plate_plan)
-
-    # the well_points_plan is an iterator of RelativePosition objects, explaining
-    # how to iterate within each well.
-    # it's *included* in the iteration of plate_plan above, but this is the only
-    # way to get the grid_row/grid_column info for each position in a well.
-    # It could be one of:
-    # GridRowsColumns | GridWidthHeight | RandomPoints | RelativePosition
+    # well_points_plan describes how to iterate within each well.
+    # We need it for grid_row/grid_col info (not available on the outer positions).
     wpp = plate_plan.well_points_plan
-    well_positions: list[RelativePosition] = (
-        [wpp] if isinstance(wpp, RelativePosition) else list(wpp)
-    )
+    well_positions = [wpp] if isinstance(wpp, RelativePosition) else list(wpp)
+    n_fovs = len(well_positions)
 
     positions: list[Position] = []
-    for row_idx, col_idx in plate_plan.selected_well_indices:
-        plate_row = _row_idx_to_letter(row_idx)
-        plate_column = str(col_idx + 1)
-        for fov_idx, well_pos in enumerate(well_positions):
-            pos = next(plate_iter)  # grab the next AbsolutePosition in the outer loop
-            # NOTE: the pos.name is a useq's auto-generated name, either WellName_fovN
-            # for multi-fovs (e.g. A1_0000, etc) or just WellName for single fov
-            # (e.g. A1, B3, etc). We replace it with `fov{fov_idx}.
-            positions.append(
-                Position(
-                    name=f"fov{fov_idx}",
-                    plate_row=plate_row,
-                    plate_column=plate_column,
-                    grid_row=getattr(well_pos, "row", None),
-                    grid_column=getattr(well_pos, "col", None),
-                    x_coord=pos.x,
-                    y_coord=pos.y,
-                )
+    for i, pos in enumerate(plate_plan):
+        fov_idx = i % n_fovs
+        well_pos = well_positions[fov_idx]
+        positions.append(
+            Position(
+                name=f"fov{fov_idx}",
+                plate_row=_row_idx_to_letter(pos.plate_row),
+                plate_column=str((pos.plate_col or 0) + 1),
+                grid_row=well_pos.grid_row,
+                grid_column=well_pos.grid_col,
+                x_coord=pos.x,
+                y_coord=pos.y,
             )
+        )
 
     return positions
 
@@ -429,6 +414,20 @@ def _row_idx_to_letter(index: int) -> str:
     return name
 
 
+def _plate_strs(pos: useq.Position) -> tuple[str | None, str | None]:
+    """Convert useq plate_row/plate_col (0-based ints) to ome-writers strings."""
+    if pos.plate_row is not None and pos.plate_col is not None:
+        return _row_idx_to_letter(pos.plate_row), str(pos.plate_col + 1)
+    if (pos.plate_row is None) != (pos.plate_col is None):
+        warnings.warn(
+            f"Position {pos.name!r} has plate_row={pos.plate_row} but "
+            f"plate_col={pos.plate_col}. Both must be set. Ignoring plate info.",
+            UserWarning,
+            stacklevel=3,
+        )
+    return None, None
+
+
 def _pos_with_grid_point(
     name: str,
     pos: useq.Position,
@@ -437,34 +436,34 @@ def _pos_with_grid_point(
     pos_idx: int | None = None,
 ) -> Position:
     """Create a Position by combining a stage position with a grid point."""
-    # This block of code asserts (/assumes) that if we have an absolute grid plan
-    # then the position is irrelevant/overriden.
-    # This basically results from a design flaw in useq where it's possible to combine
+    # If we have an absolute grid plan, the grid point coordinates are used directly.
+    # This results from a design flaw in useq where it's possible to combine
     # an absolute grid plan with (absolute) stage positions.  We will likely change
     # that in the future, but is the current v1 semantics.
     if not gp.is_relative:
         x_coord = gp.x
         y_coord = gp.y
     else:
-        # relative grid points are offsets from the stage position.
-        # and the stage position is missing, we assume it to be 0 (!!!!!)
-        # that's also bad... but it's consistent.
-        x_coord = (pos.x or 0) + cast("RelativePosition", gp).x
-        y_coord = (pos.y or 0) + cast("RelativePosition", gp).y
+        # relative grid points are offsets from the stage position
+        x_coord = (pos.x or 0) + (gp.x or 0)
+        y_coord = (pos.y or 0) + (gp.y or 0)
 
     # When there is no row/col (e.g. RandomPoints), append an index to the
     # name so each sub-position is unique
-    grid_row, grid_col = getattr(gp, "row", None), getattr(gp, "col", None)
-    if grid_row is None and grid_col is None:
+    if gp.grid_row is None and gp.grid_col is None:
         if pos_idx is not None:
             suffix = f"p{pos_idx:04d}_g{gp_idx:04d}"
             name = f"{name}_{suffix}" if name else suffix
         else:
             name = f"{name}_g{gp_idx:04d}" if name else f"{gp_idx:04d}"
+
+    plate_row, plate_col = _plate_strs(pos)
     return Position(
         name=name,
-        grid_row=grid_row,
-        grid_column=grid_col,
+        grid_row=gp.grid_row,
+        grid_column=gp.grid_col,
+        plate_row=plate_row,
+        plate_column=plate_col,
         x_coord=x_coord,
         y_coord=y_coord,
         z_coord=pos.z,
@@ -514,14 +513,17 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
                     )
                 )
         else:
+            plate_row, plate_col = _plate_strs(pos)
             positions.append(
                 Position(
                     name=name,
                     x_coord=pos.x,
                     y_coord=pos.y,
                     z_coord=pos.z,
-                    grid_column=pos.col,
-                    grid_row=pos.row,
+                    grid_column=pos.grid_col,
+                    grid_row=pos.grid_row,
+                    plate_row=plate_row,
+                    plate_column=plate_col,
                 )
             )
 
@@ -529,16 +531,36 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
 
 
 def _plate_from_useq(seq: useq.MDASequence) -> Plate | None:
-    """Convert a useq WellPlatePlan to an ome-writers Plate."""
+    """Convert a useq sequence to an ome-writers Plate.
+
+    Uses WellPlatePlan metadata if available, otherwise infers plate geometry
+    from plate_row/plate_col annotations on positions.
+    """
     import useq
 
     useq_plate = seq.stage_positions
-    if not isinstance(useq_plate, useq.WellPlatePlan):
-        return None
+    if isinstance(useq_plate, useq.WellPlatePlan):
+        plate = useq_plate.plate
+        return Plate(
+            row_names=[_row_idx_to_letter(i) for i in range(plate.rows)],
+            column_names=[str(i + 1) for i in range(plate.columns)],
+            name=plate.name or None,
+        )
 
-    plate = useq_plate.plate
-    return Plate(
-        row_names=[_row_idx_to_letter(i) for i in range(plate.rows)],
-        column_names=[str(i + 1) for i in range(plate.columns)],
-        name=plate.name or None,
-    )
+    # Fallback: infer plate from position annotations
+    rows: set[int] = set()
+    cols: set[int] = set()
+    for pos in seq.stage_positions:
+        if pos.plate_row is not None and pos.plate_col is not None:
+            rows.add(pos.plate_row)
+            cols.add(pos.plate_col)
+
+    if rows and cols:
+        max_row = max(rows)
+        max_col = max(cols)
+        return Plate(
+            row_names=[_row_idx_to_letter(i) for i in range(max_row + 1)],
+            column_names=[str(i + 1) for i in range(max_col + 1)],
+        )
+
+    return None
