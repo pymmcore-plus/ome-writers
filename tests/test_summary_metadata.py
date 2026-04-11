@@ -351,10 +351,10 @@ def test_tiff_summary_metadata_master_tiff(tmp_path: Path, tiff_backend: str) ->
         assert a.namespace != "pymmcore_plus"
 
 
-def test_tiff_summary_metadata_redundant_unsupported(
+def test_tiff_summary_metadata_redundant_fans_out(
     tmp_path: Path, tiff_backend: str
 ) -> None:
-    """Redundant mode raises NotImplementedError with guidance."""
+    """Redundant mode writes a copy of the annotation into every file."""
     multipos_dir = tmp_path / "redundant"
     settings = AcquisitionSettings(
         root_path=str(multipos_dir),
@@ -372,12 +372,26 @@ def test_tiff_summary_metadata_redundant_unsupported(
         },
     )
 
+    summary = {"mda": "redundant", "note": "every file"}
     with create_stream(settings) as stream:
-        with pytest.raises(NotImplementedError, match="companion-file"):
-            stream.set_summary_metadata("pymmcore_plus", {"x": 1})
-        # still allow the rest of the acquisition to run
+        stream.set_summary_metadata("pymmcore_plus", summary)
         for _ in range(4):
             stream.append(np.zeros((16, 16), dtype=np.uint16))
+
+    for pos_idx in range(2):
+        tiff_path = multipos_dir / f"redundant_p{pos_idx:03d}.ome.tiff"
+        ome_obj = from_tiff(str(tiff_path))
+        matches = [
+            a for a in _get_map_annotations(ome_obj) if a.namespace == "pymmcore_plus"
+        ]
+        assert len(matches) == 1, f"pos {pos_idx} missing summary annotation"
+        assert _decode_summary(matches[0]) == summary
+
+        # Not referenced by any plane.
+        ann_id = matches[0].id
+        for image in ome_obj.images:
+            for plane in image.pixels.planes:
+                assert all(ref.id != ann_id for ref in plane.annotation_refs)
 
 
 def test_tiff_summary_metadata_replace(tmp_path: Path, tiff_backend: str) -> None:
