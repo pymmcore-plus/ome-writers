@@ -228,12 +228,7 @@ class ArrayBackend(ABC):
 
     @abstractmethod
     def set_summary_metadata(self, namespace: str, metadata: Mapping[str, Any]) -> None:
-        """Attach acquisition-level metadata under a single namespace.
-
-        The value is stored in exactly one place on disk per call,
-        regardless of the number of positions in the acquisition. Same
-        namespace replaces; different namespaces are siblings.
-        """
+        """Attach acquisition-level metadata under a single namespace."""
 
     def update_metadata(self, metadata: Any) -> None:
         """Update metadata after writing is complete.
