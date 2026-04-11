@@ -134,6 +134,7 @@ class TiffBackend(ArrayBackend):
 
     def __init__(self) -> None:
         self._finalized = False
+        self._state_lock = threading.Lock()
         self._position_managers: dict[int, PositionManager] = {}
         self._storage_dims: tuple[Dimension, ...] | None = None
         self._dtype: str = ""
@@ -370,41 +371,45 @@ class TiffBackend(ArrayBackend):
 
         Must be called before ``close()`` (i.e. during acquisition).
         """
-        if self._finalized:
-            raise RuntimeError(
-                "set_summary_metadata() must be called before the stream is "
-                "closed. Use update_metadata() for post-close modifications."
-            )
-
-        payload = json.dumps(dict(metadata))
-
-        for pos_idx in self._summary_target_pos_idxs():
-            manager = self._position_managers[pos_idx]
-            with manager._lock:
-                model = manager.metadata_mirror.model
-                if not (structured := model.structured_annotations):
-                    model.structured_annotations = structured = (
-                        ome.StructuredAnnotations()
-                    )
-
-                # Replace any existing MapAnnotation with the same Namespace
-                # so that this is a setter rather than an appender.
-                structured.map_annotations = [
-                    ann
-                    for ann in structured.map_annotations
-                    if ann.namespace != namespace
-                ]
-                structured.map_annotations.append(
-                    ome.MapAnnotation(
-                        namespace=namespace,
-                        value=ome.Map.model_validate({"data_json": payload}),
-                    )
+        with self._state_lock:
+            if self._finalized:
+                raise RuntimeError(
+                    "set_summary_metadata() must be called before the stream is "
+                    "closed. Use update_metadata() for post-close modifications."
                 )
-                manager.metadata_mirror.mark_dirty()
+
+            payload = json.dumps(dict(metadata))
+
+            for pos_idx in self._summary_target_pos_idxs():
+                manager = self._position_managers[pos_idx]
+                with manager._lock:
+                    model = manager.metadata_mirror.model
+                    if not (structured := model.structured_annotations):
+                        model.structured_annotations = structured = (
+                            ome.StructuredAnnotations()
+                        )
+
+                    # Replace any existing MapAnnotation with the same Namespace
+                    # so that this is a setter rather than an appender.
+                    structured.map_annotations = [
+                        ann
+                        for ann in structured.map_annotations
+                        if ann.namespace != namespace
+                    ]
+                    structured.map_annotations.append(
+                        ome.MapAnnotation(
+                            namespace=namespace,
+                            value=ome.Map.model_validate({"data_json": payload}),
+                        )
+                    )
+                    manager.metadata_mirror.mark_dirty()
 
     def finalize(self) -> None:
         """Flush and close all TIFF writers."""
-        if not self._finalized:
+        with self._state_lock:
+            if self._finalized:
+                return
+
             # Signal all threads to stop (parallel shutdown begins)
             for manager in self._position_managers.values():
                 manager.signal_stop()

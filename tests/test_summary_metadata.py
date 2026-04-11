@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -443,3 +444,54 @@ def test_tiff_summary_metadata_siblings(tmp_path: Path, tiff_backend: str) -> No
         if a.namespace in ("ns_a", "ns_b")
     }
     assert namespaces == {"ns_a", "ns_b"}
+
+
+def test_tiff_summary_metadata_concurrent_with_close(
+    tmp_path: Path, tiff_backend: str
+) -> None:
+    """Concurrent summary updates and close should not crash."""
+    path = tmp_path / "concurrent_close.ome.tiff"
+    settings = AcquisitionSettings(
+        root_path=str(path),
+        dimensions=[
+            Dimension(name="t", count=16, type="time"),
+            Dimension(name="y", count=16, type="space"),
+            Dimension(name="x", count=16, type="space"),
+        ],
+        dtype="uint16",
+        format={"name": "ome-tiff", "backend": tiff_backend},
+    )
+
+    errors: list[BaseException] = []
+    stop = threading.Event()
+
+    stream = create_stream(settings)
+    stream.set_summary_metadata("ns", {"i": 0})
+
+    def _set_summary_loop() -> None:
+        i = 1
+        while not stop.is_set():
+            try:
+                stream.set_summary_metadata("ns", {"i": i})
+            except RuntimeError:
+                # Expected once close/finalize has completed.
+                break
+            except BaseException as e:
+                errors.append(e)
+                break
+            i += 1
+
+    worker = threading.Thread(target=_set_summary_loop)
+    worker.start()
+    try:
+        for _ in range(8):
+            stream.append(np.zeros((16, 16), dtype=np.uint16))
+    finally:
+        stream.close()
+        stop.set()
+        worker.join(timeout=2)
+
+    assert not errors
+    ome_obj = from_tiff(str(path))
+    matches = [a for a in _get_map_annotations(ome_obj) if a.namespace == "ns"]
+    assert len(matches) == 1

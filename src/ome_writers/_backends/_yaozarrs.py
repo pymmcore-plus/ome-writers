@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import threading
 import warnings
 from abc import abstractmethod
@@ -714,7 +716,26 @@ class JsonDocumentMirror(MutableMapping[str, Any]):
                         f"Failed to serialize zarr.json for {self._path}:\n{e}"
                     ) from e
 
-                self._path.write_text(json_str)
+                # Write via temp file and atomically replace destination to
+                # avoid exposing partially written JSON to concurrent readers.
+                tmp_path: str | None = None
+                try:
+                    with tempfile.NamedTemporaryFile(
+                        mode="w",
+                        encoding="utf-8",
+                        dir=self._path.parent,
+                        prefix=f"{self._path.name}.",
+                        suffix=".tmp",
+                        delete=False,
+                    ) as tmp:
+                        tmp.write(json_str)
+                        tmp_path = tmp.name
+                    os.replace(tmp_path, self._path)
+                    tmp_path = None  # replace consumed it; skip cleanup
+                finally:
+                    if tmp_path is not None:
+                        with suppress(FileNotFoundError):
+                            Path(tmp_path).unlink()
                 self._dirty = False
 
     def load(self) -> None:
