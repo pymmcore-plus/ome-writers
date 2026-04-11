@@ -155,10 +155,6 @@ class ScratchBackend(ArrayBackend):
         """Store summary metadata in memory, keyed by namespace."""
         self._summary_metadata[namespace] = deepcopy(dict(metadata))
 
-    def get_metadata(self) -> dict[str, Any]:
-        """Return acquisition-level summary metadata (namespace -> payload)."""
-        return deepcopy(self._summary_metadata)
-
     def advance(self, indices: Sequence[tuple[int, tuple[int, ...]]]) -> None:
         for pos_idx, index in indices:
             self._ensure_size(pos_idx, index)
