@@ -13,7 +13,7 @@ from ome_writers._coord_tracker import CoordUpdate
 from ome_writers._router import FrameRouter
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     import numpy as np
 
@@ -208,6 +208,50 @@ class OMEStream:
     def update_metadata(self, metadata: Any) -> None:
         """Update metadata in the backend.  Meaning is format-dependent."""
         self._backend.update_metadata(metadata)
+
+    def set_summary_metadata(self, namespace: str, metadata: Mapping[str, Any]) -> None:
+        """Attach acquisition-level metadata to the stream under a namespace.
+
+        Unlike per-frame metadata (see `append`) and per-position metadata
+        (see `update_metadata`), the payload passed here is stored in exactly
+        one location on disk per call, regardless of the number of positions
+        in the acquisition. This makes it the right place for a single
+        acquisition-level "summary" blob (acquisition settings, MDA sequence,
+        hardware state, etc.).
+
+        Calling this method again with the same `namespace` replaces the
+        previously set value. Calling with a different `namespace` adds a
+        sibling entry; namespaces never merge with each other.
+
+        Parameters
+        ----------
+        namespace : str
+            Namespace identifier. For OME-Zarr this becomes a top-level key under the
+            parent root group's `attributes`. For OME-TIFF this becomes the `Namespace`
+            attribute of a `MapAnnotation` placed directly under the canonical file's
+            `OME.structured_annotations` (not referenced by any plane). The names
+            `"ome"` and `"ome_writers"` are reserved and will raise `ValueError`.
+        metadata : Mapping[str, Any]
+            JSON-serializable mapping. May be arbitrarily nested for OME-Zarr. For
+            OME-TIFF, the entire mapping is JSON-encoded into a single `Map` entry (key
+            `data_json`), since the OME `Map` type cannot represent nested structures
+            natively.
+
+        Raises
+        ------
+        ValueError
+            If `namespace` is empty or reserved.
+        NotImplementedError
+            If the backend does not support summary metadata. In particular, the
+            OME-TIFF backend does not support this API when
+            `multi_file_metadata='redundant'` (the default for multi-position
+            acquisitions) — use `'companion-file'` or `'master-tiff'` instead.
+        """
+        if not isinstance(namespace, str) or not namespace:
+            raise ValueError("namespace must be a non-empty string")
+        if namespace in ("ome", "ome_writers"):
+            raise ValueError(f"namespace {namespace!r} is reserved by ome-writers")
+        self._backend.set_summary_metadata(namespace, metadata)
 
     def __enter__(self) -> OMEStream:
         """Enter context manager."""

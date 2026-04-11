@@ -6,7 +6,7 @@ import json
 import threading
 import warnings
 from abc import abstractmethod
-from collections.abc import Iterator, MutableMapping
+from collections.abc import Iterator, Mapping, MutableMapping
 from contextlib import suppress
 from copy import deepcopy
 from pathlib import Path
@@ -71,6 +71,11 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         self._arrays: list[_AT] = []
         self._image_group_paths: list[str] = []  # Parallel to _arrays, for metadata
         self._meta_mirrors: dict[str, JsonDocumentMirror] = {}  # grouppath -> mirror
+        # Mirror for the *parent* root group's zarr.json, used for
+        # set_summary_metadata(). For single-position layouts this is the same
+        # object as self._meta_mirrors["."]; for multi-position (bf2raw) and
+        # plate layouts it is a separate mirror over <root>/zarr.json.
+        self._root_meta_mirror: JsonDocumentMirror | None = None
         self._finalized = False
         self._root: Path | None = None
         self._chunk_buffers: list[ChunkBuffer] | None = None
@@ -203,6 +208,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         # Cache metadata immediately after creation
         # This is used later for get_metadata() and update_metadata()
         self._cache_metadata_from_arrays(root)
+        self._cache_root_meta_mirror(root)
 
         # Initialize chunk buffering if beneficial
         if self._should_use_chunk_buffering(storage_dims):
@@ -434,6 +440,11 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
             self._finalize_chunk_buffers()
             for mirror in self._meta_mirrors.values():
                 mirror.flush()
+            if (
+                self._root_meta_mirror is not None
+                and self._root_meta_mirror not in self._meta_mirrors.values()
+            ):
+                self._root_meta_mirror.flush()
             self._arrays.clear()
             # Keep _image_group_paths for post-close reading
             self._finalized = True
@@ -459,6 +470,43 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
     def _resize(self, array: _AT, new_shape: Sequence[int]) -> None:
         """Resize array to new shape."""
         array.resize(new_shape)
+
+    def _cache_root_meta_mirror(self, root: Path) -> None:
+        """Cache a mirror for the parent root group's zarr.json.
+
+        For single-position layouts the parent root group *is* the image
+        group, so we reuse the existing mirror. For multi-position (bf2raw)
+        and plate layouts, open a new mirror over ``<root>/zarr.json``.
+        """
+        # Single-position: parent root group is the image group itself.
+        if self._image_group_paths == ["."]:
+            self._root_meta_mirror = self._meta_mirrors.get(".")
+            return
+
+        root_json = root / "zarr.json"
+        if root_json.exists():
+            mirror = JsonDocumentMirror(root_json)
+            mirror.load()
+            self._root_meta_mirror = mirror
+        else:  # pragma: no cover
+            self._root_meta_mirror = None
+
+    def set_summary_metadata(self, namespace: str, metadata: Mapping[str, Any]) -> None:
+        """Write acquisition-level metadata to the parent root group's attrs.
+
+        The value is stored under ``attributes[namespace]`` in
+        ``<root>/zarr.json``. Same namespace replaces prior value; different
+        namespaces are stored as siblings. No merging.
+        """
+        mirror = self._root_meta_mirror
+        if mirror is None:  # pragma: no cover
+            raise RuntimeError("Backend not prepared. Call prepare() first.")
+
+        with mirror._lock:
+            attrs = cast("dict[str, Any]", mirror._data.setdefault("attributes", {}))
+            attrs[namespace] = deepcopy(dict(metadata))
+            mirror._dirty = True
+        mirror.flush()
 
     def _cache_metadata_from_arrays(self, root: Path) -> None:
         """Cache metadata from parent groups.

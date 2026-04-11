@@ -53,7 +53,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
     from typing import Any, Literal
 
     import numpy as np
@@ -225,6 +225,15 @@ class ArrayBackend(ABC):
         - Custom keys for non-standard metadata (timestamps, etc.)
         """
         return None  # pragma: no cover
+
+    @abstractmethod
+    def set_summary_metadata(self, namespace: str, metadata: Mapping[str, Any]) -> None:
+        """Attach acquisition-level metadata under a single namespace.
+
+        The value is stored in exactly one place on disk per call,
+        regardless of the number of positions in the acquisition. Same
+        namespace replaces; different namespaces are siblings.
+        """
 
     def update_metadata(self, metadata: Any) -> None:
         """Update metadata after writing is complete.

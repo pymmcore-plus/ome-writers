@@ -9,6 +9,7 @@ import shutil
 import tempfile
 import warnings
 from contextlib import suppress
+from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,7 +20,7 @@ from ome_writers._backends._backend import ArrayBackend
 from ome_writers._schema import ScratchFormat
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
     from io import IOBase
     from typing import Any, Final, Literal
 
@@ -40,6 +41,7 @@ class ScratchBackend(ArrayBackend):
         "_metadata_fh",
         "_root_path",
         "_settings_dump",
+        "_summary_metadata",
         "_unbounded_axes",
     )
 
@@ -59,6 +61,8 @@ class ScratchBackend(ArrayBackend):
         self._metadata_fh: IOBase | None = None
         # Flag to prevent multiple finalization steps
         self._finalized: bool = False
+        # Acquisition-level summary metadata set via set_summary_metadata()
+        self._summary_metadata: dict[str, dict[str, Any]] = {}
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         return False
@@ -146,6 +150,14 @@ class ScratchBackend(ArrayBackend):
         if frame_metadata and self._metadata_fh is not None:
             record = {"_pos": position_index, "_idx": index, **frame_metadata}
             self._metadata_fh.write(json.dumps(record) + "\n")
+
+    def set_summary_metadata(self, namespace: str, metadata: Mapping[str, Any]) -> None:
+        """Store summary metadata in memory, keyed by namespace."""
+        self._summary_metadata[namespace] = deepcopy(dict(metadata))
+
+    def get_metadata(self) -> dict[str, Any]:
+        """Return acquisition-level summary metadata (namespace -> payload)."""
+        return deepcopy(self._summary_metadata)
 
     def advance(self, indices: Sequence[tuple[int, tuple[int, ...]]]) -> None:
         for pos_idx, index in indices:

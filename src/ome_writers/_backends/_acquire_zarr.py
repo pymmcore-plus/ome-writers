@@ -166,6 +166,20 @@ class AcquireZarrBackend(YaozarrsBackend):
                 path.write_bytes(content)
             self._zarr_json_backup.clear()
 
+            # After the backup-restore, on-disk zarr.json files are back to
+            # their pristine yaozarrs state. Any user modifications that live
+            # only in the in-memory mirrors (frame_metadata, summary
+            # metadata) would be lost without a re-flush. Re-mark mirrors
+            # dirty so super().finalize() re-writes the authoritative
+            # in-memory state on top of the restored backup.
+            for mirror in self._meta_mirrors.values():
+                mirror._dirty = True
+            if (
+                self._root_meta_mirror is not None
+                and self._root_meta_mirror not in self._meta_mirrors.values()
+            ):
+                self._root_meta_mirror._dirty = True
+
         super().finalize()
 
     def _resolve_compression(

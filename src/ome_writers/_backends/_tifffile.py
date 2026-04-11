@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import threading
 import warnings
@@ -15,17 +16,17 @@ from typing import TYPE_CHECKING, Literal, cast
 import numpy as np
 
 from ome_writers._backends._backend import ArrayBackend
-from ome_writers._backends._ome_xml import prepare_metadata
+from ome_writers._backends._ome_xml import COMPANION_IDX, prepare_metadata
 from ome_writers._backends._tiff_array import FinalizedTiffArray, LiveTiffArray
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Iterator, Mapping, Sequence
     from typing import Any
 
     from ome_writers._backends._backend import ArrayLike
     from ome_writers._backends._ome_xml import OmeXMLMirror
     from ome_writers._router import FrameRouter
-    from ome_writers._schema import AcquisitionSettings, Dimension
+    from ome_writers._schema import AcquisitionSettings, Dimension, OmeTiffFormat
 
 try:
     import ome_types.model as ome
@@ -110,6 +111,17 @@ class PositionManager:
             if data_blocks := pixels.tiff_data_blocks:
                 data_blocks[0].plane_count = self.thread.frames_written
             self.metadata_mirror.flush(force=True)
+        elif self._metadata_dirty_fallback():
+            # Fallback: flush if any in-memory modifications have been made
+            # (e.g. set_summary_metadata on a 2D-only or zero-frame
+            # acquisition). This respects the dirty flag so empty streams
+            # that never modified the model don't trigger tiffcomment on a
+            # zero-page TIFF.
+            self.metadata_mirror.flush()
+
+    def _metadata_dirty_fallback(self) -> bool:
+        """Return whether the metadata mirror has unflushed modifications."""
+        return getattr(self.metadata_mirror, "_dirty", False)
 
 
 class TiffBackend(ArrayBackend):
@@ -126,6 +138,8 @@ class TiffBackend(ArrayBackend):
         self._storage_dims: tuple[Dimension, ...] | None = None
         self._dtype: str = ""
         self._frame_metadata: dict[int, list[dict[str, Any]]] = {}
+        self._tiff_format: OmeTiffFormat | None = None
+        self._single_file: bool = False
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         """Check if settings are compatible with TIFF backend."""
@@ -154,7 +168,16 @@ class TiffBackend(ArrayBackend):
 
     def prepare(self, settings: AcquisitionSettings, router: FrameRouter) -> None:
         """Initialize OME-TIFF files and writer threads."""
+        from ome_writers._schema import OmeTiffFormat
+
         self._finalized = False
+        if isinstance(settings.format, OmeTiffFormat):
+            self._tiff_format = settings.format
+            prefer = settings.format.prefer_single_file
+            num_pos = len(settings.positions)
+            self._single_file = prefer == "always" or (
+                prefer == "auto" and num_pos <= 1
+            )
         self._storage_dims = storage_dims = settings.array_storage_dimensions
         # Extract index keys, excluding Y and X, example: ['t', 'c', 'z']
         self._index_keys = [d.name for d in storage_dims[:-2]]
@@ -293,6 +316,82 @@ class TiffBackend(ArrayBackend):
             planes = images[position_index].pixels.planes
             planes.append(ome.Plane(**plane_kwargs, annotation_refs=annotation_refs))
             mirror.mark_dirty()
+
+    def _canonical_summary_pos_idx(self) -> int:
+        """Return the pos_idx of the manager that should hold summary metadata.
+
+        Returns ``COMPANION_IDX`` for companion-file mode, ``0`` for
+        single-file and master-tiff modes. Raises ``NotImplementedError``
+        for the multi-file redundant mode (the default), since there is no
+        single canonical file to write to in that case.
+        """
+        if not self._position_managers:  # pragma: no cover
+            raise RuntimeError("Backend not prepared. Call prepare() first.")
+
+        # Companion-file mode: the companion file has the special index.
+        if COMPANION_IDX in self._position_managers:
+            return COMPANION_IDX
+
+        # Single-file mode: only one position exists, and it has full metadata.
+        if self._single_file:
+            return 0
+
+        # Multi-file mode without a companion: must be master-tiff or redundant.
+        mode = (
+            self._tiff_format.multi_file_metadata if self._tiff_format else "redundant"
+        )
+        if mode == "master-tiff":
+            return 0
+        if mode == "redundant":
+            raise NotImplementedError(
+                "set_summary_metadata is not supported for OME-TIFF in "
+                "'redundant' multi_file_metadata mode. Use 'companion-file' "
+                "or 'master-tiff' instead."
+            )
+        # Any other new mode that isn't recognized here.
+        raise NotImplementedError(  # pragma: no cover
+            f"set_summary_metadata is not implemented for multi_file_metadata={mode!r}."
+        )
+
+    def set_summary_metadata(self, namespace: str, metadata: Mapping[str, Any]) -> None:
+        """Attach acquisition-level metadata as a single MapAnnotation.
+
+        The annotation is placed under the canonical file's
+        ``OME.structured_annotations.map_annotations`` with
+        ``Namespace=namespace``, and is NOT referenced by any plane
+        (distinguishing it from per-frame metadata). Same namespace replaces;
+        different namespaces are siblings.
+
+        Must be called before ``close()`` (i.e. during acquisition).
+        """
+        if self._finalized:
+            raise RuntimeError(
+                "set_summary_metadata() must be called before the stream is "
+                "closed. Use update_metadata() for post-close modifications."
+            )
+
+        pos_idx = self._canonical_summary_pos_idx()
+        manager = self._position_managers[pos_idx]
+
+        payload = json.dumps(dict(metadata))
+
+        with manager._lock:
+            model = manager.metadata_mirror.model
+            if not (structured := model.structured_annotations):
+                model.structured_annotations = structured = ome.StructuredAnnotations()
+
+            # Replace any existing MapAnnotation with the same Namespace so
+            # that this is a setter rather than an appender.
+            structured.map_annotations = [
+                ann for ann in structured.map_annotations if ann.namespace != namespace
+            ]
+            structured.map_annotations.append(
+                ome.MapAnnotation(
+                    namespace=namespace,
+                    value=ome.Map.model_validate({"data_json": payload}),
+                )
+            )
+            manager.metadata_mirror.mark_dirty()
 
     def finalize(self) -> None:
         """Flush and close all TIFF writers."""
