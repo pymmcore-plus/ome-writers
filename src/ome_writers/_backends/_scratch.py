@@ -61,7 +61,7 @@ class ScratchBackend(ArrayBackend):
         self._metadata_fh: IOBase | None = None
         # Flag to prevent multiple finalization steps
         self._finalized: bool = False
-        # Acquisition-level summary metadata set via set_summary_metadata()
+        # Acquisition-level global metadata set via set_global_metadata()
         self._summary_metadata: dict[str, dict[str, Any]] = {}
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
@@ -151,8 +151,8 @@ class ScratchBackend(ArrayBackend):
             record = {"_pos": position_index, "_idx": index, **frame_metadata}
             self._metadata_fh.write(json.dumps(record) + "\n")
 
-    def set_summary_metadata(self, namespace: str, metadata: Mapping[str, Any]) -> None:
-        """Store summary metadata in memory, keyed by namespace."""
+    def set_global_metadata(self, namespace: str, metadata: Mapping[str, Any]) -> None:
+        """Store global metadata in memory, keyed by namespace."""
         self._summary_metadata[namespace] = deepcopy(dict(metadata))
 
     def advance(self, indices: Sequence[tuple[int, tuple[int, ...]]]) -> None:

@@ -209,11 +209,11 @@ class OMEStream:
         """Update metadata in the backend.  Meaning is format-dependent."""
         self._backend.update_metadata(metadata)
 
-    def set_summary_metadata(self, namespace: str, metadata: Mapping[str, Any]) -> None:
-        """Attach acquisition-level metadata to the stream under a namespace.
+    def set_global_metadata(self, namespace: str, metadata: Mapping[str, Any]) -> None:
+        """Attach global, acquisition-level metadata to the stream under a namespace.
 
         Unlike per-frame metadata (see `append`) and per-position metadata
-        (see `update_metadata`), the payload passed here is acquisition-level:
+        (see `update_metadata`), the payload passed here is per-stream:
         a single "summary" blob (acquisition settings, MDA sequence, hardware
         state, etc.) that applies to the acquisition as a whole rather than to
         any particular frame or position.
@@ -249,13 +249,13 @@ class OMEStream:
         ValueError
             If `namespace` is empty or reserved.
         NotImplementedError
-            If the backend does not support summary metadata at all.
+            If the backend does not support global metadata at all.
         """
         if not isinstance(namespace, str) or not namespace:
             raise ValueError("namespace must be a non-empty string")
         if namespace in ("ome", "ome_writers"):
             raise ValueError(f"namespace {namespace!r} is reserved by ome-writers")
-        self._backend.set_summary_metadata(namespace, metadata)
+        self._backend.set_global_metadata(namespace, metadata)
 
     def __enter__(self) -> OMEStream:
         """Enter context manager."""

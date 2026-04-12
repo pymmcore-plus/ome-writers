@@ -113,7 +113,7 @@ class PositionManager:
             self.metadata_mirror.flush(force=True)
         elif self._metadata_dirty_fallback():
             # Fallback: flush if any in-memory modifications have been made
-            # (e.g. set_summary_metadata on a 2D-only or zero-frame
+            # (e.g. set_global_metadata on a 2D-only or zero-frame
             # acquisition). This respects the dirty flag so empty streams
             # that never modified the model don't trigger tiffcomment on a
             # zero-page TIFF.
@@ -319,7 +319,7 @@ class TiffBackend(ArrayBackend):
             mirror.mark_dirty()
 
     def _summary_target_pos_idxs(self) -> list[int]:
-        """Return pos_idxs of managers that should receive summary metadata.
+        """Return pos_idxs of managers that should receive global metadata.
 
         The behavior depends on the ``multi_file_metadata`` mode:
 
@@ -354,7 +354,7 @@ class TiffBackend(ArrayBackend):
             if mgr.metadata_mirror.is_tiff
         )
 
-    def set_summary_metadata(self, namespace: str, metadata: Mapping[str, Any]) -> None:
+    def set_global_metadata(self, namespace: str, metadata: Mapping[str, Any]) -> None:
         """Attach acquisition-level metadata as a ``MapAnnotation``.
 
         The annotation is placed under the target file's
@@ -374,7 +374,7 @@ class TiffBackend(ArrayBackend):
         with self._state_lock:
             if self._finalized:
                 raise RuntimeError(
-                    "set_summary_metadata() must be called before the stream is "
+                    "set_global_metadata() must be called before the stream is "
                     "closed. Use update_metadata() for post-close modifications."
                 )
 

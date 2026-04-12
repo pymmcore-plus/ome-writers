@@ -227,8 +227,8 @@ class ArrayBackend(ABC):
         return None  # pragma: no cover
 
     @abstractmethod
-    def set_summary_metadata(self, namespace: str, metadata: Mapping[str, Any]) -> None:
-        """Attach acquisition-level metadata under a single namespace."""
+    def set_global_metadata(self, namespace: str, metadata: Mapping[str, Any]) -> None:
+        """Attach global, acquisition-level metadata under a single namespace."""
 
     def update_metadata(self, metadata: Any) -> None:
         """Update metadata after writing is complete.

@@ -1,4 +1,4 @@
-"""Tests for OMEStream.set_summary_metadata across backends."""
+"""Tests for OMEStream.set_global_metadata across backends."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ def _write_a_frame(stream: OMEStream, shape: tuple[int, int] = (16, 16)) -> None
 def test_zarr_summary_metadata_single_position(
     tmp_path: Path, zarr_backend: str
 ) -> None:
-    """Single-position Zarr writes summary metadata to root zarr.json."""
+    """Single-position Zarr writes global metadata to root zarr.json."""
     root = tmp_path / "single.zarr"
     settings = AcquisitionSettings(
         root_path=str(root),
@@ -52,7 +52,7 @@ def test_zarr_summary_metadata_single_position(
 
     summary = {"a": 1, "nested": {"b": [2, 3], "c": "hello"}}
     with create_stream(settings) as stream:
-        stream.set_summary_metadata("pymmcore_plus", summary)
+        stream.set_global_metadata("pymmcore_plus", summary)
         for _ in range(2):
             _write_a_frame(stream)
 
@@ -66,7 +66,7 @@ def test_zarr_summary_metadata_single_position(
 
 
 def test_zarr_summary_metadata_multiposition(tmp_path: Path, zarr_backend: str) -> None:
-    """Multi-position Zarr writes summary metadata in one place only."""
+    """Multi-position Zarr writes global metadata in one place only."""
     root = tmp_path / "multi.zarr"
     settings = AcquisitionSettings(
         root_path=str(root),
@@ -83,7 +83,7 @@ def test_zarr_summary_metadata_multiposition(tmp_path: Path, zarr_backend: str) 
 
     summary = {"mda_sequence": {"positions": ["Pos0", "Pos1"]}}
     with create_stream(settings) as stream:
-        stream.set_summary_metadata("pymmcore_plus", summary)
+        stream.set_global_metadata("pymmcore_plus", summary)
         for _ in range(2):
             _write_a_frame(stream)
 
@@ -98,7 +98,7 @@ def test_zarr_summary_metadata_multiposition(tmp_path: Path, zarr_backend: str) 
 
 
 def test_zarr_summary_metadata_plate(tmp_path: Path, zarr_backend: str) -> None:
-    """Plate Zarr writes summary metadata to the plate root zarr.json once."""
+    """Plate Zarr writes global metadata to the plate root zarr.json once."""
     root = tmp_path / "plate.zarr"
     settings = AcquisitionSettings(
         root_path=str(root),
@@ -122,7 +122,7 @@ def test_zarr_summary_metadata_plate(tmp_path: Path, zarr_backend: str) -> None:
 
     summary = {"experiment": "plate test"}
     with create_stream(settings) as stream:
-        stream.set_summary_metadata("pymmcore_plus", summary)
+        stream.set_global_metadata("pymmcore_plus", summary)
         for _ in range(2):
             _write_a_frame(stream)
 
@@ -151,8 +151,8 @@ def test_zarr_summary_metadata_replace(tmp_path: Path, zarr_backend: str) -> Non
     )
 
     with create_stream(settings) as stream:
-        stream.set_summary_metadata("ns", {"first": True, "shared": 1})
-        stream.set_summary_metadata("ns", {"second": True})
+        stream.set_global_metadata("ns", {"first": True, "shared": 1})
+        stream.set_global_metadata("ns", {"second": True})
         _write_a_frame(stream)
 
     attrs = json.loads((root / "zarr.json").read_text())["attributes"]
@@ -175,8 +175,8 @@ def test_zarr_summary_metadata_siblings(tmp_path: Path, zarr_backend: str) -> No
     )
 
     with create_stream(settings) as stream:
-        stream.set_summary_metadata("ns_a", {"x": 1})
-        stream.set_summary_metadata("ns_b", {"y": 2})
+        stream.set_global_metadata("ns_a", {"x": 1})
+        stream.set_global_metadata("ns_b", {"y": 2})
         _write_a_frame(stream)
 
     attrs = json.loads((root / "zarr.json").read_text())["attributes"]
@@ -201,11 +201,11 @@ def test_summary_metadata_reserved_namespace(tmp_path: Path, zarr_backend: str) 
 
     with create_stream(settings) as stream:
         with pytest.raises(ValueError, match="reserved"):
-            stream.set_summary_metadata("ome", {})
+            stream.set_global_metadata("ome", {})
         with pytest.raises(ValueError, match="reserved"):
-            stream.set_summary_metadata("ome_writers", {})
+            stream.set_global_metadata("ome_writers", {})
         with pytest.raises(ValueError, match="non-empty"):
-            stream.set_summary_metadata("", {})
+            stream.set_global_metadata("", {})
         _write_a_frame(stream)
 
 
@@ -251,7 +251,7 @@ def test_tiff_summary_metadata_single_file(tmp_path: Path, tiff_backend: str) ->
 
     summary = {"mda": {"positions": 1}, "note": "single"}
     with create_stream(settings) as stream:
-        stream.set_summary_metadata("pymmcore_plus", summary)
+        stream.set_global_metadata("pymmcore_plus", summary)
         for _ in range(2):
             stream.append(np.zeros((16, 16), dtype=np.uint16))
 
@@ -291,7 +291,7 @@ def test_tiff_summary_metadata_companion_file(
 
     summary = {"mda": "companion"}
     with create_stream(settings) as stream:
-        stream.set_summary_metadata("pymmcore_plus", summary)
+        stream.set_global_metadata("pymmcore_plus", summary)
         for _ in range(4):
             stream.append(np.zeros((16, 16), dtype=np.uint16))
 
@@ -332,7 +332,7 @@ def test_tiff_summary_metadata_master_tiff(tmp_path: Path, tiff_backend: str) ->
 
     summary = {"mda": "master"}
     with create_stream(settings) as stream:
-        stream.set_summary_metadata("pymmcore_plus", summary)
+        stream.set_global_metadata("pymmcore_plus", summary)
         for _ in range(4):
             stream.append(np.zeros((16, 16), dtype=np.uint16))
 
@@ -375,7 +375,7 @@ def test_tiff_summary_metadata_redundant_fans_out(
 
     summary = {"mda": "redundant", "note": "every file"}
     with create_stream(settings) as stream:
-        stream.set_summary_metadata("pymmcore_plus", summary)
+        stream.set_global_metadata("pymmcore_plus", summary)
         for _ in range(4):
             stream.append(np.zeros((16, 16), dtype=np.uint16))
 
@@ -409,8 +409,8 @@ def test_tiff_summary_metadata_replace(tmp_path: Path, tiff_backend: str) -> Non
     )
 
     with create_stream(settings) as stream:
-        stream.set_summary_metadata("ns", {"first": True})
-        stream.set_summary_metadata("ns", {"second": True})
+        stream.set_global_metadata("ns", {"first": True})
+        stream.set_global_metadata("ns", {"second": True})
         stream.append(np.zeros((16, 16), dtype=np.uint16))
 
     ome_obj = from_tiff(str(path))
@@ -433,8 +433,8 @@ def test_tiff_summary_metadata_siblings(tmp_path: Path, tiff_backend: str) -> No
     )
 
     with create_stream(settings) as stream:
-        stream.set_summary_metadata("ns_a", {"x": 1})
-        stream.set_summary_metadata("ns_b", {"y": 2})
+        stream.set_global_metadata("ns_a", {"x": 1})
+        stream.set_global_metadata("ns_b", {"y": 2})
         stream.append(np.zeros((16, 16), dtype=np.uint16))
 
     ome_obj = from_tiff(str(path))
@@ -466,13 +466,13 @@ def test_tiff_summary_metadata_concurrent_with_close(
     stop = threading.Event()
 
     stream = create_stream(settings)
-    stream.set_summary_metadata("ns", {"i": 0})
+    stream.set_global_metadata("ns", {"i": 0})
 
     def _set_summary_loop() -> None:
         i = 1
         while not stop.is_set():
             try:
-                stream.set_summary_metadata("ns", {"i": i})
+                stream.set_global_metadata("ns", {"i": i})
             except RuntimeError:
                 # Expected once close/finalize has completed.
                 break

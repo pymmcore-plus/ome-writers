@@ -74,7 +74,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         self._image_group_paths: list[str] = []  # Parallel to _arrays, for metadata
         self._meta_mirrors: dict[str, JsonDocumentMirror] = {}  # grouppath -> mirror
         # Mirror for the *parent* root group's zarr.json, used for
-        # set_summary_metadata(). For single-position layouts this is the same
+        # set_global_metadata(). For single-position layouts this is the same
         # object as self._meta_mirrors["."]; for multi-position (bf2raw) and
         # plate layouts it is a separate mirror over <root>/zarr.json.
         self._root_meta_mirror: JsonDocumentMirror | None = None
@@ -493,7 +493,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         else:  # pragma: no cover
             self._root_meta_mirror = None
 
-    def set_summary_metadata(self, namespace: str, metadata: Mapping[str, Any]) -> None:
+    def set_global_metadata(self, namespace: str, metadata: Mapping[str, Any]) -> None:
         """Write acquisition-level metadata to the parent root group's attrs.
 
         The value is stored under ``attributes[namespace]`` in

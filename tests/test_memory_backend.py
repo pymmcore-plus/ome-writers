@@ -188,12 +188,12 @@ def test_tempdir_mode_multi_position(tmp_path: Path) -> None:
 
 
 def test_summary_metadata_in_manifest(tmp_path: Path) -> None:
-    """Summary metadata should be persisted to manifest.json when disk-backed."""
+    """global metadata should be persisted to manifest.json when disk-backed."""
     settings = _make_settings(root_path=str(tmp_path / "meta"))
     summary = {"a": 1, "nested": {"b": [2, 3], "c": "hello"}}
     with create_stream(settings) as stream:
-        stream.set_summary_metadata("pymmcore_plus", summary)
-        stream.set_summary_metadata("other", {"x": 42})
+        stream.set_global_metadata("pymmcore_plus", summary)
+        stream.set_global_metadata("other", {"x": 42})
         frame = np.ones((8, 8), dtype="uint16")
         for _ in range(6):
             stream.append(frame)
@@ -207,7 +207,7 @@ def test_summary_metadata_in_manifest(tmp_path: Path) -> None:
     # Pure in-memory mode has no manifest, so nothing to assert on disk.
     settings = _make_settings()
     with create_stream(settings) as stream:
-        stream.set_summary_metadata("ns", {"k": "v"})
+        stream.set_global_metadata("ns", {"k": "v"})
         # The metadata is held in memory on the backend but not persisted.
         assert stream._backend._summary_metadata == {"ns": {"k": "v"}}  # type: ignore[attr-defined]
 
