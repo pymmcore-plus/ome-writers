@@ -228,10 +228,7 @@ def _get_map_annotations(ome_obj: Any) -> list[Any]:
 
 def _decode_summary(annotation: Any) -> dict:
     """Return decoded summary payload from a MapAnnotation."""
-    for entry in annotation.value.ms:
-        if entry.k == "data_json":
-            return json.loads(entry.value)
-    raise AssertionError("no data_json key in MapAnnotation.value")
+    return {entry.k: json.loads(entry.value) for entry in annotation.value.ms}
 
 
 def test_tiff_global_metadata_single_file(tmp_path: Path, tiff_backend: str) -> None:

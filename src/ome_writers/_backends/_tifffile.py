@@ -378,7 +378,7 @@ class TiffBackend(ArrayBackend):
                     "closed. Use update_metadata() for post-close modifications."
                 )
 
-            payload = json.dumps(dict(metadata))
+            payload = {k: json.dumps(value) for k, value in metadata.items()}
 
             for pos_idx in self._global_target_pos_idxs():
                 manager = self._position_managers[pos_idx]
@@ -399,7 +399,7 @@ class TiffBackend(ArrayBackend):
                     structured.map_annotations.append(
                         ome.MapAnnotation(
                             namespace=namespace,
-                            value=ome.Map.model_validate({"data_json": payload}),
+                            value=ome.Map.model_validate(payload),
                         )
                     )
                     manager.metadata_mirror.mark_dirty()

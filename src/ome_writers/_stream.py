@@ -239,10 +239,10 @@ class OMEStream:
             file for redundant mode. The names `"ome"` and `"ome_writers"`
             are reserved and will raise `ValueError`.
         metadata : Mapping[str, Any]
-            JSON-serializable mapping. May be arbitrarily nested for OME-Zarr.
-            For OME-TIFF, the entire mapping is JSON-encoded into a single
-            `Map` entry (key `data_json`), since the OME `Map` type cannot
-            represent nested structures natively.
+            JSON-serializable mapping.
+            For OME-TIFF, each top-level key becomes a `Map` entry whose
+            value is the JSON-encoded value (to avoid the complexity of nested
+            structures in OME-XML).
 
         Raises
         ------
