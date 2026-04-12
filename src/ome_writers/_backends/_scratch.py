@@ -37,11 +37,11 @@ class ScratchBackend(ArrayBackend):
     __slots__ = (
         "_arrays",
         "_finalized",
+        "_global_metadata",
         "_logical_shapes",
         "_metadata_fh",
         "_root_path",
         "_settings_dump",
-        "_summary_metadata",
         "_unbounded_axes",
     )
 
@@ -62,7 +62,7 @@ class ScratchBackend(ArrayBackend):
         # Flag to prevent multiple finalization steps
         self._finalized: bool = False
         # Acquisition-level global metadata set via set_global_metadata()
-        self._summary_metadata: dict[str, dict[str, Any]] = {}
+        self._global_metadata: dict[str, dict[str, Any]] = {}
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         return False
@@ -153,7 +153,7 @@ class ScratchBackend(ArrayBackend):
 
     def set_global_metadata(self, namespace: str, metadata: Mapping[str, Any]) -> None:
         """Store global metadata in memory, keyed by namespace."""
-        self._summary_metadata[namespace] = deepcopy(dict(metadata))
+        self._global_metadata[namespace] = deepcopy(dict(metadata))
 
     def advance(self, indices: Sequence[tuple[int, tuple[int, ...]]]) -> None:
         for pos_idx, index in indices:
@@ -283,7 +283,7 @@ class ScratchBackend(ArrayBackend):
         if self._root_path is None:
             return
         self._settings_dump["position_shapes"] = list(self._logical_shapes)
-        self._settings_dump["summary_metadata"] = self._summary_metadata
+        self._settings_dump["summary_metadata"] = self._global_metadata
         (self._root_path / MANIFEST).write_text(json.dumps(self._settings_dump))
 
 

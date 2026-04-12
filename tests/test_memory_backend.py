@@ -187,7 +187,7 @@ def test_tempdir_mode_multi_position(tmp_path: Path) -> None:
     assert manifest["position_shapes"] == [[8, 8], [8, 8]]
 
 
-def test_summary_metadata_in_manifest(tmp_path: Path) -> None:
+def test_global_metadata_in_manifest(tmp_path: Path) -> None:
     """global metadata should be persisted to manifest.json when disk-backed."""
     settings = _make_settings(root_path=str(tmp_path / "meta"))
     summary = {"a": 1, "nested": {"b": [2, 3], "c": "hello"}}
@@ -209,7 +209,7 @@ def test_summary_metadata_in_manifest(tmp_path: Path) -> None:
     with create_stream(settings) as stream:
         stream.set_global_metadata("ns", {"k": "v"})
         # The metadata is held in memory on the backend but not persisted.
-        assert stream._backend._summary_metadata == {"ns": {"k": "v"}}  # type: ignore[attr-defined]
+        assert stream._backend._global_metadata == {"ns": {"k": "v"}}  # type: ignore[attr-defined]
 
 
 def test_context_manager_lifecycle() -> None:

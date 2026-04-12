@@ -33,7 +33,7 @@ def _write_a_frame(stream: OMEStream, shape: tuple[int, int] = (16, 16)) -> None
     stream.append(np.random.randint(0, 100, shape, dtype=np.uint16))
 
 
-def test_zarr_summary_metadata_single_position(
+def test_zarr_global_metadata_single_position(
     tmp_path: Path, zarr_backend: str
 ) -> None:
     """Single-position Zarr writes global metadata to root zarr.json."""
@@ -65,7 +65,7 @@ def test_zarr_summary_metadata_single_position(
     assert "multiscales" in attrs["ome"]
 
 
-def test_zarr_summary_metadata_multiposition(tmp_path: Path, zarr_backend: str) -> None:
+def test_zarr_global_metadata_multiposition(tmp_path: Path, zarr_backend: str) -> None:
     """Multi-position Zarr writes global metadata in one place only."""
     root = tmp_path / "multi.zarr"
     settings = AcquisitionSettings(
@@ -97,7 +97,7 @@ def test_zarr_summary_metadata_multiposition(tmp_path: Path, zarr_backend: str) 
         assert "pymmcore_plus" not in pos_data["attributes"]
 
 
-def test_zarr_summary_metadata_plate(tmp_path: Path, zarr_backend: str) -> None:
+def test_zarr_global_metadata_plate(tmp_path: Path, zarr_backend: str) -> None:
     """Plate Zarr writes global metadata to the plate root zarr.json once."""
     root = tmp_path / "plate.zarr"
     settings = AcquisitionSettings(
@@ -136,7 +136,7 @@ def test_zarr_summary_metadata_plate(tmp_path: Path, zarr_backend: str) -> None:
         assert "pymmcore_plus" not in well_data.get("attributes", {})
 
 
-def test_zarr_summary_metadata_replace(tmp_path: Path, zarr_backend: str) -> None:
+def test_zarr_global_metadata_replace(tmp_path: Path, zarr_backend: str) -> None:
     """Same namespace replaces rather than merges."""
     root = tmp_path / "replace.zarr"
     settings = AcquisitionSettings(
@@ -160,7 +160,7 @@ def test_zarr_summary_metadata_replace(tmp_path: Path, zarr_backend: str) -> Non
     assert attrs["ns"] == {"second": True}
 
 
-def test_zarr_summary_metadata_siblings(tmp_path: Path, zarr_backend: str) -> None:
+def test_zarr_global_metadata_siblings(tmp_path: Path, zarr_backend: str) -> None:
     """Different namespaces coexist as siblings."""
     root = tmp_path / "siblings.zarr"
     settings = AcquisitionSettings(
@@ -187,7 +187,7 @@ def test_zarr_summary_metadata_siblings(tmp_path: Path, zarr_backend: str) -> No
     assert "ome_writers" in attrs
 
 
-def test_summary_metadata_reserved_namespace(tmp_path: Path, zarr_backend: str) -> None:
+def test_global_metadata_reserved_namespace(tmp_path: Path, zarr_backend: str) -> None:
     settings = AcquisitionSettings(
         root_path=str(tmp_path / "reserved.zarr"),
         dimensions=[
@@ -234,7 +234,7 @@ def _decode_summary(annotation: Any) -> dict:
     raise AssertionError("no data_json key in MapAnnotation.value")
 
 
-def test_tiff_summary_metadata_single_file(tmp_path: Path, tiff_backend: str) -> None:
+def test_tiff_global_metadata_single_file(tmp_path: Path, tiff_backend: str) -> None:
     """Single-file OME-TIFF stores a single MapAnnotation at OME root."""
     path = tmp_path / "single.ome.tiff"
     settings = AcquisitionSettings(
@@ -268,9 +268,7 @@ def test_tiff_summary_metadata_single_file(tmp_path: Path, tiff_backend: str) ->
             assert all(ref.id != ann_id for ref in plane.annotation_refs)
 
 
-def test_tiff_summary_metadata_companion_file(
-    tmp_path: Path, tiff_backend: str
-) -> None:
+def test_tiff_global_metadata_companion_file(tmp_path: Path, tiff_backend: str) -> None:
     """Companion-file mode writes MapAnnotation to companion only."""
     multipos_dir = tmp_path / "companion"
     settings = AcquisitionSettings(
@@ -311,7 +309,7 @@ def test_tiff_summary_metadata_companion_file(
             assert a.namespace != "pymmcore_plus"
 
 
-def test_tiff_summary_metadata_master_tiff(tmp_path: Path, tiff_backend: str) -> None:
+def test_tiff_global_metadata_master_tiff(tmp_path: Path, tiff_backend: str) -> None:
     """Master-tiff mode writes MapAnnotation to master file only."""
     multipos_dir = tmp_path / "master"
     settings = AcquisitionSettings(
@@ -352,7 +350,7 @@ def test_tiff_summary_metadata_master_tiff(tmp_path: Path, tiff_backend: str) ->
         assert a.namespace != "pymmcore_plus"
 
 
-def test_tiff_summary_metadata_redundant_fans_out(
+def test_tiff_global_metadata_redundant_fans_out(
     tmp_path: Path, tiff_backend: str
 ) -> None:
     """Redundant mode writes a copy of the annotation into every file."""
@@ -395,7 +393,7 @@ def test_tiff_summary_metadata_redundant_fans_out(
                 assert all(ref.id != ann_id for ref in plane.annotation_refs)
 
 
-def test_tiff_summary_metadata_replace(tmp_path: Path, tiff_backend: str) -> None:
+def test_tiff_global_metadata_replace(tmp_path: Path, tiff_backend: str) -> None:
     """Same namespace: second call replaces the first."""
     path = tmp_path / "replace.ome.tiff"
     settings = AcquisitionSettings(
@@ -419,7 +417,7 @@ def test_tiff_summary_metadata_replace(tmp_path: Path, tiff_backend: str) -> Non
     assert _decode_summary(matches[0]) == {"second": True}
 
 
-def test_tiff_summary_metadata_siblings(tmp_path: Path, tiff_backend: str) -> None:
+def test_tiff_global_metadata_siblings(tmp_path: Path, tiff_backend: str) -> None:
     """Different namespaces: two distinct MapAnnotations."""
     path = tmp_path / "siblings.ome.tiff"
     settings = AcquisitionSettings(
@@ -446,7 +444,7 @@ def test_tiff_summary_metadata_siblings(tmp_path: Path, tiff_backend: str) -> No
     assert namespaces == {"ns_a", "ns_b"}
 
 
-def test_tiff_summary_metadata_concurrent_with_close(
+def test_tiff_global_metadata_concurrent_with_close(
     tmp_path: Path, tiff_backend: str
 ) -> None:
     """Concurrent summary updates and close should not crash."""
