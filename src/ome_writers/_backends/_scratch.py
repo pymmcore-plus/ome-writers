@@ -283,7 +283,7 @@ class ScratchBackend(ArrayBackend):
         if self._root_path is None:
             return
         self._settings_dump["position_shapes"] = list(self._logical_shapes)
-        self._settings_dump["summary_metadata"] = self._global_metadata
+        self._settings_dump["global_metadata"] = self._global_metadata
         (self._root_path / MANIFEST).write_text(json.dumps(self._settings_dump))
 
 

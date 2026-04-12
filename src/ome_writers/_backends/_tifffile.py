@@ -318,7 +318,7 @@ class TiffBackend(ArrayBackend):
             planes.append(ome.Plane(**plane_kwargs, annotation_refs=annotation_refs))
             mirror.mark_dirty()
 
-    def _summary_target_pos_idxs(self) -> list[int]:
+    def _global_target_pos_idxs(self) -> list[int]:
         """Return pos_idxs of managers that should receive global metadata.
 
         The behavior depends on the ``multi_file_metadata`` mode:
@@ -347,7 +347,7 @@ class TiffBackend(ArrayBackend):
             return [0]
         # redundant (and any unrecognized future mode): fan out to every TIFF
         # position. Each file has its own full OME copy, so each file gets
-        # its own copy of the summary annotation too.
+        # its own copy of the global annotation too.
         return sorted(
             pos_idx
             for pos_idx, mgr in self._position_managers.items()
@@ -380,7 +380,7 @@ class TiffBackend(ArrayBackend):
 
             payload = json.dumps(dict(metadata))
 
-            for pos_idx in self._summary_target_pos_idxs():
+            for pos_idx in self._global_target_pos_idxs():
                 manager = self._position_managers[pos_idx]
                 with manager._lock:
                     model = manager.metadata_mirror.model

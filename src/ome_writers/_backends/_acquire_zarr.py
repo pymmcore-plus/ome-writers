@@ -168,7 +168,7 @@ class AcquireZarrBackend(YaozarrsBackend):
 
             # After the backup-restore, on-disk zarr.json files are back to
             # their pristine yaozarrs state. Any user modifications that live
-            # only in the in-memory mirrors (frame_metadata, summary
+            # only in the in-memory mirrors (frame_metadata, global
             # metadata) would be lost without a re-flush. Re-mark mirrors
             # dirty so super().finalize() re-writes the authoritative
             # in-memory state on top of the restored backup.
