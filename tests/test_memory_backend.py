@@ -199,7 +199,7 @@ def test_global_metadata_in_manifest(tmp_path: Path) -> None:
             stream.append(frame)
 
     manifest = json.loads((tmp_path / "meta" / "manifest.json").read_text())
-    assert manifest["summary_metadata"] == {
+    assert manifest["global_metadata"] == {
         "pymmcore_plus": summary,
         "other": {"x": 42},
     }
