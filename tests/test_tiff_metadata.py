@@ -953,7 +953,12 @@ def test_tiff_global_metadata_multi_file_modes(
 def test_tiff_global_metadata_concurrent_with_close(
     tmp_path: Path, tiff_backend: str
 ) -> None:
-    """Concurrent summary updates and close should not crash."""
+    """Concurrent summary updates around close should not crash.
+
+    `set_global_metadata` may be called at any time (pre- or post-close);
+    this test stresses the transition through finalize while another thread
+    is updating the namespace.
+    """
     settings = AcquisitionSettings(
         root_path=str(tmp_path / "concurrent_close.ome.tiff"),
         dimensions=[
@@ -975,8 +980,6 @@ def test_tiff_global_metadata_concurrent_with_close(
         while not stop.is_set():
             try:
                 stream.set_global_metadata("ns", {"i": i})
-            except RuntimeError:  # expected once close finalizes
-                break
             except BaseException as e:
                 errors.append(e)
                 break
@@ -995,3 +998,114 @@ def test_tiff_global_metadata_concurrent_with_close(
     assert not errors
     matches = _anns_by_ns(from_tiff(str(tmp_path / "concurrent_close.ome.tiff")), "ns")
     assert len(matches) == 1
+
+
+def test_tiff_global_metadata_post_close_single_file(
+    tmp_path: Path, tiff_backend: str
+) -> None:
+    """Single-file TIFF: set_global_metadata works after stream.close()."""
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "post_close.ome.tiff"),
+        dimensions=[
+            Dimension(name="t", count=2, type="time"),
+            Dimension(name="y", count=16, type="space"),
+            Dimension(name="x", count=16, type="space"),
+        ],
+        dtype="uint16",
+        format={"name": "ome-tiff", "backend": tiff_backend},
+    )
+    summary = {"mda": {"positions": 1}, "note": "post-close"}
+
+    stream = create_stream(settings)
+    for _ in range(2):
+        stream.append(np.zeros((16, 16), dtype=np.uint16))
+    stream.close()
+
+    # Post-close write: flushed immediately via tiffcomment.
+    stream.set_global_metadata("ns_a", summary)
+    stream.set_global_metadata("ns_b", {"y": 2})  # sibling
+
+    ome_obj = from_tiff(str(tmp_path / "post_close.ome.tiff"))
+    ns_a = _anns_by_ns(ome_obj, "ns_a")
+    ns_b = _anns_by_ns(ome_obj, "ns_b")
+    assert len(ns_a) == 1 and _decode_map(ns_a[0]) == summary
+    assert len(ns_b) == 1 and _decode_map(ns_b[0]) == {"y": 2}
+
+
+@pytest.mark.parametrize("mode", MULTI_FILE_MODES)
+def test_tiff_global_metadata_post_close_multi_file_modes(
+    tmp_path: Path, tiff_backend: str, mode: MultiFileMetadata
+) -> None:
+    """Each multi-file mode flushes a post-close global metadata update to the
+    correct file(s)."""
+    d = tmp_path / mode.value
+    settings = AcquisitionSettings(
+        root_path=str(d),
+        dimensions=[
+            Dimension(name="p", type="position", coords=["Pos0", "Pos1"]),
+            Dimension(name="t", count=2, type="time"),
+            Dimension(name="y", count=16, type="space"),
+            Dimension(name="x", count=16, type="space"),
+        ],
+        dtype="uint16",
+        format={
+            "name": "ome-tiff",
+            "backend": tiff_backend,
+            "multi_file_metadata": mode.value,
+        },
+    )
+    summary = {"mda": mode.value}
+
+    stream = create_stream(settings)
+    for _ in range(4):
+        stream.append(np.zeros((16, 16), dtype=np.uint16))
+    stream.close()
+
+    # Post-close: no writer threads, files are closed. Flushes via tiffcomment
+    # for TIFFs and direct write for the companion.
+    stream.set_global_metadata("ns", summary)
+
+    per_pos = [
+        _anns_by_ns(from_tiff(str(d / f"{mode.value}_p{p:03d}.ome.tiff")), "ns")
+        for p in range(2)
+    ]
+    if mode == MultiFileMetadata.REDUNDANT:
+        for anns in per_pos:
+            assert len(anns) == 1 and _decode_map(anns[0]) == summary
+    elif mode == MultiFileMetadata.MASTER_TIFF:
+        assert len(per_pos[0]) == 1 and _decode_map(per_pos[0][0]) == summary
+        assert per_pos[1] == []
+    else:  # MultiFileMetadata.COMPANION
+        assert per_pos[0] == [] and per_pos[1] == []
+        companion = from_xml((d / "companion.ome").read_text())
+        c_anns = _anns_by_ns(companion, "ns")
+        assert len(c_anns) == 1 and _decode_map(c_anns[0]) == summary
+
+
+def test_tiff_global_metadata_pre_and_post_close(
+    tmp_path: Path, tiff_backend: str
+) -> None:
+    """Setting the same namespace pre-close and then overwriting post-close
+    produces the post-close value (replace semantics survive finalize)."""
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "pre_and_post.ome.tiff"),
+        dimensions=[
+            Dimension(name="t", count=2, type="time"),
+            Dimension(name="y", count=16, type="space"),
+            Dimension(name="x", count=16, type="space"),
+        ],
+        dtype="uint16",
+        format={"name": "ome-tiff", "backend": tiff_backend},
+    )
+
+    stream = create_stream(settings)
+    stream.set_global_metadata("ns", {"phase": "pre"})
+    for _ in range(2):
+        stream.append(np.zeros((16, 16), dtype=np.uint16))
+    stream.close()
+    stream.set_global_metadata("ns", {"phase": "post"})
+
+    ome_obj = from_tiff(str(tmp_path / "pre_and_post.ome.tiff"))
+    anns = _anns_by_ns(ome_obj, "ns")
+    assert len(anns) == 1
+    assert _decode_map(anns[0]) == {"phase": "post"}

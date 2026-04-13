@@ -321,11 +321,11 @@ class TiffBackend(ArrayBackend):
     def _global_target_pos_idxs(self) -> list[int]:
         """Return pos_idxs of managers that should receive global metadata.
 
-        The behavior depends on the ``multi_file_metadata`` mode:
+        The behavior depends on the `multi_file_metadata` mode:
 
-        - ``companion-file``: the companion file only (``COMPANION_IDX``).
-        - single-file / ``master-tiff``: the first (master) position.
-        - ``redundant``: every TIFF position, matching the "duplicate
+        - `companion-file`: the companion file only (`COMPANION_IDX`).
+        - single-file / `master-tiff`: the first (master) position.
+        - `redundant`: every TIFF position, matching the "duplicate
           full OME into every file" semantics of that mode.
         """
         if not self._position_managers:  # pragma: no cover
@@ -355,29 +355,26 @@ class TiffBackend(ArrayBackend):
         )
 
     def set_global_metadata(self, namespace: str, metadata: Mapping[str, Any]) -> None:
-        """Attach acquisition-level metadata as a ``MapAnnotation``.
+        """Attach acquisition-level metadata as a `MapAnnotation`.
 
         The annotation is placed under the target file's
-        ``OME.structured_annotations.map_annotations`` with
-        ``Namespace=namespace`` and is NOT referenced by any plane
-        (distinguishing it from per-frame metadata). Same namespace replaces
-        any prior value; different namespaces are siblings.
+        `OME.structured_annotations.map_annotations` with `Namespace=namespace` and is
+        NOT referenced by any plane (distinguishing it from per-frame metadata). Same
+        namespace replaces any prior value; different namespaces are siblings.
 
         Where the annotation lands on disk is driven by the OME-TIFF
-        ``multi_file_metadata`` mode: single-file and ``master-tiff`` write
-        to one file, ``companion-file`` writes to the companion, and
-        ``redundant`` writes a copy into every per-position TIFF (matching
-        that mode's "full OME in every file" guarantee).
+        `multi_file_metadata` mode: single-file and `master-tiff` write to one file,
+        `companion-file` writes to the companion, and `redundant` writes a copy into
+        every per-position TIFF (matching that mode's "full OME in every file"
+        guarantee).
 
-        Must be called before ``close()`` (i.e. during acquisition).
+        Can be called any time after `prepare()`, including after `close()`.
+        Pre-close the update is deferred to `finalize()` (`tiffcomment` cannot
+        safely run while a writer thread is still appending frames); post-close
+        the update is flushed immediately via `tiffcomment` for TIFF mirrors
+        or a direct file write for the companion file.
         """
         with self._state_lock:
-            if self._finalized:
-                raise RuntimeError(
-                    "set_global_metadata() must be called before the stream is "
-                    "closed. Use update_metadata() for post-close modifications."
-                )
-
             payload = {k: json.dumps(value) for k, value in metadata.items()}
 
             for pos_idx in self._global_target_pos_idxs():
@@ -404,6 +401,14 @@ class TiffBackend(ArrayBackend):
                     )
                     manager.metadata_mirror.mark_dirty()
 
+                    # Post-finalize: writer threads are joined and files are
+                    # closed, so flush directly (tiffcomment for TIFFs, or
+                    # file write for companion). Pre-finalize: defer to
+                    # finalize() since tiffcomment is unsafe while the writer
+                    # thread is still active.
+                    if self._finalized:
+                        manager.metadata_mirror.flush(force=True)
+
     def finalize(self) -> None:
         """Flush and close all TIFF writers."""
         with self._state_lock:
@@ -424,11 +429,11 @@ class TiffBackend(ArrayBackend):
     def get_arrays(self) -> list[ArrayLike]:
         """Return array-like objects backed by TIFF files.
 
-        If finalized and fully written: returns ``FinalizedTiffArray`` objects
+        If finalized and fully written: returns `FinalizedTiffArray` objects
         that read through *tifffile*'s page API (supports compression).
 
         Otherwise (live viewing, finalized-partial, or zero-frame): returns
-        ``LiveTiffArray`` objects that read raw bytes at calculated offsets
+        `LiveTiffArray` objects that read raw bytes at calculated offsets
         (requires uncompressed / contiguous writes).
 
         Returns

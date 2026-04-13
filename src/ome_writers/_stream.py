@@ -227,6 +227,12 @@ class OMEStream:
         single location or every per-position file depending on how the
         format distributes its OME metadata.
 
+        May be called any time after `create_stream()`, including after
+        `close()`. For OME-TIFF the pre-close update is deferred to the
+        finalize flush (since `tiffcomment` cannot safely run while the
+        writer thread is active); post-close it is flushed immediately.
+        For OME-Zarr the write is always immediate.
+
         Parameters
         ----------
         namespace : str

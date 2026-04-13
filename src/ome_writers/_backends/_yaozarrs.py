@@ -477,7 +477,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
 
         For single-position layouts the parent root group *is* the image
         group, so we reuse the existing mirror. For multi-position (bf2raw)
-        and plate layouts, open a new mirror over ``<root>/zarr.json``.
+        and plate layouts, open a new mirror over `<root>/zarr.json`.
         """
         # Single-position: parent root group is the image group itself.
         if self._image_group_paths == ["."]:
@@ -493,8 +493,8 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
     def set_global_metadata(self, namespace: str, metadata: Mapping[str, Any]) -> None:
         """Write acquisition-level metadata to the parent root group's attrs.
 
-        The value is stored under ``attributes[namespace]`` in
-        ``<root>/zarr.json``. Same namespace replaces prior value; different
+        The value is stored under `attributes[namespace]` in
+        `<root>/zarr.json`. Same namespace replaces prior value; different
         namespaces are stored as siblings. No merging.
         """
         if (mirror := self._root_meta_mirror) is None:  # pragma: no cover
@@ -675,7 +675,7 @@ class JsonDocumentMirror(MutableMapping[str, Any]):
             self._dirty = True
 
     def set_attribute_namespace(self, namespace: str, value: Mapping[str, Any]) -> None:
-        """Set ``attributes[namespace] = deepcopy(value)`` atomically."""
+        """Set `attributes[namespace] = deepcopy(value)` atomically."""
         with self._lock:
             attrs = cast("dict[str, Any]", self._data.setdefault("attributes", {}))
             attrs[namespace] = deepcopy(dict(value))
