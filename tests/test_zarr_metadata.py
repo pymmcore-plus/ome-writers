@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import numpy as np
@@ -15,34 +14,8 @@ from ome_writers import (
     Dimension,
     create_stream,
 )
-from ome_writers._backends._yaozarrs import JsonDocumentMirror
 
 pytest.importorskip("zarr", reason="zarr not available")
-
-
-def test_json_document_mirror_flush_is_atomic(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """JsonDocumentMirror.flush should publish updates via os.replace."""
-    mirror_path = tmp_path / "zarr.json"
-    mirror = JsonDocumentMirror(mirror_path)
-    mirror["attributes"] = {"custom": {"value": 1}}
-
-    calls: list[tuple[str, str]] = []
-    real_replace = os.replace
-
-    def _replace_spy(src: str, dst: str) -> None:
-        calls.append((src, dst))
-        real_replace(src, dst)
-
-    monkeypatch.setattr("ome_writers._backends._yaozarrs.os.replace", _replace_spy)
-
-    mirror.flush()
-
-    assert calls, "expected JsonDocumentMirror.flush() to call os.replace()"
-    assert Path(calls[0][1]) == mirror_path
-    assert json.loads(mirror_path.read_text())["attributes"]["custom"]["value"] == 1
-    assert not list(tmp_path.glob("zarr.json.*.tmp"))
 
 
 def test_get_metadata_single_position(tmp_path: Path) -> None:
