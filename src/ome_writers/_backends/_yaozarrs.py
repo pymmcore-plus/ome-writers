@@ -12,7 +12,7 @@ from collections.abc import Iterator, Mapping, MutableMapping
 from contextlib import suppress
 from copy import deepcopy
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
 
 import numpy as np
 
@@ -33,8 +33,9 @@ except ImportError as e:
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
-    from typing import Protocol
+    from typing import Literal, Protocol
 
+    from typing_extensions import Self
     from yaozarrs.write.v05._write import CompressionName
 
     from ome_writers._backends._backend import ArrayLike
@@ -442,11 +443,9 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
             self._finalize_chunk_buffers()
             for mirror in self._meta_mirrors.values():
                 mirror.flush()
-            if (
-                self._root_meta_mirror is not None
-                and self._root_meta_mirror not in self._meta_mirrors.values()
-            ):
-                self._root_meta_mirror.flush()
+            root_mir = self._root_meta_mirror
+            if root_mir is not None and root_mir not in self._meta_mirrors.values():
+                root_mir.flush()
             self._arrays.clear()
             # Keep _image_group_paths for post-close reading
             self._finalized = True
@@ -487,9 +486,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
 
         root_json = root / "zarr.json"
         if root_json.exists():
-            mirror = JsonDocumentMirror(root_json)
-            mirror.load()
-            self._root_meta_mirror = mirror
+            self._root_meta_mirror = JsonDocumentMirror(root_json).load()
         else:  # pragma: no cover
             self._root_meta_mirror = None
 
@@ -500,14 +497,10 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         ``<root>/zarr.json``. Same namespace replaces prior value; different
         namespaces are stored as siblings. No merging.
         """
-        mirror = self._root_meta_mirror
-        if mirror is None:  # pragma: no cover
+        if (mirror := self._root_meta_mirror) is None:  # pragma: no cover
             raise RuntimeError("Backend not prepared. Call prepare() first.")
 
-        with mirror._lock:
-            attrs = cast("dict[str, Any]", mirror._data.setdefault("attributes", {}))
-            attrs[namespace] = deepcopy(dict(metadata))
-            mirror._dirty = True
+        mirror.set_attribute_namespace(namespace, metadata)
         mirror.flush()
 
     def _cache_metadata_from_arrays(self, root: Path) -> None:
@@ -517,8 +510,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         """
         for group_path in self._image_group_paths:
             if (zarr_json := root / group_path / "zarr.json").exists():
-                self._meta_mirrors[group_path] = doc = JsonDocumentMirror(zarr_json)
-                doc.load()
+                self._meta_mirrors[group_path] = JsonDocumentMirror(zarr_json).load()
 
     def _should_use_chunk_buffering(self, storage_dims: list[Dimension]) -> bool:
         """Check if chunk buffering would be beneficial.
@@ -677,6 +669,18 @@ class JsonDocumentMirror(MutableMapping[str, Any]):
         self._frame_metadata.append(metadata)
         self._dirty = True
 
+    def mark_dirty(self) -> None:
+        """Mark this mirror as having unflushed in-memory modifications."""
+        with self._lock:
+            self._dirty = True
+
+    def set_attribute_namespace(self, namespace: str, value: Mapping[str, Any]) -> None:
+        """Set ``attributes[namespace] = deepcopy(value)`` atomically."""
+        with self._lock:
+            attrs = cast("dict[str, Any]", self._data.setdefault("attributes", {}))
+            attrs[namespace] = deepcopy(dict(value))
+            self._dirty = True
+
     def __getitem__(self, key: str) -> Any:
         with self._lock:
             return self._data[key]
@@ -738,7 +742,7 @@ class JsonDocumentMirror(MutableMapping[str, Any]):
                             Path(tmp_path).unlink()
                 self._dirty = False
 
-    def load(self) -> None:
+    def load(self) -> Self:
         """Load data from disk."""
         with self._lock:
             if self._dirty:  #  pragma: no cover
@@ -752,6 +756,7 @@ class JsonDocumentMirror(MutableMapping[str, Any]):
             else:
                 self._data = {}  # pragma: no cover
             self._dirty = False
+        return self
 
     @property
     def ome_writers(self) -> dict[str, Any]:

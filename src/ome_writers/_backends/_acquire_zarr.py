@@ -173,12 +173,11 @@ class AcquireZarrBackend(YaozarrsBackend):
             # dirty so super().finalize() re-writes the authoritative
             # in-memory state on top of the restored backup.
             for mirror in self._meta_mirrors.values():
-                mirror._dirty = True
-            if (
-                self._root_meta_mirror is not None
-                and self._root_meta_mirror not in self._meta_mirrors.values()
-            ):
-                self._root_meta_mirror._dirty = True
+                mirror.mark_dirty()
+
+            root_mir = self._root_meta_mirror
+            if root_mir is not None and root_mir not in self._meta_mirrors.values():
+                root_mir.mark_dirty()
 
         super().finalize()
 
