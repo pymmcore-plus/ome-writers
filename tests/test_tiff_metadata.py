@@ -905,6 +905,44 @@ def test_tiff_global_metadata_single_file(tmp_path: Path, tiff_backend: str) -> 
             assert all(ref.id not in ann_ids for ref in plane.annotation_refs)
 
 
+def test_tiff_global_metadata_replace_is_position_stable(
+    tmp_path: Path, tiff_backend: str
+) -> None:
+    """Replacing a namespace must not reorder siblings in `map_annotations`."""
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "stable.ome.tiff"),
+        dimensions=[
+            Dimension(name="t", count=2, type="time"),
+            Dimension(name="y", count=16, type="space"),
+            Dimension(name="x", count=16, type="space"),
+        ],
+        dtype="uint16",
+        format={"name": "ome-tiff", "backend": tiff_backend},
+    )
+
+    with create_stream(settings) as stream:
+        stream.set_global_metadata("ns_a", {"v": 1})
+        stream.set_global_metadata("ns_b", {"v": 2})
+        stream.set_global_metadata("ns_c", {"v": 3})
+        stream.set_global_metadata("ns_a", {"v": 99})  # replace, should stay at [0]
+        stream.set_global_metadata("ns_b", {"v": 99})  # replace, should stay at [1]
+        for _ in range(2):
+            stream.append(np.zeros((16, 16), dtype=np.uint16))
+
+    ome_obj = from_tiff(str(tmp_path / "stable.ome.tiff"))
+    assert ome_obj.structured_annotations is not None
+    namespaces = [a.namespace for a in ome_obj.structured_annotations.map_annotations]
+    assert namespaces == ["ns_a", "ns_b", "ns_c"]
+
+    # Replacement values still applied.
+    ns_a = _anns_by_ns(ome_obj, "ns_a")
+    ns_b = _anns_by_ns(ome_obj, "ns_b")
+    ns_c = _anns_by_ns(ome_obj, "ns_c")
+    assert len(ns_a) == 1 and _decode_map(ns_a[0]) == {"v": 99}
+    assert len(ns_b) == 1 and _decode_map(ns_b[0]) == {"v": 99}
+    assert len(ns_c) == 1 and _decode_map(ns_c[0]) == {"v": 3}
+
+
 @pytest.mark.parametrize("mode", MULTI_FILE_MODES)
 def test_tiff_global_metadata_multi_file_modes(
     tmp_path: Path, tiff_backend: str, mode: MultiFileMetadata

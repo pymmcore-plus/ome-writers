@@ -344,37 +344,17 @@ class TiffBackend(ArrayBackend):
         or a direct file write for the companion file.
         """
         with self._state_lock:
-            payload = {k: json.dumps(value) for k, value in metadata.items()}
+            value = ome.Map.model_validate(
+                {k: json.dumps(v) for k, v in metadata.items()}
+            )
 
             for pos_idx in self._global_target_pos_idxs():
                 manager = self._position_managers[pos_idx]
                 with manager._lock:
-                    model = manager.metadata_mirror.model
-                    if not (structured := model.structured_annotations):
-                        model.structured_annotations = structured = (
-                            ome.StructuredAnnotations()
-                        )
-
-                    # Replace any existing MapAnnotation with the same Namespace
-                    # so that this is a setter rather than an appender.
-                    structured.map_annotations = [
-                        ann
-                        for ann in structured.map_annotations
-                        if ann.namespace != namespace
-                    ]
-                    structured.map_annotations.append(
-                        ome.MapAnnotation(
-                            namespace=namespace,
-                            value=ome.Map.model_validate(payload),
-                        )
-                    )
-                    manager.metadata_mirror.mark_dirty()
+                    manager.metadata_mirror.set_map_annotation(namespace, value)
 
                     # Post-finalize: writer threads are joined and files are
-                    # closed, so flush directly (tiffcomment for TIFFs, or
-                    # file write for companion). Pre-finalize: defer to
-                    # finalize() since tiffcomment is unsafe while the writer
-                    # thread is still active.
+                    # closed, so flush directly.
                     if self._finalized:
                         manager.metadata_mirror.flush(force=True)
 
