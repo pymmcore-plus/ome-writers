@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
 
 from ome_writers import AcquisitionSettings, Dimension, Plate, Position, create_stream
+from ome_writers._backends._yaozarrs import YaozarrsBackend
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -19,27 +20,6 @@ XY = [
 FRAME = np.zeros((16, 16), dtype=np.uint16)
 
 
-def _settings(
-    root: Path,
-    fmt: dict[str, Any],
-    dims: list[Dimension] | None = None,
-    **extra: Any,
-) -> AcquisitionSettings:
-    return AcquisitionSettings(
-        root_path=str(root),
-        dimensions=dims if dims is not None else XY,
-        dtype="uint16",
-        overwrite=True,
-        format=fmt,
-        **extra,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Zarr backend
-# ---------------------------------------------------------------------------
-
-
 def _zarr_attrs(path: Path) -> dict:
     return json.loads((path / "zarr.json").read_text()).get("attributes", {})
 
@@ -49,11 +29,15 @@ def test_zarr_global_metadata_single_position(
 ) -> None:
     """Single-pos zarr: nested values, replace, siblings, untouched ns."""
     root = tmp_path / "single.zarr"
-    fmt = {"name": "ome-zarr", "backend": zarr_backend}
-    dims = [Dimension(name="c", count=2, type="channel"), *XY]
     nested = {"a": 1, "nested": {"b": [2, 3], "c": "hello"}}
+    settings = AcquisitionSettings(
+        root_path=str(root),
+        dimensions=[Dimension(name="c", count=2, type="channel"), *XY],
+        dtype="uint16",
+        format=zarr_backend,
+    )
 
-    with create_stream(_settings(root, fmt, dims)) as stream:
+    with create_stream(settings) as stream:
         stream.set_global_metadata("ns_a", {"first": True, "shared": 1})
         stream.set_global_metadata("ns_a", nested)  # replace
         stream.set_global_metadata("ns_b", {"y": 2})  # sibling
@@ -69,11 +53,15 @@ def test_zarr_global_metadata_single_position(
 def test_zarr_global_metadata_multiposition(tmp_path: Path, zarr_backend: str) -> None:
     """Multi-pos zarr writes metadata at the root only."""
     root = tmp_path / "multi.zarr"
-    fmt = {"name": "ome-zarr", "backend": zarr_backend}
-    dims = [Dimension(name="p", type="position", coords=["Pos0", "Pos1"]), *XY]
-    summary = {"mda_sequence": {"positions": ["Pos0", "Pos1"]}}
+    settings = AcquisitionSettings(
+        root_path=str(root),
+        dimensions=[Dimension(name="p", type="position", coords=["Pos0", "Pos1"]), *XY],
+        dtype="uint16",
+        format=zarr_backend,
+    )
 
-    with create_stream(_settings(root, fmt, dims)) as stream:
+    summary = {"mda_sequence": {"positions": ["Pos0", "Pos1"]}}
+    with create_stream(settings) as stream:
         stream.set_global_metadata("ns", summary)
         stream.append(FRAME)
         stream.append(FRAME)
@@ -86,22 +74,27 @@ def test_zarr_global_metadata_multiposition(tmp_path: Path, zarr_backend: str) -
 def test_zarr_global_metadata_plate(tmp_path: Path, zarr_backend: str) -> None:
     """Plate zarr writes metadata at the plate root only."""
     root = tmp_path / "plate.zarr"
-    fmt = {"name": "ome-zarr", "backend": zarr_backend}
-    dims = [
-        Dimension(
-            name="p",
-            type="position",
-            coords=[
-                Position(name="field0", plate_row="A", plate_column="1"),
-                Position(name="field0", plate_row="A", plate_column="2"),
-            ],
-        ),
-        *XY,
-    ]
-    plate = Plate(name="p", row_names=["A"], column_names=["1", "2"])
-    summary = {"experiment": "plate test"}
+    settings = AcquisitionSettings(
+        root_path=str(root),
+        dimensions=[
+            Dimension(
+                name="p",
+                type="position",
+                coords=[
+                    Position(name="field0", plate_row="A", plate_column="1"),
+                    Position(name="field0", plate_row="A", plate_column="2"),
+                ],
+            ),
+            *XY,
+        ],
+        dtype="uint16",
+        overwrite=True,
+        format=zarr_backend,
+        plate=Plate(name="p", row_names=["A"], column_names=["1", "2"]),
+    )
 
-    with create_stream(_settings(root, fmt, dims, plate=plate)) as stream:
+    summary = {"experiment": "plate test"}
+    with create_stream(settings) as stream:
         stream.set_global_metadata("ns", summary)
         stream.append(FRAME)
         stream.append(FRAME)
@@ -123,11 +116,16 @@ def test_zarr_single_position_root_mirror_aliased(
     over the same file for single-position mode, `finalize()` would clobber
     whatever `set_global_metadata` wrote (last-writer-wins).
     """
-    root = tmp_path / "aliased.zarr"
-    fmt = {"name": "ome-zarr", "backend": zarr_backend}
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "aliased.zarr"),
+        dimensions=XY,
+        dtype="uint16",
+        format=zarr_backend,
+    )
 
-    with create_stream(_settings(root, fmt)) as stream:
+    with create_stream(settings) as stream:
         backend = stream._backend  # type: ignore[attr-defined]
+        assert isinstance(backend, YaozarrsBackend)
         assert backend._image_group_paths == ["."]
         assert backend._root_meta_mirror is backend._meta_mirrors["."]
         stream.append(FRAME)
@@ -135,8 +133,15 @@ def test_zarr_single_position_root_mirror_aliased(
 
 def test_global_metadata_invalid_namespace(tmp_path: Path, zarr_backend: str) -> None:
     """Reserved and empty namespaces raise ValueError."""
-    fmt = {"name": "ome-zarr", "backend": zarr_backend}
-    with create_stream(_settings(tmp_path / "reserved.zarr", fmt)) as stream:
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "reserved.zarr"),
+        dimensions=XY,
+        dtype="uint16",
+        overwrite=True,
+        format=zarr_backend,
+    )
+
+    with create_stream(settings) as stream:
         for ns in ("ome", "ome_writers"):
             with pytest.raises(ValueError, match="reserved"):
                 stream.set_global_metadata(ns, {})
