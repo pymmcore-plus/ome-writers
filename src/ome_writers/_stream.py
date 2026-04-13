@@ -13,7 +13,7 @@ from ome_writers._coord_tracker import CoordUpdate
 from ome_writers._router import FrameRouter
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     import numpy as np
 
@@ -208,6 +208,60 @@ class OMEStream:
     def update_metadata(self, metadata: Any) -> None:
         """Update metadata in the backend.  Meaning is format-dependent."""
         self._backend.update_metadata(metadata)
+
+    def set_global_metadata(self, namespace: str, metadata: Mapping[str, Any]) -> None:
+        """Attach global, acquisition-level metadata to the stream under a namespace.
+
+        Unlike per-frame metadata (see `append`) and per-position metadata
+        (see `update_metadata`), the payload passed here is per-stream:
+        a single "summary" blob (acquisition settings, MDA sequence, hardware
+        state, etc.) that applies to the acquisition as a whole rather than to
+        any particular frame or position.
+
+        Calling this method again with the same `namespace` replaces the
+        previously set value. Calling with a different `namespace` adds a
+        sibling entry; namespaces never merge with each other.
+
+        Where the payload lands on disk is format-defined: the stream will
+        place it wherever is natural for the target format, which may be a
+        single location or every per-position file depending on how the
+        format distributes its OME metadata.
+
+        May be called any time after `create_stream()`, including after
+        `close()`. For OME-TIFF the pre-close update is deferred to the
+        finalize flush (since `tiffcomment` cannot safely run while the
+        writer thread is active); post-close it is flushed immediately.
+        For OME-Zarr the write is always immediate.
+
+        Parameters
+        ----------
+        namespace : str
+            Namespace identifier. For OME-Zarr this becomes a top-level key
+            under the parent root group's `attributes`. For OME-TIFF this
+            becomes the `Namespace` attribute of a `MapAnnotation` under
+            `OME.structured_annotations` (not referenced by any plane) —
+            written once to the canonical file for single-file, master-tiff
+            and companion-file modes, or fanned out to every per-position
+            file for redundant mode. The names `"ome"` and `"ome_writers"`
+            are reserved and will raise `ValueError`.
+        metadata : Mapping[str, Any]
+            JSON-serializable mapping.
+            For OME-TIFF, each top-level key becomes a `Map` entry whose
+            value is the JSON-encoded value (to avoid the complexity of nested
+            structures in OME-XML).
+
+        Raises
+        ------
+        ValueError
+            If `namespace` is empty or reserved.
+        NotImplementedError
+            If the backend does not support global metadata at all.
+        """
+        if not isinstance(namespace, str) or not namespace:
+            raise ValueError("namespace must be a non-empty string")
+        if namespace in ("ome", "ome_writers"):
+            raise ValueError(f"namespace {namespace!r} is reserved by ome-writers")
+        self._backend.set_global_metadata(namespace, metadata)
 
     def __enter__(self) -> OMEStream:
         """Enter context manager."""

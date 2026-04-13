@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import threading
 import warnings
 from abc import abstractmethod
-from collections.abc import Iterator, MutableMapping
+from collections.abc import Iterator, Mapping, MutableMapping
 from contextlib import suppress
 from copy import deepcopy
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
 
 import numpy as np
 
@@ -31,8 +33,9 @@ except ImportError as e:
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
-    from typing import Protocol
+    from typing import Literal, Protocol
 
+    from typing_extensions import Self
     from yaozarrs.write.v05._write import CompressionName
 
     from ome_writers._backends._backend import ArrayLike
@@ -71,6 +74,11 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         self._arrays: list[_AT] = []
         self._image_group_paths: list[str] = []  # Parallel to _arrays, for metadata
         self._meta_mirrors: dict[str, JsonDocumentMirror] = {}  # grouppath -> mirror
+        # Mirror for the *parent* root group's zarr.json, used for
+        # set_global_metadata(). For single-position layouts this is the same
+        # object as self._meta_mirrors["."]; for multi-position (bf2raw) and
+        # plate layouts it is a separate mirror over <root>/zarr.json.
+        self._root_meta_mirror: JsonDocumentMirror | None = None
         self._finalized = False
         self._root: Path | None = None
         self._chunk_buffers: list[ChunkBuffer] | None = None
@@ -203,6 +211,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         # Cache metadata immediately after creation
         # This is used later for get_metadata() and update_metadata()
         self._cache_metadata_from_arrays(root)
+        self._cache_root_meta_mirror(root)
 
         # Initialize chunk buffering if beneficial
         if self._should_use_chunk_buffering(storage_dims):
@@ -434,6 +443,9 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
             self._finalize_chunk_buffers()
             for mirror in self._meta_mirrors.values():
                 mirror.flush()
+            root_mir = self._root_meta_mirror
+            if root_mir is not None and root_mir not in self._meta_mirrors.values():
+                root_mir.flush()
             self._arrays.clear()
             # Keep _image_group_paths for post-close reading
             self._finalized = True
@@ -460,6 +472,37 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         """Resize array to new shape."""
         array.resize(new_shape)
 
+    def _cache_root_meta_mirror(self, root: Path) -> None:
+        """Cache a mirror for the parent root group's zarr.json.
+
+        For single-position layouts the parent root group *is* the image
+        group, so we reuse the existing mirror. For multi-position (bf2raw)
+        and plate layouts, open a new mirror over `<root>/zarr.json`.
+        """
+        # Single-position: parent root group is the image group itself.
+        if self._image_group_paths == ["."]:
+            self._root_meta_mirror = self._meta_mirrors.get(".")
+            return
+
+        root_json = root / "zarr.json"
+        if root_json.exists():
+            self._root_meta_mirror = JsonDocumentMirror(root_json).load()
+        else:  # pragma: no cover
+            self._root_meta_mirror = None
+
+    def set_global_metadata(self, namespace: str, metadata: Mapping[str, Any]) -> None:
+        """Write acquisition-level metadata to the parent root group's attrs.
+
+        The value is stored under `attributes[namespace]` in
+        `<root>/zarr.json`. Same namespace replaces prior value; different
+        namespaces are stored as siblings. No merging.
+        """
+        if (mirror := self._root_meta_mirror) is None:  # pragma: no cover
+            raise RuntimeError("Backend not prepared. Call prepare() first.")
+
+        mirror.set_attribute_namespace(namespace, metadata)
+        mirror.flush()
+
     def _cache_metadata_from_arrays(self, root: Path) -> None:
         """Cache metadata from parent groups.
 
@@ -467,8 +510,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         """
         for group_path in self._image_group_paths:
             if (zarr_json := root / group_path / "zarr.json").exists():
-                self._meta_mirrors[group_path] = doc = JsonDocumentMirror(zarr_json)
-                doc.load()
+                self._meta_mirrors[group_path] = JsonDocumentMirror(zarr_json).load()
 
     def _should_use_chunk_buffering(self, storage_dims: list[Dimension]) -> bool:
         """Check if chunk buffering would be beneficial.
@@ -627,6 +669,18 @@ class JsonDocumentMirror(MutableMapping[str, Any]):
         self._frame_metadata.append(metadata)
         self._dirty = True
 
+    def mark_dirty(self) -> None:
+        """Mark this mirror as having unflushed in-memory modifications."""
+        with self._lock:
+            self._dirty = True
+
+    def set_attribute_namespace(self, namespace: str, value: Mapping[str, Any]) -> None:
+        """Set `attributes[namespace] = deepcopy(value)` atomically."""
+        with self._lock:
+            attrs = cast("dict[str, Any]", self._data.setdefault("attributes", {}))
+            attrs[namespace] = deepcopy(dict(value))
+            self._dirty = True
+
     def __getitem__(self, key: str) -> Any:
         with self._lock:
             return self._data[key]
@@ -666,10 +720,29 @@ class JsonDocumentMirror(MutableMapping[str, Any]):
                         f"Failed to serialize zarr.json for {self._path}:\n{e}"
                     ) from e
 
-                self._path.write_text(json_str)
+                # Write via temp file and atomically replace destination to
+                # avoid exposing partially written JSON to concurrent readers.
+                tmp_path: str | None = None
+                try:
+                    with tempfile.NamedTemporaryFile(
+                        mode="w",
+                        encoding="utf-8",
+                        dir=self._path.parent,
+                        prefix=f"{self._path.name}.",
+                        suffix=".tmp",
+                        delete=False,
+                    ) as tmp:
+                        tmp.write(json_str)
+                        tmp_path = tmp.name
+                    os.replace(tmp_path, self._path)
+                    tmp_path = None  # replace consumed it; skip cleanup
+                finally:
+                    if tmp_path is not None:
+                        with suppress(FileNotFoundError):
+                            Path(tmp_path).unlink()
                 self._dirty = False
 
-    def load(self) -> None:
+    def load(self) -> Self:
         """Load data from disk."""
         with self._lock:
             if self._dirty:  #  pragma: no cover
@@ -683,6 +756,7 @@ class JsonDocumentMirror(MutableMapping[str, Any]):
             else:
                 self._data = {}  # pragma: no cover
             self._dirty = False
+        return self
 
     @property
     def ome_writers(self) -> dict[str, Any]:

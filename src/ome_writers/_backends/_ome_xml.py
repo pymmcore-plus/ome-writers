@@ -61,6 +61,40 @@ class OmeXMLMirror:
         """Mark the OME-XML as dirty (modified)."""
         self._dirty = True
 
+    def set_map_annotation(self, namespace: str, value: ome.Map) -> None:
+        """Set a `MapAnnotation` keyed by `namespace`, preserving order.
+
+        If a `MapAnnotation` with the given `namespace` already exists in
+        `structured_annotations.map_annotations`, it is replaced *in place*
+        so sibling annotations keep their relative order. Otherwise a new
+        entry is appended. Any later duplicates with the same namespace are
+        dropped as a defensive measure. The mirror is marked dirty.
+
+        This method is not internally locked; callers must hold whatever
+        lock protects concurrent access to this mirror (e.g. the owning
+        `PositionManager._lock` in `TiffBackend`).
+        """
+        if not (structured := self.model.structured_annotations):
+            self.model.structured_annotations = structured = ome.StructuredAnnotations()
+
+        new_ann = ome.MapAnnotation(namespace=namespace, value=value)
+        existing = structured.map_annotations
+        idx = next(
+            (i for i, a in enumerate(existing) if a.namespace == namespace),
+            None,
+        )
+        if idx is None:
+            existing.append(new_ann)
+        else:
+            existing[idx] = new_ann
+            if any(a.namespace == namespace for a in existing[idx + 1 :]):
+                structured.map_annotations = [
+                    a
+                    for i, a in enumerate(existing)
+                    if i <= idx or a.namespace != namespace
+                ]
+        self._dirty = True
+
     @property
     def is_tiff(self) -> bool:
         """Whether the OME-XML is stored in a TIFF file."""
@@ -100,6 +134,14 @@ def prepare_metadata(settings: AcquisitionSettings) -> dict[str, OmeXMLMirror]:
     -------
     dict[str, OmeXMLMirror]
         Mapping of file paths to their OME-XML mirrors.
+
+    Notes
+    -----
+    Invariant relied on by `TiffBackend._global_target_pos_idxs`: stub
+    mirrors (BinData-only references to another file) MUST set
+    ``model.binary_only``, and full-OME mirrors MUST leave it unset. The
+    backend uses that flag to decide which file(s) receive global
+    `MapAnnotation` updates.
     """
     if not isinstance(settings.format, OmeTiffFormat):
         raise ValueError("Expected settings.format to be an OmeTiffFormat instance.")
