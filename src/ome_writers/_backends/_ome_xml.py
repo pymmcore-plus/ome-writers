@@ -100,6 +100,14 @@ def prepare_metadata(settings: AcquisitionSettings) -> dict[str, OmeXMLMirror]:
     -------
     dict[str, OmeXMLMirror]
         Mapping of file paths to their OME-XML mirrors.
+
+    Notes
+    -----
+    Invariant relied on by `TiffBackend._global_target_pos_idxs`: stub
+    mirrors (BinData-only references to another file) MUST set
+    ``model.binary_only``, and full-OME mirrors MUST leave it unset. The
+    backend uses that flag to decide which file(s) receive global
+    `MapAnnotation` updates.
     """
     if not isinstance(settings.format, OmeTiffFormat):
         raise ValueError("Expected settings.format to be an OmeTiffFormat instance.")

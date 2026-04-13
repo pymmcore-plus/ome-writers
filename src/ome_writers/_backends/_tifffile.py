@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Literal, cast
 import numpy as np
 
 from ome_writers._backends._backend import ArrayBackend
-from ome_writers._backends._ome_xml import COMPANION_IDX, prepare_metadata
+from ome_writers._backends._ome_xml import prepare_metadata
 from ome_writers._backends._tiff_array import FinalizedTiffArray, LiveTiffArray
 
 if TYPE_CHECKING:
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from ome_writers._backends._backend import ArrayLike
     from ome_writers._backends._ome_xml import OmeXMLMirror
     from ome_writers._router import FrameRouter
-    from ome_writers._schema import AcquisitionSettings, Dimension, OmeTiffFormat
+    from ome_writers._schema import AcquisitionSettings, Dimension
 
 try:
     import ome_types.model as ome
@@ -135,8 +135,6 @@ class TiffBackend(ArrayBackend):
         self._storage_dims: tuple[Dimension, ...] | None = None
         self._dtype: str = ""
         self._frame_metadata: dict[int, list[dict[str, Any]]] = {}
-        self._tiff_format: OmeTiffFormat | None = None
-        self._single_file: bool = False
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         """Check if settings are compatible with TIFF backend."""
@@ -165,16 +163,8 @@ class TiffBackend(ArrayBackend):
 
     def prepare(self, settings: AcquisitionSettings, router: FrameRouter) -> None:
         """Initialize OME-TIFF files and writer threads."""
-        from ome_writers._schema import OmeTiffFormat
 
         self._finalized = False
-        if isinstance(settings.format, OmeTiffFormat):
-            self._tiff_format = settings.format
-            prefer = settings.format.prefer_single_file
-            num_pos = len(settings.positions)
-            self._single_file = prefer == "always" or (
-                prefer == "auto" and num_pos <= 1
-            )
         self._storage_dims = storage_dims = settings.array_storage_dimensions
         # Extract index keys, excluding Y and X, example: ['t', 'c', 'z']
         self._index_keys = [d.name for d in storage_dims[:-2]]
@@ -315,39 +305,22 @@ class TiffBackend(ArrayBackend):
             mirror.mark_dirty()
 
     def _global_target_pos_idxs(self) -> list[int]:
-        """Return pos_idxs of managers that should receive global metadata.
+        """Return pos_idxs of managers whose mirror holds the full OME model.
 
-        The behavior depends on the `multi_file_metadata` mode:
-
-        - `companion-file`: the companion file only (`COMPANION_IDX`).
-        - single-file / `master-tiff`: the first (master) position.
-        - `redundant`: every TIFF position, matching the "duplicate
-          full OME into every file" semantics of that mode.
+        Across every `multi_file_metadata` mode, the "full OME" mirrors are
+        exactly the files that should carry global `MapAnnotation`s: the
+        companion in companion-file mode, the master in master-tiff, the
+        sole file in single-file, and every file in redundant mode.
+        `prepare_metadata` marks stub mirrors by setting
+        ``model.binary_only``; full-OME mirrors leave it unset.
         """
         if not self._position_managers:  # pragma: no cover
             raise RuntimeError("Backend not prepared. Call prepare() first.")
 
-        # Companion-file mode: the companion file has the special index and
-        # is the one location with a full OME model.
-        if COMPANION_IDX in self._position_managers:
-            return [COMPANION_IDX]
-
-        # Single-file mode: only one position exists, and it has full metadata.
-        if self._single_file:
-            return [0]
-
-        mode = (
-            self._tiff_format.multi_file_metadata if self._tiff_format else "redundant"
-        )
-        if mode == "master-tiff":
-            return [0]
-        # redundant (and any unrecognized future mode): fan out to every TIFF
-        # position. Each file has its own full OME copy, so each file gets
-        # its own copy of the global annotation too.
         return sorted(
             pos_idx
             for pos_idx, mgr in self._position_managers.items()
-            if mgr.metadata_mirror.is_tiff
+            if mgr.metadata_mirror.model.binary_only is None
         )
 
     def set_global_metadata(self, namespace: str, metadata: Mapping[str, Any]) -> None:
