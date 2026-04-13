@@ -111,17 +111,10 @@ class PositionManager:
             if data_blocks := pixels.tiff_data_blocks:
                 data_blocks[0].plane_count = self.thread.frames_written
             self.metadata_mirror.flush(force=True)
-        elif self._metadata_dirty_fallback():
-            # Fallback: flush if any in-memory modifications have been made
-            # (e.g. set_global_metadata on a 2D-only or zero-frame
-            # acquisition). This respects the dirty flag so empty streams
-            # that never modified the model don't trigger tiffcomment on a
-            # zero-page TIFF.
+        else:
+            # Fallback: flush if any in-memory modifications have been made (e.g.
+            # set_global_metadata on a 2D-only or zero-frame acquisition).  No force.
             self.metadata_mirror.flush()
-
-    def _metadata_dirty_fallback(self) -> bool:
-        """Return whether the metadata mirror has unflushed modifications."""
-        return getattr(self.metadata_mirror, "_dirty", False)
 
 
 class TiffBackend(ArrayBackend):
@@ -134,6 +127,9 @@ class TiffBackend(ArrayBackend):
 
     def __init__(self) -> None:
         self._finalized = False
+        # Lock ordering: always acquire self._state_lock BEFORE any
+        # PositionManager._lock. set_global_metadata() and finalize() follow
+        # this order; inverting it in new code will deadlock.
         self._state_lock = threading.Lock()
         self._position_managers: dict[int, PositionManager] = {}
         self._storage_dims: tuple[Dimension, ...] | None = None

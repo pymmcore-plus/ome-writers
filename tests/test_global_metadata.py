@@ -111,6 +111,28 @@ def test_zarr_global_metadata_plate(tmp_path: Path, zarr_backend: str) -> None:
         assert "ns" not in _zarr_attrs(root / "A" / col / "field0")
 
 
+def test_zarr_single_position_root_mirror_aliased(
+    tmp_path: Path, zarr_backend: str
+) -> None:
+    """In single-position layouts the parent root group *is* the image group,
+    so `_root_meta_mirror` must be the same object as `_meta_mirrors["."]`.
+
+    This invariant is load-bearing: `set_global_metadata` flushes through
+    `_root_meta_mirror`, while `finalize()` flushes per-image mirrors via
+    `_meta_mirrors`. If a future refactor opens a second, distinct mirror
+    over the same file for single-position mode, `finalize()` would clobber
+    whatever `set_global_metadata` wrote (last-writer-wins).
+    """
+    root = tmp_path / "aliased.zarr"
+    fmt = {"name": "ome-zarr", "backend": zarr_backend}
+
+    with create_stream(_settings(root, fmt)) as stream:
+        backend = stream._backend  # type: ignore[attr-defined]
+        assert backend._image_group_paths == ["."]
+        assert backend._root_meta_mirror is backend._meta_mirrors["."]
+        stream.append(FRAME)
+
+
 def test_global_metadata_invalid_namespace(tmp_path: Path, zarr_backend: str) -> None:
     """Reserved and empty namespaces raise ValueError."""
     fmt = {"name": "ome-zarr", "backend": zarr_backend}
