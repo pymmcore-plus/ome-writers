@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import threading
 from pathlib import Path as PathlibPath
+from typing import Any
 
 import numpy as np
 import pytest
@@ -850,3 +853,145 @@ def test_pixel_data_integrity(tmp_path: Path, mode: MultiFileMetadata) -> None:
                 data = tif.pages[z_idx].asarray()
                 assert data.shape == (32, 32)
                 assert np.all(data == expected_value)
+
+
+# ---------------------------------------------------------------------------
+# set_global_metadata tests
+# ---------------------------------------------------------------------------
+
+
+def _anns_by_ns(ome_obj: Any, namespace: str) -> list[Any]:
+    sa = ome_obj.structured_annotations
+    if sa is None:
+        return []
+    return [a for a in sa.map_annotations if a.namespace == namespace]
+
+
+def _decode_map(annotation: Any) -> dict:
+    return {entry.k: json.loads(entry.value) for entry in annotation.value.ms}
+
+
+def test_tiff_global_metadata_single_file(tmp_path: Path, tiff_backend: str) -> None:
+    """Single-file TIFF: replace + siblings + not referenced by any plane."""
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "single.ome.tiff"),
+        dimensions=[
+            Dimension(name="t", count=2, type="time"),
+            Dimension(name="y", count=16, type="space"),
+            Dimension(name="x", count=16, type="space"),
+        ],
+        dtype="uint16",
+        format={"name": "ome-tiff", "backend": tiff_backend},
+    )
+    summary = {"mda": {"positions": 1}, "note": "single"}
+
+    with create_stream(settings) as stream:
+        stream.set_global_metadata("ns_a", {"first": True})
+        stream.set_global_metadata("ns_a", summary)  # replace
+        stream.set_global_metadata("ns_b", {"y": 2})  # sibling
+        for _ in range(2):
+            stream.append(np.zeros((16, 16), dtype=np.uint16))
+
+    ome_obj = from_tiff(str(tmp_path / "single.ome.tiff"))
+    ns_a = _anns_by_ns(ome_obj, "ns_a")
+    ns_b = _anns_by_ns(ome_obj, "ns_b")
+    assert len(ns_a) == 1 and _decode_map(ns_a[0]) == summary
+    assert len(ns_b) == 1 and _decode_map(ns_b[0]) == {"y": 2}
+
+    # Not referenced by any plane.
+    ann_ids = {ns_a[0].id, ns_b[0].id}
+    for image in ome_obj.images:
+        for plane in image.pixels.planes:
+            assert all(ref.id not in ann_ids for ref in plane.annotation_refs)
+
+
+@pytest.mark.parametrize("mode", MULTI_FILE_MODES)
+def test_tiff_global_metadata_multi_file_modes(
+    tmp_path: Path, tiff_backend: str, mode: MultiFileMetadata
+) -> None:
+    """Each multi-file mode routes the annotation to the correct file(s)."""
+    d = tmp_path / mode.value
+    settings = AcquisitionSettings(
+        root_path=str(d),
+        dimensions=[
+            Dimension(name="p", type="position", coords=["Pos0", "Pos1"]),
+            Dimension(name="t", count=2, type="time"),
+            Dimension(name="y", count=16, type="space"),
+            Dimension(name="x", count=16, type="space"),
+        ],
+        dtype="uint16",
+        format={
+            "name": "ome-tiff",
+            "backend": tiff_backend,
+            "multi_file_metadata": mode.value,
+        },
+    )
+    summary = {"mda": mode.value}
+
+    with create_stream(settings) as stream:
+        stream.set_global_metadata("ns", summary)
+        for _ in range(4):
+            stream.append(np.zeros((16, 16), dtype=np.uint16))
+
+    per_pos = [
+        _anns_by_ns(from_tiff(str(d / f"{mode.value}_p{p:03d}.ome.tiff")), "ns")
+        for p in range(2)
+    ]
+    if mode == MultiFileMetadata.REDUNDANT:
+        for anns in per_pos:
+            assert len(anns) == 1 and _decode_map(anns[0]) == summary
+    elif mode == MultiFileMetadata.MASTER_TIFF:
+        assert len(per_pos[0]) == 1 and _decode_map(per_pos[0][0]) == summary
+        assert per_pos[1] == []
+    else:  # MultiFileMetadata.COMPANION
+        assert per_pos[0] == [] and per_pos[1] == []
+        companion = from_xml((d / "companion.ome").read_text())
+        c_anns = _anns_by_ns(companion, "ns")
+        assert len(c_anns) == 1 and _decode_map(c_anns[0]) == summary
+
+
+def test_tiff_global_metadata_concurrent_with_close(
+    tmp_path: Path, tiff_backend: str
+) -> None:
+    """Concurrent summary updates and close should not crash."""
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "concurrent_close.ome.tiff"),
+        dimensions=[
+            Dimension(name="t", count=16, type="time"),
+            Dimension(name="y", count=16, type="space"),
+            Dimension(name="x", count=16, type="space"),
+        ],
+        dtype="uint16",
+        format={"name": "ome-tiff", "backend": tiff_backend},
+    )
+    errors: list[BaseException] = []
+    stop = threading.Event()
+
+    stream = create_stream(settings)
+    stream.set_global_metadata("ns", {"i": 0})
+
+    def _loop() -> None:
+        i = 1
+        while not stop.is_set():
+            try:
+                stream.set_global_metadata("ns", {"i": i})
+            except RuntimeError:  # expected once close finalizes
+                break
+            except BaseException as e:
+                errors.append(e)
+                break
+            i += 1
+
+    worker = threading.Thread(target=_loop)
+    worker.start()
+    try:
+        for _ in range(8):
+            stream.append(np.zeros((16, 16), dtype=np.uint16))
+    finally:
+        stream.close()
+        stop.set()
+        worker.join(timeout=2)
+
+    assert not errors
+    matches = _anns_by_ns(from_tiff(str(tmp_path / "concurrent_close.ome.tiff")), "ns")
+    assert len(matches) == 1
