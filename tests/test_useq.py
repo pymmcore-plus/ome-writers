@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -781,3 +782,49 @@ def test_plate_from_position_annotations_zarr(
     assert (zarr_root / "A" / "1" / "fov0").exists()
     assert (zarr_root / "A" / "1" / "fov1").exists()
     assert (zarr_root / "B" / "2" / "fov0").exists()
+
+
+def test_useq_stage_positions_write_per_position_translation(
+    tmp_path: Path, zarr_backend: str
+) -> None:
+    """Stage positions drive per-image translation in the written zarr.
+
+    This is the end-to-end check for pymmcore-plus/ome-writers#132: each
+    position's NGFF image should carry its own x/y/z translation, so that a
+    grid-scan acquisition can be reconstructed from the zarr metadata alone.
+    """
+
+    seq = useq.MDASequence(
+        stage_positions=[
+            useq.Position(x=100, y=200, z=5, name="A"),
+            useq.Position(x=500, y=800, z=10, name="B"),
+        ],
+        channels=["DAPI"],
+    )
+    root = tmp_path / "per_pos_tx.ome.zarr"
+    settings = AcquisitionSettings(
+        root_path=str(root),
+        **useq_to_acquisition_settings(
+            seq, image_width=8, image_height=8, pixel_size_um=0.5
+        ),
+        dtype="uint16",
+        format=zarr_backend,
+    )
+    with create_stream(settings) as stream:
+        for _ in seq:
+            stream.append(np.zeros((8, 8), dtype="uint16"))
+
+    def _tx(path: Path) -> dict[str, float]:
+        doc = json.loads((path / "zarr.json").read_text())
+        ms = doc["attributes"]["ome"]["multiscales"][0]
+        axes = [ax["name"] for ax in ms["axes"]]
+        xforms = ms["datasets"][0]["coordinateTransformations"]
+        tx = next(t for t in xforms if t["type"] == "translation")["translation"]
+        return dict(zip(axes, tx, strict=True))
+
+    a = _tx(root / "A")
+    b = _tx(root / "B")
+    assert a["x"] == 100.0 and a["y"] == 200.0
+    assert b["x"] == 500.0 and b["y"] == 800.0
+    # No Z dim in this sequence (no z_plan), so Z isn't part of the image axes.
+    assert "z" not in a
