@@ -127,10 +127,14 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         shape = tuple(d.count if d.count is not None else 1 for d in storage_dims)
         dtype = settings.dtype
         chunks, shards = _get_chunks_and_shards(storage_dims)
-        # this single image model is reused for all positions
-        # (the underlying assumption is that we currently don't support inhomogeneous
-        # shapes/dtypes across positions)
-        image = _build_yaozarrs_image_model(storage_dims, dtype)
+        # Build a per-position image model so each position can carry its own
+        # spatial translation (from Position.x_coord/y_coord/z_coord).  Shape and
+        # dtype are shared across positions.
+        storage_dims_list = list(storage_dims)
+        images: list[v05.Image] = [
+            _build_yaozarrs_image_model(storage_dims_list, dtype, position=pos)
+            for pos in positions
+        ]
 
         compression = cast("CompressionName", settings.compression or "none")
 
@@ -158,7 +162,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
 
             for (row, col), pos_list in well_positions.items():
                 images_dict = {
-                    pos.name: (image, [(shape, dtype)]) for _idx, pos in pos_list
+                    pos.name: (images[idx], [(shape, dtype)]) for idx, pos in pos_list
                 }
                 builder.add_well(row=row, col=col, images=images_dict)
 
@@ -175,7 +179,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         elif len(positions) == 1:
             _, all_arrays = prepare_image(
                 root,
-                image,
+                images[0],
                 datasets=[(shape, dtype)],
                 overwrite=settings.overwrite,
                 chunks=chunks,
@@ -196,8 +200,8 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
                 writer=writer,
                 compression=compression,
             )
-            for pos in positions:
-                builder.add_series(_get_series_name(pos), image, [(shape, dtype)])
+            for idx, pos in enumerate(positions):
+                builder.add_series(_get_series_name(pos), images[idx], [(shape, dtype)])
 
             _, all_arrays = builder.prepare()
             self._image_group_paths = [_get_series_name(pos) for pos in positions]
@@ -579,8 +583,18 @@ def _get_chunks_and_shards(
     return tuple(chunks), tuple(shards) if has_shards else None
 
 
-def _build_yaozarrs_image_model(dims: list[Dimension], dtype: str) -> v05.Image:
-    """Build yaozarrs v05 Image metadata from Dimensions."""
+def _build_yaozarrs_image_model(
+    dims: list[Dimension], dtype: str, position: Position | None = None
+) -> v05.Image:
+    """Build yaozarrs v05 Image metadata from Dimensions.
+
+    If `position` is given, its `x_coord`/`y_coord`/`z_coord` override the
+    translation of the corresponding spatial dims so that each per-position
+    image in a multi-position acquisition gets its own origin. See
+    `_position_translation_by_dim_index` for the mapping rules.
+    """
+    pos_translations = _position_translation_by_dim_index(dims, position)
+
     dim_specs = [
         DimSpec(
             name=dim.name,
@@ -588,9 +602,9 @@ def _build_yaozarrs_image_model(dims: list[Dimension], dtype: str) -> v05.Image:
             type=dim.type,
             unit=dim.unit,
             scale=1.0 if dim.scale is None else dim.scale,
-            translation=dim.translation,
+            translation=pos_translations.get(i, dim.translation),
         )
-        for dim in dims
+        for i, dim in enumerate(dims)
     ]
     channel_dim = next((d for d in dims if is_channel_dim(d)), None)
     if channel_dim is not None and channel_dim.coords:
@@ -616,6 +630,72 @@ def _build_yaozarrs_image_model(dims: list[Dimension], dtype: str) -> v05.Image:
     else:
         omero = None
     return v05.Image(multiscales=[v05.Multiscale.from_dims(dim_specs)], omero=omero)
+
+
+def _position_translation_by_dim_index(
+    dims: list[Dimension], pos: Position | None
+) -> dict[int, float]:
+    """Map `Position.x_coord/y_coord/z_coord` onto target dim indices.
+
+    Strategy:
+
+    1. Name match (case-insensitive) on `"x"`, `"y"`, `"z"` wins first. This is
+       the NGFF canonical labeling and what the vast majority of users will
+       have (via `StandardAxis` / `useq_to_acquisition_settings`).
+    2. For X and Y *only*, fall back to the trailing two dims of `dims` (the
+       schema-guaranteed frame dims): the last dim gets `x_coord`, the
+       second-to-last gets `y_coord`, provided they are space-typed and
+       weren't already claimed by a name match. This handles non-canonical
+       names like `"row"`/`"col"`.
+    3. Z has *no* positional fallback. ome-writers doesn't mandate canonical
+       axis names and doesn't mandate a ZYX dim order (`storage_order` can
+       be `"acquisition"` or a custom list), so there is no unambiguous
+       positional slot for Z the way there is for the frame-last X/Y pair.
+       A future schema change — e.g. an explicit `spatial_role` on
+       `Dimension`, or a structured position coord map keyed by dim name —
+       could lift this restriction. Until then, per-position Z translation
+       requires naming the Z axis `"z"` (case-insensitive).
+
+    Returns
+    -------
+    dict[int, float]
+        Mapping of dim index to translation value for spatial dims with position coords.
+        Example: {0: 1.5, 3: 0.2} means the dim at index 0 has translation 1.5 and the
+        dim at index 3 has translation 0.2.
+    """
+    if pos is None:
+        return {}
+
+    # Step 1: name match
+    name_to_index: dict[str, int] = {}
+    for i, d in enumerate(dims):
+        lower = d.name.lower()
+        if lower in ("x", "y", "z") and lower not in name_to_index:
+            name_to_index[lower] = i
+
+    out: dict[int, float] = {}
+    for axis, value in (("x", pos.x_coord), ("y", pos.y_coord), ("z", pos.z_coord)):
+        if value is not None and (idx := name_to_index.get(axis)) is not None:
+            out[idx] = value
+
+    # Step 2: positional fallback for the frame X/Y dims only.
+    n = len(dims)
+    if (
+        "x" not in name_to_index
+        and pos.x_coord is not None
+        and n >= 1
+        and dims[-1].type == "space"
+    ):
+        out.setdefault(n - 1, pos.x_coord)
+    if (
+        "y" not in name_to_index
+        and pos.y_coord is not None
+        and n >= 2
+        and dims[-2].type == "space"
+    ):
+        out.setdefault(n - 2, pos.y_coord)
+
+    return out
 
 
 def _get_series_name(pos: Position) -> str:

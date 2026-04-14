@@ -6,7 +6,7 @@
 # ]
 #
 # [tool.uv.sources]
-# ome-writers = { path = "../" }
+# ome-writers = { path = "../", editable = true }
 # ///
 """Example of using ome_writers to store data acquired with pymmcore-plus."""
 
