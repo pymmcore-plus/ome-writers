@@ -14,6 +14,7 @@ import tifffile
 
 from ome_writers._schema import OmeTiffFormat
 from ome_writers._units import ngff_to_ome_unit
+from ome_writers._util import spatial_role_indices
 
 if TYPE_CHECKING:
     from ome_writers._schema import AcquisitionSettings, Channel, Dimension, Position
@@ -385,6 +386,7 @@ def _build_full_model(
             name=pos.name,
             pixels=pixels,
             acquisition_date=datetime.now(timezone.utc),
+            stage_label=_build_stage_label(pos, dims),
         )
         images.append(image)
 
@@ -403,6 +405,30 @@ def _get_dimension_order(dims: list[Dimension]) -> str:
         if order[2:].startswith(suffix):
             return order
     raise ValueError(f"No valid order matches {suffix}")  # pragma: no cover
+
+
+def _build_stage_label(pos: Position, dims: list[Dimension]) -> ome.StageLabel | None:
+    """Build `ome.StageLabel` from a `Position` if any XYZ coord is present.
+
+    Units are derived from the spatial dim that plays the corresponding role
+    (per `_spatial_role_indices`), converted to an OME-XML `UnitsLength`
+    string via `ngff_to_ome_unit`. Axes with no coord are left unset and
+    take `StageLabel`'s default (`REFERENCEFRAME`). Returns `None` when no
+    coord is available so no empty `StageLabel` is attached.
+    """
+    if pos.x_coord is None and pos.y_coord is None and pos.z_coord is None:
+        return None
+
+    roles = spatial_role_indices(dims)
+    kwargs: dict[str, object] = {"name": pos.name}
+    for axis, value in (("x", pos.x_coord), ("y", pos.y_coord), ("z", pos.z_coord)):
+        if value is not None:
+            kwargs[axis] = value
+            idx = roles.get(axis)
+            if idx is not None and (unit := dims[idx].unit):
+                if ome_unit := ngff_to_ome_unit(unit):
+                    kwargs[f"{axis}_unit"] = ome_unit
+    return ome.StageLabel(**kwargs)
 
 
 def _get_physical_sizes(dims: list[Dimension]) -> dict:

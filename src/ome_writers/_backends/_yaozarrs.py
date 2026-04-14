@@ -20,6 +20,7 @@ from ome_writers import __version__
 from ome_writers._backends._backend import ArrayBackend
 from ome_writers._backends._chunk_buffer import ChunkBuffer
 from ome_writers._schema import is_channel_dim
+from ome_writers._util import spatial_role_indices
 
 try:
     from yaozarrs import DimSpec, v05
@@ -637,65 +638,27 @@ def _position_translation_by_dim_index(
 ) -> dict[int, float]:
     """Map `Position.x_coord/y_coord/z_coord` onto target dim indices.
 
-    Strategy:
-
-    1. Name match (case-insensitive) on `"x"`, `"y"`, `"z"` wins first. This is
-       the NGFF canonical labeling and what the vast majority of users will
-       have (via `StandardAxis` / `useq_to_acquisition_settings`).
-    2. For X and Y *only*, fall back to the trailing two dims of `dims` (the
-       schema-guaranteed frame dims): the last dim gets `x_coord`, the
-       second-to-last gets `y_coord`, provided they are space-typed and
-       weren't already claimed by a name match. This handles non-canonical
-       names like `"row"`/`"col"`.
-    3. Z has *no* positional fallback. ome-writers doesn't mandate canonical
-       axis names and doesn't mandate a ZYX dim order (`storage_order` can
-       be `"acquisition"` or a custom list), so there is no unambiguous
-       positional slot for Z the way there is for the frame-last X/Y pair.
-       A future schema change — e.g. an explicit `spatial_role` on
-       `Dimension`, or a structured position coord map keyed by dim name —
-       could lift this restriction. Until then, per-position Z translation
-       requires naming the Z axis `"z"` (case-insensitive).
+    Uses `_spatial_role_indices` to resolve which dim plays which spatial
+    role, then maps the corresponding position coord onto that dim's index.
+    See `_spatial_role_indices` for the resolution rules (name match first,
+    then positional fallback for X/Y only — no Z fallback).
 
     Returns
     -------
     dict[int, float]
-        Mapping of dim index to translation value for spatial dims with position coords.
-        Example: {0: 1.5, 3: 0.2} means the dim at index 0 has translation 1.5 and the
-        dim at index 3 has translation 0.2.
+        Mapping of dim index to translation value. Example: `{0: 1.5, 3: 0.2}`
+        means the dim at index 0 has translation 1.5 and the dim at index 3
+        has translation 0.2.
     """
     if pos is None:
         return {}
 
-    # Step 1: name match
-    name_to_index: dict[str, int] = {}
-    for i, d in enumerate(dims):
-        lower = d.name.lower()
-        if lower in ("x", "y", "z") and lower not in name_to_index:
-            name_to_index[lower] = i
-
-    out: dict[int, float] = {}
-    for axis, value in (("x", pos.x_coord), ("y", pos.y_coord), ("z", pos.z_coord)):
-        if value is not None and (idx := name_to_index.get(axis)) is not None:
-            out[idx] = value
-
-    # Step 2: positional fallback for the frame X/Y dims only.
-    n = len(dims)
-    if (
-        "x" not in name_to_index
-        and pos.x_coord is not None
-        and n >= 1
-        and dims[-1].type == "space"
-    ):
-        out.setdefault(n - 1, pos.x_coord)
-    if (
-        "y" not in name_to_index
-        and pos.y_coord is not None
-        and n >= 2
-        and dims[-2].type == "space"
-    ):
-        out.setdefault(n - 2, pos.y_coord)
-
-    return out
+    roles = spatial_role_indices(dims)
+    return {
+        roles[axis]: value
+        for axis, value in (("x", pos.x_coord), ("y", pos.y_coord), ("z", pos.z_coord))
+        if value is not None and axis in roles
+    }
 
 
 def _get_series_name(pos: Position) -> str:

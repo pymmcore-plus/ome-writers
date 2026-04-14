@@ -683,6 +683,81 @@ def test_5d_with_physical_sizes(tmp_path: Path, mode: MultiFileMetadata) -> None
 
 
 @pytest.mark.parametrize("mode", MULTI_FILE_MODES)
+def test_stage_label_from_position_coords(
+    tmp_path: Path, mode: MultiFileMetadata
+) -> None:
+    """Each per-position `Image` carries a `StageLabel` built from `Position`.
+
+    This is the OME-TIFF counterpart to the zarr per-position coordinate
+    transform wired in pymmcore-plus/ome-writers#132. `StageLabel` is an
+    `ome.Image` child and is the only place in the OME-XML schema for a
+    single per-image stage XYZ.
+    """
+    dimensions = [
+        Dimension(
+            name="p",
+            type="position",
+            coords=[
+                Position(name="A", x_coord=100.0, y_coord=200.0, z_coord=5.0),
+                Position(name="B", x_coord=500.0, y_coord=800.0, z_coord=10.0),
+            ],
+        ),
+        Dimension(name="c", count=1, type="channel"),
+        Dimension(name="z", count=3, type="space", scale=1.0, unit="micrometer"),
+        Dimension(name="y", count=8, type="space", scale=0.5, unit="micrometer"),
+        Dimension(name="x", count=8, type="space", scale=0.5, unit="micrometer"),
+    ]
+
+    settings = _write_with_mode(tmp_path, dimensions, mode)
+    ome = _get_full_ome(settings)
+
+    labels = {img.name: img.stage_label for img in ome.images}
+    assert set(labels) == {"A", "B"}
+
+    a = labels["A"]
+    assert a is not None
+    assert a.name == "A"
+    assert (a.x, a.y, a.z) == (100.0, 200.0, 5.0)
+    assert a.x_unit.value == "µm"
+    assert a.y_unit.value == "µm"
+    assert a.z_unit.value == "µm"
+
+    b = labels["B"]
+    assert b is not None
+    assert b.name == "B"
+    assert (b.x, b.y, b.z) == (500.0, 800.0, 10.0)
+
+
+def test_stage_label_skipped_when_no_coords(tmp_path: Path) -> None:
+    """Positions without XYZ coords don't get a `StageLabel` attached."""
+    settings = AcquisitionSettings(
+        root_path=str(tmp_path / "no_coords.ome.tiff"),
+        dimensions=[
+            Dimension(
+                name="p",
+                type="position",
+                coords=[Position(name="A"), Position(name="B")],
+            ),
+            Dimension(name="c", count=1, type="channel"),
+            Dimension(name="y", count=8, type="space", scale=0.5, unit="micrometer"),
+            Dimension(name="x", count=8, type="space", scale=0.5, unit="micrometer"),
+        ],
+        dtype="uint16",
+        overwrite=True,
+        format={"name": "ome-tiff"},
+    )
+
+    with create_stream(settings) as stream:
+        for _ in range(2):
+            stream.append(np.zeros((8, 8), dtype=np.uint16))
+
+    ome = _get_full_ome(settings)
+    assert len(ome.images) == 2
+    for img in ome.images:
+        assert img.stage_label is None
+
+
+@pytest.mark.parametrize("mode", MULTI_FILE_MODES)
 def test_plate_basic(tmp_path: Path, mode: MultiFileMetadata) -> None:
     """Test plate with one field per well."""
     dimensions = [
