@@ -428,14 +428,52 @@ def _plate_strs(pos: useq.Position) -> tuple[str | None, str | None]:
     return None, None
 
 
+def _grid_position_name(
+    pos: useq.Position,
+    gp: useq.Position,
+    gp_idx: int,
+    pos_idx: int | None,
+    has_plate: bool,
+) -> str:
+    """Determine the name for a grid-expanded position.
+
+    Naming priority:
+    1. Explicit name from user (may be further suffixed for RandomPoints)
+    2. fov{grid_index} for plate positions (matches WellPlatePlan convention)
+    3. str(position_index) fallback
+
+    For RandomPoints (no grid_row/grid_col), an index suffix is appended
+    to ensure uniqueness since grid coordinates can't distinguish positions.
+    """
+    if pos.name:
+        name = pos.name
+    elif has_plate:
+        return f"fov{gp_idx}"
+    else:
+        # pos_idx is None when there's only one position (index 0)
+        name = str(pos_idx if pos_idx is not None else 0)
+
+    # RandomPoints have no grid_row/grid_col — append index for uniqueness
+    if gp.grid_row is None and gp.grid_col is None:
+        if pos_idx is not None:
+            suffix = f"p{pos_idx:04d}_g{gp_idx:04d}"
+            return f"{name}_{suffix}" if name else suffix
+        else:
+            return f"{name}_g{gp_idx:04d}" if name else f"{gp_idx:04d}"
+
+    return name
+
+
 def _pos_with_grid_point(
     name: str,
     pos: useq.Position,
     gp: useq.Position,
-    gp_idx: int = 0,
-    pos_idx: int | None = None,
 ) -> Position:
-    """Create a Position by combining a stage position with a grid point."""
+    """Create a Position by combining a stage position with a grid point.
+
+    Handles only coordinate merging — all naming logic lives in the caller
+    (_build_stage_positions_plan).
+    """
     # If we have an absolute grid plan, the grid point coordinates are used directly.
     # This results from a design flaw in useq where it's possible to combine
     # an absolute grid plan with (absolute) stage positions.  We will likely change
@@ -447,15 +485,6 @@ def _pos_with_grid_point(
         # relative grid points are offsets from the stage position
         x_coord = (pos.x or 0) + (gp.x or 0)
         y_coord = (pos.y or 0) + (gp.y or 0)
-
-    # When there is no row/col (e.g. RandomPoints), append an index to the
-    # name so each sub-position is unique
-    if gp.grid_row is None and gp.grid_col is None:
-        if pos_idx is not None:
-            suffix = f"p{pos_idx:04d}_g{gp_idx:04d}"
-            name = f"{name}_{suffix}" if name else suffix
-        else:
-            name = f"{name}_g{gp_idx:04d}" if name else f"{gp_idx:04d}"
 
     plate_row, plate_col = _plate_strs(pos)
     return Position(
@@ -493,8 +522,10 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
     if grid_first and global_grid:
         # Grid-first: outer loop is grid points, inner loop is positions
         return [
-            _pos_with_grid_point(pos.name or str(p_idx), pos, gp)
-            for gp in global_grid
+            _pos_with_grid_point(
+                _grid_position_name(pos, gp, gp_idx, p_idx, has_plate), pos, gp
+            )
+            for gp_idx, gp in enumerate(global_grid)
             for p_idx, pos in enumerate(seq.stage_positions)
         ]
 
@@ -511,21 +542,10 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
 
         if grid:
             for gp_idx, gp in enumerate(grid):
-                # Position naming priority:
-                # 1. Explicit name from user
-                # 2. fov{grid_index} for plate positions (matches WellPlatePlan)
-                # 3. str(position_index) fallback
-                if pos.name:
-                    name = pos.name
-                elif has_plate:
-                    name = f"fov{gp_idx}"
-                else:
-                    name = str(p_idx)
-                positions.append(
-                    _pos_with_grid_point(
-                        name, pos, gp, gp_idx, p_idx if num_pos > 1 else None
-                    )
+                name = _grid_position_name(
+                    pos, gp, gp_idx, p_idx if num_pos > 1 else None, has_plate
                 )
+                positions.append(_pos_with_grid_point(name, pos, gp))
         else:
             plate_row, plate_col = _plate_strs(pos)
             # Same naming priority as above; without a grid each
