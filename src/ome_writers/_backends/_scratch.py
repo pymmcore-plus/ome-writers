@@ -9,6 +9,7 @@ import shutil
 import tempfile
 import warnings
 from contextlib import suppress
+from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,7 +20,7 @@ from ome_writers._backends._backend import ArrayBackend
 from ome_writers._schema import ScratchFormat
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
     from io import IOBase
     from typing import Any, Final, Literal
 
@@ -36,6 +37,7 @@ class ScratchBackend(ArrayBackend):
     __slots__ = (
         "_arrays",
         "_finalized",
+        "_global_metadata",
         "_logical_shapes",
         "_metadata_fh",
         "_root_path",
@@ -59,6 +61,8 @@ class ScratchBackend(ArrayBackend):
         self._metadata_fh: IOBase | None = None
         # Flag to prevent multiple finalization steps
         self._finalized: bool = False
+        # Acquisition-level global metadata set via set_global_metadata()
+        self._global_metadata: dict[str, dict[str, Any]] = {}
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         return False
@@ -146,6 +150,10 @@ class ScratchBackend(ArrayBackend):
         if frame_metadata and self._metadata_fh is not None:
             record = {"_pos": position_index, "_idx": index, **frame_metadata}
             self._metadata_fh.write(json.dumps(record) + "\n")
+
+    def set_global_metadata(self, namespace: str, metadata: Mapping[str, Any]) -> None:
+        """Store global metadata in memory, keyed by namespace."""
+        self._global_metadata[namespace] = deepcopy(dict(metadata))
 
     def advance(self, indices: Sequence[tuple[int, tuple[int, ...]]]) -> None:
         for pos_idx, index in indices:
@@ -275,6 +283,7 @@ class ScratchBackend(ArrayBackend):
         if self._root_path is None:
             return
         self._settings_dump["position_shapes"] = list(self._logical_shapes)
+        self._settings_dump["global_metadata"] = self._global_metadata
         (self._root_path / MANIFEST).write_text(json.dumps(self._settings_dump))
 
 

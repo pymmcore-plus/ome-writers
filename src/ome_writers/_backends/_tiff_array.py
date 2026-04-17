@@ -121,10 +121,10 @@ class LiveTiffArray(TiffArrayBase):
     """ArrayLike backed by a TIFF file being written (or finalized uncompressed).
 
     Reads raw frame data at calculated byte offsets.  Only works for
-    ``contiguous=True`` (uncompressed) TIFF writes.
+    `contiguous=True` (uncompressed) TIFF writes.
 
-    The ``shape`` property is dynamic: for unbounded first dimensions it
-    derives the outer extent from ``WriterThread.frames_written``, eliminating
+    The `shape` property is dynamic: for unbounded first dimensions it
+    derives the outer extent from `WriterThread.frames_written`, eliminating
     the previous hard-coded magic number (1000).
     """
 

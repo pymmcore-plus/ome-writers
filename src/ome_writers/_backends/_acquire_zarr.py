@@ -12,7 +12,7 @@ from ome_writers._backends._yaozarrs import YaozarrsBackend
 from ome_writers._schema import Dimension
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
 
     from ome_writers._schema import AcquisitionSettings, Dimension
@@ -154,6 +154,27 @@ class AcquireZarrBackend(YaozarrsBackend):
             fill_buffer = np.zeros(total_elements, dtype=self._dtype)
             self._stream.append(fill_buffer, key=output_key)
 
+    def set_global_metadata(self, namespace: str, metadata: Mapping[str, Any]) -> None:
+        """Write acquisition-level metadata to the parent root group's attrs.
+
+        Overrides the base implementation to skip the immediate disk flush
+        while the acquire-zarr stream is still open. Pre-finalize, any write
+        would be clobbered by acquire-zarr's own zarr.json overwrite on close,
+        and then restored/re-flushed by `finalize()` anyway — see the
+        backup-restore dance below. We just mutate the in-memory mirror
+        (which `set_attribute_namespace` also marks dirty) and let
+        `finalize()` perform the single authoritative flush.
+
+        Post-finalize, the backup-restore cycle has already completed, so
+        flush immediately like the base class.
+        """
+        if (mirror := self._root_meta_mirror) is None:  # pragma: no cover
+            raise RuntimeError("Backend not prepared. Call prepare() first.")
+
+        mirror.set_attribute_namespace(namespace, metadata)
+        if self._finalized:
+            mirror.flush()
+
     def finalize(self) -> None:
         """Close stream and release resources."""
         if not self._finalized and self._stream is not None:
@@ -165,6 +186,19 @@ class AcquireZarrBackend(YaozarrsBackend):
             for path, content in self._zarr_json_backup.items():
                 path.write_bytes(content)
             self._zarr_json_backup.clear()
+
+            # After the backup-restore, on-disk zarr.json files are back to
+            # their pristine yaozarrs state. Any user modifications that live
+            # only in the in-memory mirrors (frame_metadata, global
+            # metadata) would be lost without a re-flush. Re-mark mirrors
+            # dirty so super().finalize() re-writes the authoritative
+            # in-memory state on top of the restored backup.
+            for mirror in self._meta_mirrors.values():
+                mirror.mark_dirty()
+
+            root_mir = self._root_meta_mirror
+            if root_mir is not None and root_mir not in self._meta_mirrors.values():
+                root_mir.mark_dirty()
 
         super().finalize()
 
