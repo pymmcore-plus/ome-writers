@@ -484,6 +484,12 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
         and seq.axis_order.index(Axis.GRID) < seq.axis_order.index(Axis.POSITION)
     )
 
+    # Check if positions have plate annotations (plate_row/plate_col)
+    has_plate = any(
+        p.plate_row is not None and p.plate_col is not None
+        for p in seq.stage_positions
+    )
+
     if grid_first and global_grid:
         # Grid-first: outer loop is grid points, inner loop is positions
         return [
@@ -496,8 +502,6 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
     positions: list[Position] = []
     num_pos = len(seq.stage_positions)
     for p_idx, pos in enumerate(seq.stage_positions):
-        name = pos.name or str(p_idx)
-
         # Determine which grid to use for this position
         # Priority: subsequence grid > global grid > no grid
         if pos.sequence and pos.sequence.grid_plan:
@@ -507,6 +511,16 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
 
         if grid:
             for gp_idx, gp in enumerate(grid):
+                # Position naming priority:
+                # 1. Explicit name from user
+                # 2. fov{grid_index} for plate positions (matches WellPlatePlan)
+                # 3. str(position_index) fallback
+                if pos.name:
+                    name = pos.name
+                elif has_plate:
+                    name = f"fov{gp_idx}"
+                else:
+                    name = str(p_idx)
                 positions.append(
                     _pos_with_grid_point(
                         name, pos, gp, gp_idx, p_idx if num_pos > 1 else None
@@ -514,6 +528,14 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
                 )
         else:
             plate_row, plate_col = _plate_strs(pos)
+            # Same naming priority as above; without a grid each
+            # position is a single fov in its well, so always fov0
+            if pos.name:
+                name = pos.name
+            elif has_plate:
+                name = "fov0"
+            else:
+                name = str(p_idx)
             positions.append(
                 Position(
                     name=name,
