@@ -430,30 +430,49 @@ def _plate_strs(pos: useq.Position) -> tuple[str | None, str | None]:
 
 def _grid_position_name(
     pos: useq.Position,
-    gp: useq.Position,
-    gp_idx: int,
-    pos_idx: int | None,
+    gp: useq.Position | None = None,
+    gp_idx: int = 0,
+    pos_idx: int | None = None,
 ) -> str:
-    """Determine the name for a grid-expanded position.
+    """Determine the storage name for a position.
+
+    Used for both grid-expanded positions and standalone positions. When called
+    without a grid point (gp=None), returns a base name for a single-FOV position.
 
     Naming priority:
-    1. Explicit name from user (may be further suffixed for RandomPoints)
-    2. fov{grid_index} for plate positions (matches WellPlatePlan convention)
-    3. str(position_index) fallback
+      1. Explicit user name — preserved as-is for regular grids, suffixed for
+         RandomPoints (e.g. "mypos" → "mypos_g0000")
+      2. Plate positions (plate_row/plate_col set) — "fov{gp_idx}", matching
+         the WellPlatePlan convention
+      3. Fallback — str(pos_idx), e.g. "0", "1"
 
-    For RandomPoints (no grid_row/grid_col), an index suffix is appended
-    to ensure uniqueness since grid coordinates can't distinguish positions.
+    Parameters
+    ----------
+    pos : useq.Position
+        The original stage position (carries name, plate_row, plate_col).
+    gp : useq.Position | None
+        The grid point being merged. None when there is no grid.
+    gp_idx : int
+        Index of the grid point within the grid (used in fov and suffix naming).
+    pos_idx : int | None
+        Index of the stage position. None when there is only one position,
+        which simplifies RandomPoints suffixes (omits the p{idx} prefix).
     """
+    # 1. Explicit user name
     if pos.name:
         name = pos.name
+    # 2. Plate position → fov naming
     elif pos.plate_row is not None and pos.plate_col is not None:
         return f"fov{gp_idx}"
+    # 3. Fallback to position index
     else:
-        # pos_idx is None when there's only one position (index 0)
         name = str(pos_idx if pos_idx is not None else 0)
 
-    # RandomPoints have no grid_row/grid_col — append index for uniqueness
-    if gp.grid_row is None and gp.grid_col is None:
+    # RandomPoints produce grid points without row/col — append a unique
+    # suffix since the name alone can't distinguish sub-positions.
+    #   Single position:    "name_g0000", "name_g0001"
+    #   Multiple positions: "name_p0000_g0000", "name_p0001_g0000"
+    if gp is not None and gp.grid_row is None and gp.grid_col is None:
         if pos_idx is not None:
             suffix = f"p{pos_idx:04d}_g{gp_idx:04d}"
             return f"{name}_{suffix}" if name else suffix
@@ -540,14 +559,7 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
                 positions.append(_pos_with_grid_point(name, pos, gp))
         else:
             plate_row, plate_col = _plate_strs(pos)
-            # Same naming priority as _grid_position_name; without a grid
-            # each position is a single fov in its well, so always fov0
-            if pos.name:
-                name = pos.name
-            elif pos.plate_row is not None and pos.plate_col is not None:
-                name = "fov0"
-            else:
-                name = str(p_idx)
+            name = _grid_position_name(pos, pos_idx=p_idx)
             positions.append(
                 Position(
                     name=name,
