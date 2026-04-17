@@ -448,14 +448,18 @@ def _pos_with_grid_point(
         x_coord = (pos.x or 0) + (gp.x or 0)
         y_coord = (pos.y or 0) + (gp.y or 0)
 
-    # When there is no row/col (e.g. RandomPoints), append an index to the
-    # name so each sub-position is unique
+    # Ensure each sub-position gets a unique name within its parent position.
     if gp.grid_row is None and gp.grid_col is None:
+        # No grid coordinates (e.g. RandomPoints) — append an index to the name
         if pos_idx is not None:
             suffix = f"p{pos_idx:04d}_g{gp_idx:04d}"
             name = f"{name}_{suffix}" if name else suffix
         else:
             name = f"{name}_g{gp_idx:04d}" if name else f"{gp_idx:04d}"
+    elif pos.plate_row is not None and pos.plate_col is not None:
+        # Plate positions with grid coordinates need unique names within each well,
+        # consistent with WellPlatePlan's fov naming convention
+        name = f"fov{gp_idx}"
 
     plate_row, plate_col = _plate_strs(pos)
     return Position(

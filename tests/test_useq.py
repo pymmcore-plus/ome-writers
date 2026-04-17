@@ -160,6 +160,30 @@ SEQ_CASES = [
         ],
         id="well_plate_with_points",
     ),
+    # Plate positions (plate_row/plate_col) combined with a global grid_plan
+    # Each stage position should produce fov0..fovN within its well (issue #131)
+    Case(
+        seq=useq.MDASequence(
+            axis_order="pgtc",
+            stage_positions=[
+                useq.Position(x=0, y=0, plate_row=0, plate_col=0),
+                useq.Position(x=10, y=10, plate_row=0, plate_col=1),
+                useq.Position(x=20, y=20, plate_row=1, plate_col=0),
+            ],
+            grid_plan=useq.GridRowsColumns(rows=1, columns=2),
+            channels=["DAPI"],
+        ),
+        expected_dim_names=["p", "c", "y", "x"],
+        expected_positions=[
+            ExpectedPosition("fov0", "A", "1", grid_row=0, grid_col=0),
+            ExpectedPosition("fov1", "A", "1", grid_row=0, grid_col=1),
+            ExpectedPosition("fov0", "A", "2", grid_row=0, grid_col=0),
+            ExpectedPosition("fov1", "A", "2", grid_row=0, grid_col=1),
+            ExpectedPosition("fov0", "B", "1", grid_row=0, grid_col=0),
+            ExpectedPosition("fov1", "B", "1", grid_row=0, grid_col=1),
+        ],
+        id="plate_positions_with_global_grid",
+    ),
     # MultiPhaseTimePlan - no single .interval attribute
     Case(
         seq=useq.MDASequence(
