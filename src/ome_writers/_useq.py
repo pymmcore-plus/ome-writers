@@ -428,14 +428,70 @@ def _plate_strs(pos: useq.Position) -> tuple[str | None, str | None]:
     return None, None
 
 
+def _grid_position_name(
+    pos: useq.Position,
+    gp: useq.Position | None = None,
+    gp_idx: int = 0,
+    pos_idx: int | None = None,
+) -> str:
+    """Determine the storage name for a position.
+
+    Used for both grid-expanded positions and standalone positions. When called
+    without a grid point (gp=None), returns a base name for a single-FOV position.
+
+    Naming priority:
+      1. Explicit user name — preserved as-is for regular grids, suffixed for
+         RandomPoints (e.g. "mypos" → "mypos_g0000")
+      2. Plate positions (plate_row/plate_col set) — "fov{gp_idx}", matching
+         the WellPlatePlan convention
+      3. Fallback — str(pos_idx), e.g. "0", "1"
+
+    Parameters
+    ----------
+    pos : useq.Position
+        The original stage position (carries name, plate_row, plate_col).
+    gp : useq.Position | None
+        The grid point being merged. None when there is no grid.
+    gp_idx : int
+        Index of the grid point within the grid (used in fov and suffix naming).
+    pos_idx : int | None
+        Index of the stage position. None when there is only one position,
+        which simplifies RandomPoints suffixes (omits the p{idx} prefix).
+    """
+    # 1. Explicit user name
+    if pos.name:
+        name = pos.name
+    # 2. Plate position → fov naming
+    elif pos.plate_row is not None and pos.plate_col is not None:
+        return f"fov{gp_idx}"
+    # 3. Fallback to position index
+    else:
+        name = str(pos_idx if pos_idx is not None else 0)
+
+    # RandomPoints produce grid points without row/col — append a unique
+    # suffix since the name alone can't distinguish sub-positions.
+    #   Single position:    "name_g0000", "name_g0001"
+    #   Multiple positions: "name_p0000_g0000", "name_p0001_g0000"
+    if gp is not None and gp.grid_row is None and gp.grid_col is None:
+        if pos_idx is not None:
+            suffix = f"p{pos_idx:04d}_g{gp_idx:04d}"
+            return f"{name}_{suffix}" if name else suffix
+        else:
+            return f"{name}_g{gp_idx:04d}" if name else f"{gp_idx:04d}"
+
+    return name
+
+
 def _pos_with_grid_point(
     name: str,
     pos: useq.Position,
     gp: useq.Position,
-    gp_idx: int = 0,
-    pos_idx: int | None = None,
 ) -> Position:
-    """Create a Position by combining a stage position with a grid point."""
+    """Create a Position by combining a stage position with a grid point.
+
+    Handles only coordinate merging — all naming logic lives in the caller
+    (_build_stage_positions_plan).
+    """
     # If we have an absolute grid plan, the grid point coordinates are used directly.
     # This results from a design flaw in useq where it's possible to combine
     # an absolute grid plan with (absolute) stage positions.  We will likely change
@@ -447,15 +503,6 @@ def _pos_with_grid_point(
         # relative grid points are offsets from the stage position
         x_coord = (pos.x or 0) + (gp.x or 0)
         y_coord = (pos.y or 0) + (gp.y or 0)
-
-    # When there is no row/col (e.g. RandomPoints), append an index to the
-    # name so each sub-position is unique
-    if gp.grid_row is None and gp.grid_col is None:
-        if pos_idx is not None:
-            suffix = f"p{pos_idx:04d}_g{gp_idx:04d}"
-            name = f"{name}_{suffix}" if name else suffix
-        else:
-            name = f"{name}_g{gp_idx:04d}" if name else f"{gp_idx:04d}"
 
     plate_row, plate_col = _plate_strs(pos)
     return Position(
@@ -484,20 +531,19 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
         and seq.axis_order.index(Axis.GRID) < seq.axis_order.index(Axis.POSITION)
     )
 
+    positions: list[Position] = []
+
     if grid_first and global_grid:
         # Grid-first: outer loop is grid points, inner loop is positions
-        return [
-            _pos_with_grid_point(pos.name or str(p_idx), pos, gp)
-            for gp in global_grid
-            for p_idx, pos in enumerate(seq.stage_positions)
-        ]
+        for gp_idx, gp in enumerate(global_grid):
+            for p_idx, pos in enumerate(seq.stage_positions):
+                name = _grid_position_name(pos, gp, gp_idx, p_idx)
+                positions.append(_pos_with_grid_point(name, pos, gp))
+        return positions
 
     # Position-first (default)
-    positions: list[Position] = []
     num_pos = len(seq.stage_positions)
     for p_idx, pos in enumerate(seq.stage_positions):
-        name = pos.name or str(p_idx)
-
         # Determine which grid to use for this position
         # Priority: subsequence grid > global grid > no grid
         if pos.sequence and pos.sequence.grid_plan:
@@ -507,13 +553,13 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
 
         if grid:
             for gp_idx, gp in enumerate(grid):
-                positions.append(
-                    _pos_with_grid_point(
-                        name, pos, gp, gp_idx, p_idx if num_pos > 1 else None
-                    )
+                name = _grid_position_name(
+                    pos, gp, gp_idx, p_idx if num_pos > 1 else None
                 )
+                positions.append(_pos_with_grid_point(name, pos, gp))
         else:
             plate_row, plate_col = _plate_strs(pos)
+            name = _grid_position_name(pos, pos_idx=p_idx)
             positions.append(
                 Position(
                     name=name,
