@@ -512,18 +512,17 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
         and seq.axis_order.index(Axis.GRID) < seq.axis_order.index(Axis.POSITION)
     )
 
+    positions: list[Position] = []
+
     if grid_first and global_grid:
         # Grid-first: outer loop is grid points, inner loop is positions
-        return [
-            _pos_with_grid_point(
-                _grid_position_name(pos, gp, gp_idx, p_idx), pos, gp
-            )
-            for gp_idx, gp in enumerate(global_grid)
-            for p_idx, pos in enumerate(seq.stage_positions)
-        ]
+        for gp_idx, gp in enumerate(global_grid):
+            for p_idx, pos in enumerate(seq.stage_positions):
+                name = _grid_position_name(pos, gp, gp_idx, p_idx)
+                positions.append(_pos_with_grid_point(name, pos, gp))
+        return positions
 
     # Position-first (default)
-    positions: list[Position] = []
     num_pos = len(seq.stage_positions)
     for p_idx, pos in enumerate(seq.stage_positions):
         # Determine which grid to use for this position
