@@ -433,7 +433,6 @@ def _grid_position_name(
     gp: useq.Position,
     gp_idx: int,
     pos_idx: int | None,
-    has_plate: bool,
 ) -> str:
     """Determine the name for a grid-expanded position.
 
@@ -447,7 +446,7 @@ def _grid_position_name(
     """
     if pos.name:
         name = pos.name
-    elif has_plate:
+    elif pos.plate_row is not None and pos.plate_col is not None:
         return f"fov{gp_idx}"
     else:
         # pos_idx is None when there's only one position (index 0)
@@ -513,17 +512,11 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
         and seq.axis_order.index(Axis.GRID) < seq.axis_order.index(Axis.POSITION)
     )
 
-    # Check if positions have plate annotations (plate_row/plate_col)
-    has_plate = any(
-        p.plate_row is not None and p.plate_col is not None
-        for p in seq.stage_positions
-    )
-
     if grid_first and global_grid:
         # Grid-first: outer loop is grid points, inner loop is positions
         return [
             _pos_with_grid_point(
-                _grid_position_name(pos, gp, gp_idx, p_idx, has_plate), pos, gp
+                _grid_position_name(pos, gp, gp_idx, p_idx), pos, gp
             )
             for gp_idx, gp in enumerate(global_grid)
             for p_idx, pos in enumerate(seq.stage_positions)
@@ -543,16 +536,16 @@ def _build_stage_positions_plan(seq: useq.MDASequence) -> list[Position]:
         if grid:
             for gp_idx, gp in enumerate(grid):
                 name = _grid_position_name(
-                    pos, gp, gp_idx, p_idx if num_pos > 1 else None, has_plate
+                    pos, gp, gp_idx, p_idx if num_pos > 1 else None
                 )
                 positions.append(_pos_with_grid_point(name, pos, gp))
         else:
             plate_row, plate_col = _plate_strs(pos)
-            # Same naming priority as above; without a grid each
-            # position is a single fov in its well, so always fov0
+            # Same naming priority as _grid_position_name; without a grid
+            # each position is a single fov in its well, so always fov0
             if pos.name:
                 name = pos.name
-            elif has_plate:
+            elif pos.plate_row is not None and pos.plate_col is not None:
                 name = "fov0"
             else:
                 name = str(p_idx)
