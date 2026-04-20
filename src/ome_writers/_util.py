@@ -9,7 +9,7 @@ import numpy.typing as npt
 from ome_writers._schema import Dimension, dims_from_standard_axes
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Iterator, Mapping, Sequence
 
 
 def fake_data_for_sizes(
@@ -64,3 +64,45 @@ def fake_data_for_sizes(
                 i += 1
 
     return _build_plane_generator(), dims, dtype
+
+
+def spatial_role_indices(dims: Sequence[Dimension]) -> dict[str, int]:
+    """Return a `{"x"|"y"|"z": dim_index}` map for spatial roles in `dims`.
+
+    This function exists because ome-writers and NGFF don't mandate canonical axis
+    names or a dimension orders, but some metadata formats/fields *DO*.  This is our
+    best-effort attempt to resolve the spatial roles of dimensions based on their names
+    and positions.
+
+    Resolution rules (shared by the zarr and OME-XML backends):
+
+    1. **Name match (case-insensitive)** on `"x"`, `"y"`, `"z"` wins first.
+       This is the NGFF canonical labeling and what the vast majority of
+       users will have via `StandardAxis` / `useq_to_acquisition_settings`.
+    2. **Positional fallback for X and Y only**: if a name match didn't
+       resolve X, the last dim of `dims` plays the X role when space-typed;
+       if a name match didn't resolve Y, the second-to-last dim plays the Y
+       role when space-typed. This handles non-canonical names like
+       `"row"`/`"col"` without guessing.
+    3. **Z has no positional fallback.** ome-writers doesn't mandate canonical
+       axis names and doesn't mandate a ZYX dim order (`storage_order` can
+       be `"acquisition"` or a custom list), so there's no unambiguous
+       positional slot for Z the way there is for the frame-last X/Y pair.
+       A future schema change — e.g. an explicit `spatial_role` on
+       `Dimension`, or a structured position-coord map keyed by dim name —
+       could lift this restriction. Until then, per-position Z metadata
+       requires naming the Z axis `"z"` (case-insensitive).
+
+    Missing roles are simply absent from the returned dict.
+    """
+    result: dict[str, int] = {}
+    for i, d in enumerate(dims):
+        lower = d.name.lower()
+        if lower in ("x", "y", "z") and lower not in result:
+            result[lower] = i
+    n = len(dims)
+    if "x" not in result and n >= 1 and dims[-1].type == "space":
+        result["x"] = n - 1
+    if "y" not in result and n >= 2 and dims[-2].type == "space":
+        result["y"] = n - 2
+    return result
