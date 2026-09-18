@@ -47,7 +47,10 @@ zarrs-python = [
 acquire-zarr = ["acquire-zarr>=0.7.0"]
 tifffile = [
     "tifffile>=2024.8.30",
+    "imagecodecs>=2025.11.11; python_version >= '3.14'",
+    "imagecodecs>=2024.12.30; python_version >= '3.13'",
     "imagecodecs>=2024.9.22",
+    "ome-types>=0.6.2; python_version >= '3.14'",
     "ome-types>=0.6.1",
     "pydantic>=2.8",
 ]
