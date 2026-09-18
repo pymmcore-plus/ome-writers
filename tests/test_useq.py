@@ -914,7 +914,10 @@ def _zarr_translation(path: Path) -> dict[str, float]:
     ],
 )
 def test_useq_z_plan_translation_matches_first_event(
-    tmp_path: Path, z_plan: useq.ZPlan, expected_z: dict[str, float]
+    tmp_path: Path,
+    zarr_backend: str,
+    z_plan: useq.ZPlan,
+    expected_z: dict[str, float],
 ) -> None:
     """The written z translation is the z of the first plane useq actually visits."""
     seq = useq.MDASequence(
@@ -935,7 +938,7 @@ def test_useq_z_plan_translation_matches_first_event(
             seq, image_width=8, image_height=8, pixel_size_um=0.5
         ),
         dtype="uint16",
-        format={"name": "ome-zarr", "backend": "zarr-python"},
+        format=zarr_backend,
     )
     with create_stream(settings) as stream:
         for _ in seq:
