@@ -41,7 +41,7 @@ with create_stream(settings) as stream:
 ## Reference
 
 For complete reference on how to build `AcquisitionSettings`, see the
-[API documentation](reference/index.md).
+[API documentation](reference.md).
 
 ## Examples
 

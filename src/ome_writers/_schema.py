@@ -970,8 +970,8 @@ class AcquisitionSettings(_BaseModel):
         description="Desired output format/backend. Can be a simple string: 'ome-tiff' "
         "or 'ome-zarr', in which case the first available format-appropriate backend "
         "will be used; Or it may be a full format specification dict/object "
-        "([`ome_writers.OmeTiff`][] or [`ome_writers.OmeZarr`][]), to configure "
-        "format-specific options such as backend selection.",
+        "([`ome_writers.OmeTiffFormat`][] or [`ome_writers.OmeZarrFormat`][]), to "
+        "configure format-specific options such as backend selection.",
     )
     compression: Compression | None = Field(
         default=None,
