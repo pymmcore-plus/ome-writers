@@ -213,6 +213,9 @@ ignore = [".pre-commit-config.yaml", ".ruff_cache/**/*", "tests/**/*"]
 [tool.typos.default]
 extend-ignore-identifiers-re = ["(?i)nd2?.*", "(?i)ome", "FOV"]
 
+[tool.typos.default.extend-words]
+writeable = "writeable" # numpy flag
+
 [tool.ty.environment]
 python = "./.venv"
 
