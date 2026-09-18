@@ -108,7 +108,9 @@ class ChunkBuffer:
         """Allocate buffer for a new chunk."""
         actual_chunk_shape = self._get_actual_chunk_shape(chunk_coords)
         full_shape = actual_chunk_shape + self.frame_shape
-        self._active_chunks[chunk_coords] = np.zeros(full_shape, dtype=self.dtype)
+        self._active_chunks[chunk_coords] = np.zeros(
+            full_shape, dtype=np.dtype(self.dtype)
+        )
         self._filled_count[chunk_coords] = 0
 
     def _get_actual_chunk_shape(self, chunk_coords: tuple[int, ...]) -> tuple[int, ...]:

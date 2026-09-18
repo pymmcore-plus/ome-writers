@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gc
+import math
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 import acquire_zarr as az
@@ -150,7 +151,7 @@ class AcquireZarrBackend(YaozarrsBackend):
         for pos_idx, frame_count in position_frame_count.items():
             output_key = self._az_pos_keys[pos_idx]
             # Create buffer: (frame_count * frame_height * frame_width) flattened
-            total_elements = frame_count * np.prod(self._frame_shape)
+            total_elements = frame_count * math.prod(self._frame_shape)
             fill_buffer = np.zeros(total_elements, dtype=self._dtype)
             self._stream.append(fill_buffer, key=output_key)
 
