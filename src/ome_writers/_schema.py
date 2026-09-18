@@ -237,7 +237,8 @@ class Position(_BaseModel):
 
     - OME-TIFF: as the per-image `StageLabel`.
     - OME-Zarr: added to the `translation` of the spatial dimension with the
-      matching name (`x`, `y`, `z`; case-insensitive). The position coordinate is
+      matching name (`x`, `y`, `z`; case-insensitive), or for `x`/`y`, the last
+      two (frame) dimensions if none match by name. The position coordinate is
       the origin of the image, and [`Dimension.translation`][ome_writers.Dimension]
       is the offset of the first element from that origin (e.g. the first plane of a
       z-stack acquired relative to `z_coord`).
@@ -423,9 +424,10 @@ class Dimension(_BaseModel):
         default=None,
         description="Physical offset of the first element along this dimension, "
         "in the specified `unit`. (e.g. the physical coordinate of the first pixel "
-        "or timepoint, in some XYZ stage or other coordinate system). For spatial "
-        "dimensions named `x`, `y`, or `z`, this is relative to the corresponding "
-        "`Position` coordinate (if any).",
+        "or timepoint, in some XYZ stage or other coordinate system). For the "
+        "`x`/`y`/`z` dimensions (matched by name, or the last two frame dimensions "
+        "for `x`/`y`), this is relative to the corresponding `Position` coordinate "
+        "(if any).",
     )
 
     @model_validator(mode="before")

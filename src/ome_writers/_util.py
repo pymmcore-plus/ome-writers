@@ -82,8 +82,9 @@ def spatial_role_indices(dims: Sequence[Dimension]) -> dict[str, int]:
         if lower in ("x", "y", "z") and lower not in result:
             result[lower] = i
     n = len(dims)
-    if "x" not in result and n >= 1 and dims[-1].type == "space":
-        result["x"] = n - 1
-    if "y" not in result and n >= 2 and dims[-2].type == "space":
-        result["y"] = n - 2
+    for axis, i in (("x", n - 1), ("y", n - 2)):
+        if axis in result or i < 0 or i in result.values():
+            continue
+        if dims[i].type == "space":
+            result[axis] = i
     return result

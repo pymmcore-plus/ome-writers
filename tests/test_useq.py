@@ -945,3 +945,13 @@ def test_useq_z_plan_translation_matches_first_event(
         tx = _zarr_translation(root / name)
         assert tx["z"] == z
     assert _zarr_translation(root / "A")["x"] == 100.0
+
+
+def test_useq_z_plan_translation_without_positions_or_with_units() -> None:
+    """z translation comes from the z_plan even without positions or with units."""
+    seq = useq.MDASequence(z_plan=useq.ZRangeAround(range=4, step=2))
+    kwargs = {"image_width": 8, "image_height": 8}
+    for extra in ({}, {"units": {"z": (2.0, "micrometer")}}):
+        dims = useq_to_acquisition_settings(seq, **kwargs, **extra)["dimensions"]
+        z = next(d for d in dims if d.name == "z")
+        assert z.translation == -2.0

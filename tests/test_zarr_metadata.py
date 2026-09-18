@@ -548,3 +548,17 @@ def test_frame_metadata_multiposition(tmp_path: Path) -> None:
         assert all(meta["position_name"] == pos_name for meta in frame_meta)
         assert [meta["frame_number"] for meta in frame_meta] == [0, 1]
         assert [meta["storage_index"] for meta in frame_meta] == [[0], [1]]
+
+
+def test_spatial_role_indices() -> None:
+    from ome_writers._util import spatial_role_indices
+
+    def _dims(*names: str) -> list[Dimension]:
+        return [Dimension(name=n, count=2, type="space") for n in names]
+
+    assert spatial_role_indices(_dims("z", "y", "x")) == {"z": 0, "y": 1, "x": 2}
+    assert spatial_role_indices(_dims("Z", "row", "col")) == {"z": 0, "y": 1, "x": 2}
+    # an xz scan: the frame is (z, x), and y must not fall back onto z's index
+    assert spatial_role_indices(_dims("z", "x")) == {"z": 0, "x": 1}
+    assert spatial_role_indices(_dims("a")) == {"x": 0}
+    assert spatial_role_indices([Dimension(name="t", count=2, type="time")]) == {}

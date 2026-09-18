@@ -150,11 +150,12 @@ def _dims_from_useq(
                 dim.unit = "micrometer"
                 if hasattr(seq.z_plan, "step"):
                     dim.scale = seq.z_plan.step  # ty: ignore
-                # first plane visited (respects go_up). For relative plans this is
-                # an offset from Position.z_coord; for absolute plans Position.z is
-                # ignored (see `_build_positions`), so this is the absolute z.
-                if z_positions := list(seq.z_plan):
-                    dim.translation = z_positions[0]
+        if std_axis == StandardAxis.Z and seq.z_plan:
+            # first plane visited (respects go_up). For relative plans this is
+            # an offset from Position.z_coord; for absolute plans Position.z is
+            # ignored (see `_build_positions`), so this is the absolute z.
+            if z_positions := list(seq.z_plan):
+                dim.translation = z_positions[0]
         if std_axis == StandardAxis.CHANNEL and seq.channels:
             dim.coords = [Channel(name=c.config) for c in seq.channels]
         dims.append(dim)
