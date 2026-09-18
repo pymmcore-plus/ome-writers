@@ -891,3 +891,57 @@ def test_useq_stage_positions_write_per_position_translation(
     assert b["x"] == 500.0 and b["y"] == 800.0
     # No Z dim in this sequence (no z_plan), so Z isn't part of the image axes.
     assert "z" not in a
+
+
+def _zarr_translation(path: Path) -> dict[str, float]:
+    doc = json.loads((path / "zarr.json").read_text())
+    ms = doc["attributes"]["ome"]["multiscales"][0]
+    axes = [ax["name"] for ax in ms["axes"]]
+    xforms = ms["datasets"][0]["coordinateTransformations"]
+    tx = next(t for t in xforms if t["type"] == "translation")["translation"]
+    return dict(zip(axes, tx, strict=True))
+
+
+@pytest.mark.parametrize(
+    ("z_plan", "expected_z"),
+    [
+        # relative plans are offsets from Position.z: first plane at z - range/2
+        (useq.ZRangeAround(range=4, step=2), {"A": 3.0, "B": 8.0}),
+        # go_up=False visits the top plane first
+        (useq.ZRangeAround(range=4, step=2, go_up=False), {"A": 7.0, "B": 12.0}),
+        # absolute plans ignore Position.z entirely
+        (useq.ZAbsolutePositions(absolute=[50, 51, 52]), {"A": 50.0, "B": 50.0}),
+    ],
+)
+def test_useq_z_plan_translation_matches_first_event(
+    tmp_path: Path, z_plan: useq.ZPlan, expected_z: dict[str, float]
+) -> None:
+    """The written z translation is the z of the first plane useq actually visits."""
+    seq = useq.MDASequence(
+        stage_positions=[
+            useq.Position(x=100, y=200, z=5, name="A"),
+            useq.Position(x=500, y=800, z=10, name="B"),
+        ],
+        z_plan=z_plan,
+    )
+    # sanity check the expectation against useq itself
+    first_z = {e.pos_name: e.z_pos for e in seq if e.index["z"] == 0}
+    assert first_z == expected_z
+
+    root = tmp_path / "z_tx.ome.zarr"
+    settings = AcquisitionSettings(
+        root_path=str(root),
+        **useq_to_acquisition_settings(
+            seq, image_width=8, image_height=8, pixel_size_um=0.5
+        ),
+        dtype="uint16",
+        format={"name": "ome-zarr", "backend": "zarr-python"},
+    )
+    with create_stream(settings) as stream:
+        for _ in seq:
+            stream.append(np.zeros((8, 8), dtype="uint16"))
+
+    for name, z in expected_z.items():
+        tx = _zarr_translation(root / name)
+        assert tx["z"] == z
+    assert _zarr_translation(root / "A")["x"] == 100.0

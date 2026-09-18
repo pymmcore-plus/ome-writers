@@ -150,6 +150,11 @@ def _dims_from_useq(
                 dim.unit = "micrometer"
                 if hasattr(seq.z_plan, "step"):
                     dim.scale = seq.z_plan.step  # ty: ignore
+                # first plane visited (respects go_up). For relative plans this is
+                # an offset from Position.z_coord; for absolute plans Position.z is
+                # ignored (see `_build_positions`), so this is the absolute z.
+                if z_positions := list(seq.z_plan):
+                    dim.translation = z_positions[0]
         if std_axis == StandardAxis.CHANNEL and seq.channels:
             dim.coords = [Channel(name=c.config) for c in seq.channels]
         dims.append(dim)
@@ -350,18 +355,19 @@ def _build_positions(seq: useq.MDASequence) -> list[Position]:
     """
     from useq import WellPlatePlan
 
+    positions: list[Position]
     # Case 1: WellPlatePlan
     # we've previously asserted that seq.grid_plan is None.
     if isinstance(seq.stage_positions, WellPlatePlan):
-        return _build_well_plate_positions(seq.stage_positions)
+        positions = _build_well_plate_positions(seq.stage_positions)
 
     # Case 2: Stage positions (with optional global grid_plan)
-    if seq.stage_positions:
-        return _build_stage_positions_plan(seq)
+    elif seq.stage_positions:
+        positions = _build_stage_positions_plan(seq)
 
     # Case 3: Grid plan only (no stage_positions)
-    if seq.grid_plan is not None:
-        return [
+    elif seq.grid_plan is not None:
+        positions = [
             Position(
                 name=f"{i:04d}",
                 grid_row=gp.grid_row,
@@ -372,8 +378,13 @@ def _build_positions(seq: useq.MDASequence) -> list[Position]:
             )
             for i, gp in enumerate(seq.grid_plan)
         ]
+    else:
+        return []  # pragma: no cover
 
-    return []  # pragma: no cover
+    # useq ignores Position.z entirely when the z_plan is absolute
+    if seq.z_plan is not None and not seq.z_plan.is_relative:
+        positions = [p.model_copy(update={"z_coord": None}) for p in positions]
+    return positions
 
 
 def _build_well_plate_positions(plate_plan: useq.WellPlatePlan) -> list[Position]:

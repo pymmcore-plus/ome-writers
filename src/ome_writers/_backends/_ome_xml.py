@@ -410,11 +410,13 @@ def _get_dimension_order(dims: list[Dimension]) -> str:
 def _build_stage_label(pos: Position, dims: list[Dimension]) -> ome.StageLabel | None:
     """Build `ome.StageLabel` from a `Position` if any XYZ coord is present.
 
-    Units are derived from the spatial dim that plays the corresponding role
-    (per `_spatial_role_indices`), converted to an OME-XML `UnitsLength`
-    string via `ngff_to_ome_unit`. Axes with no coord are left unset and
-    take `StageLabel`'s default (`REFERENCEFRAME`). Returns `None` when no
-    coord is available so no empty `StageLabel` is attached.
+    Coordinates are written verbatim (unlike the NGFF translation, no
+    `Dimension.translation` is added: `StageLabel` is the stage position of the
+    image, not the coordinate of its first element). Units are derived from the
+    spatial dim that plays the corresponding role (per `spatial_role_indices`),
+    converted to an OME-XML `UnitsLength` string via `ngff_to_ome_unit`. Axes with
+    no coord are left unset and take `StageLabel`'s default (`REFERENCEFRAME`).
+    Returns `None` when no coord is available so no empty `StageLabel` is attached.
     """
     if pos.x_coord is None and pos.y_coord is None and pos.z_coord is None:
         return None

@@ -176,13 +176,7 @@ def test_per_position_translation_bf2raw(tmp_path: Path) -> None:
 
 
 def test_per_position_translation_nonstandard_axis_names(tmp_path: Path) -> None:
-    """Per-position translation handles non-canonical space dim names.
-
-    `Dimension.name` is user-defined — the fallback maps the trailing two
-    space dims to Y/X when they aren't named canonically. Z has no
-    positional fallback (see comment in `_build_yaozarrs_image_model`), so
-    `z_coord` is silently dropped unless a Z-named dim exists.
-    """
+    """Unnamed frame dims fall back to (Y, X); Z is only matched by name."""
     root = tmp_path / "custom_names.ome.zarr"
     settings = AcquisitionSettings(
         root_path=str(root),
@@ -195,8 +189,6 @@ def test_per_position_translation_nonstandard_axis_names(tmp_path: Path) -> None
                     Position(name="B", x_coord=500.0, y_coord=800.0, z_coord=10.0),
                 ],
             ),
-            # Non-standard space dim names. "row"/"col" should pick up y/x
-            # via the trailing-two fallback. "plane" is NOT recognized as Z.
             Dimension(name="plane", count=3, type="space", unit="micrometer"),
             Dimension(name="row", count=8, type="space", unit="micrometer", scale=0.5),
             Dimension(name="col", count=8, type="space", unit="micrometer", scale=0.5),
@@ -212,10 +204,53 @@ def test_per_position_translation_nonstandard_axis_names(tmp_path: Path) -> None
 
     a = _image_translation(root / "A" / "zarr.json")
     b = _image_translation(root / "B" / "zarr.json")
-    # row/col pick up y/x via the trailing-two fallback; plane does NOT pick
-    # up z_coord (no positional fallback for Z) so it defaults to 0.0.
+    # "plane" is not recognized as Z, so z_coord is dropped for zarr.
     assert a == {"plane": 0.0, "row": 200.0, "col": 100.0}
     assert b == {"plane": 0.0, "row": 800.0, "col": 500.0}
+
+
+def test_per_position_translation_adds_dim_translation(tmp_path: Path) -> None:
+    """`Dimension.translation` is an offset from the position coordinate.
+
+    e.g. a z-stack acquired relative to `Position.z_coord`, where the first plane
+    sits 2 µm below the position.
+    """
+    root = tmp_path / "additive.ome.zarr"
+    settings = AcquisitionSettings(
+        root_path=str(root),
+        dimensions=[
+            Dimension(
+                name="p",
+                type="position",
+                coords=[
+                    Position(name="A", x_coord=100.0, y_coord=200.0, z_coord=5.0),
+                    Position(name="B", x_coord=500.0, y_coord=800.0),
+                ],
+            ),
+            Dimension(name="z", count=3, type="space", unit="um", translation=-2.0),
+            Dimension(name="y", count=8, type="space", unit="um", translation=-4.0),
+            Dimension(name="x", count=8, type="space", unit="um", scale=0.5),
+        ],
+        dtype="uint16",
+        overwrite=True,
+        format={"name": "ome-zarr", "backend": "zarr-python"},
+    )
+
+    with create_stream(settings) as stream:
+        for _ in range(2 * 3):
+            stream.append(np.zeros((8, 8), dtype=np.uint16))
+
+    assert _image_translation(root / "A" / "zarr.json") == {
+        "z": 3.0,
+        "y": 196.0,
+        "x": 100.0,
+    }
+    # no z_coord -> plain dim translation
+    assert _image_translation(root / "B" / "zarr.json") == {
+        "z": -2.0,
+        "y": 796.0,
+        "x": 500.0,
+    }
 
 
 def test_per_position_translation_case_insensitive_names(tmp_path: Path) -> None:

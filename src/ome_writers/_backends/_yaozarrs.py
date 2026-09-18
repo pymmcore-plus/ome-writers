@@ -589,7 +589,7 @@ def _build_yaozarrs_image_model(
 ) -> v05.Image:
     """Build yaozarrs v05 Image metadata from Dimensions.
 
-    If `position` is given, its `x_coord`/`y_coord`/`z_coord` override the
+    If `position` is given, its `x_coord`/`y_coord`/`z_coord` are added to the
     translation of the corresponding spatial dims so that each per-position
     image in a multi-position acquisition gets its own origin. See
     `_position_translation_by_dim_index` for the mapping rules.
@@ -638,10 +638,11 @@ def _position_translation_by_dim_index(
 ) -> dict[int, float]:
     """Map `Position.x_coord/y_coord/z_coord` onto target dim indices.
 
-    Uses `_spatial_role_indices` to resolve which dim plays which spatial
-    role, then maps the corresponding position coord onto that dim's index.
-    See `_spatial_role_indices` for the resolution rules (name match first,
-    then positional fallback for X/Y only — no Z fallback).
+    Uses `spatial_role_indices` to resolve which dim plays which spatial role,
+    then maps `pos_coord + (dim.translation or 0)` onto that dim's index: the
+    position coordinate is the origin of this image, and
+    `Dimension.translation` is the offset of element 0 from that origin (e.g. the
+    first plane of a z-stack acquired relative to the position's z).
 
     Returns
     -------
@@ -655,7 +656,7 @@ def _position_translation_by_dim_index(
 
     roles = spatial_role_indices(dims)
     return {
-        roles[axis]: value
+        roles[axis]: value + (dims[roles[axis]].translation or 0)
         for axis, value in (("x", pos.x_coord), ("y", pos.y_coord), ("z", pos.z_coord))
         if value is not None and axis in roles
     }
