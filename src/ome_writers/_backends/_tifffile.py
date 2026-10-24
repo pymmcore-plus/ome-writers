@@ -74,42 +74,52 @@ class PositionManager:
         if self.queue is not None:
             self.queue.put(None)
 
-    def finalize(self, index_dims: tuple[Dimension, ...] | None) -> None:
-        """Wait for thread completion and update metadata with actual frames written.
+    def join(self) -> None:
+        """Wait for the writer thread (if any) to finish."""
+        if self.thread:
+            self.thread.join(timeout=5)
+
+    def finalize(
+        self,
+        index_dims: tuple[Dimension, ...] | None,
+        frames_written: Mapping[int, int],
+    ) -> None:
+        """Update metadata with actual frames written, and flush it.
 
         Parameters
         ----------
         index_dims : tuple[Dimension, ...] | None
             Dimensions used for storage indexing, or None if unavailable.
             (usually just T, C, Z)
+        frames_written : Mapping[int, int]
+            Number of frames written to the TIFF file of each position index.
+            This mirror may hold the Image of other positions too (e.g. in
+            "redundant" and "companion-file" modes), so each Image is updated
+            from the count of its own position.
         """
-        # Wait for thread to finish
-        if self.thread:
-            self.thread.join(timeout=5)
-
-        # Update metadata based on actual frames written
-        if self.thread is None:
-            # No thread means no TIFF file (e.g., companion OME-XML only)
-            self.metadata_mirror.flush(force=True)
-            return
-
         # Update dimension sizes and plane count based on actual frames written
         images = self.metadata_mirror.model.images
-        if self.thread.frames_written and index_dims and images:
-            pixels = images[0].pixels
+        updated = False
+        if index_dims and images:
+            first, *inner = index_dims
+            inner_prod = math.prod([d.count or 1 for d in inner])
+            for pos_idx, n_frames in frames_written.items():
+                if not n_frames or pos_idx >= len(images):
+                    continue
+                pixels = images[pos_idx].pixels
 
-            # Update the outermost dimension's size based on frames written
-            # This handles both unbounded dims and incomplete bounded dims
-            if index_dims:
-                first, *inner = index_dims
-                # Calculate actual size of outermost dimension
-                inner_prod = math.prod([d.count or 1 for d in inner])
-                actual_outer_size = max(1, self.thread.frames_written // inner_prod)
+                # Update the outermost dimension's size based on frames written
+                # This handles both unbounded dims and incomplete bounded dims
+                actual_outer_size = max(1, n_frames // inner_prod)
                 setattr(pixels, f"size_{first.name.lower()}", actual_outer_size)
 
-            # Update plane count
-            if data_blocks := pixels.tiff_data_blocks:
-                data_blocks[0].plane_count = self.thread.frames_written
+                # Update plane count
+                if data_blocks := pixels.tiff_data_blocks:
+                    data_blocks[0].plane_count = n_frames
+                updated = True
+
+        if updated or self.thread is None:
+            # No thread means no TIFF file (e.g., companion OME-XML only)
             self.metadata_mirror.flush(force=True)
         else:
             # Fallback: flush if any in-memory modifications have been made (e.g.
@@ -368,10 +378,19 @@ class TiffBackend(ArrayBackend):
             for manager in self._position_managers.values():
                 manager.signal_stop()
 
-            # Finalize each position (wait for thread and update metadata)
+            # Wait for all threads, since one mirror may describe several positions
             for manager in self._position_managers.values():
-                index_dims = self._storage_dims[:-2] if self._storage_dims else None
-                manager.finalize(index_dims)
+                manager.join()
+            frames_written = {
+                pos_idx: manager.thread.frames_written
+                for pos_idx, manager in self._position_managers.items()
+                if manager.thread is not None
+            }
+
+            # Finalize each position (update metadata and flush)
+            index_dims = self._storage_dims[:-2] if self._storage_dims else None
+            for manager in self._position_managers.values():
+                manager.finalize(index_dims, frames_written)
 
             self._finalized = True
 

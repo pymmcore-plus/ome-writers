@@ -654,6 +654,31 @@ def test_basic_multiposition(tmp_path: Path, mode: MultiFileMetadata) -> None:
 
 
 @pytest.mark.parametrize("mode", MULTI_FILE_MODES)
+def test_unbounded_multiposition_sizes(tmp_path: Path, mode: MultiFileMetadata) -> None:
+    """Every position's Image gets the actual number of frames written."""
+    settings = AcquisitionSettings(
+        root_path=tmp_path / "test.ome.tiff",
+        dimensions=[
+            Dimension(name="t", count=None, type="time"),
+            Dimension(name="p", type="position", coords=["Pos0", "Pos1"]),
+            Dimension(name="y", count=16, type="space"),
+            Dimension(name="x", count=16, type="space"),
+        ],
+        dtype="uint16",
+        overwrite=True,
+        format={"name": "ome-tiff", "multi_file_metadata": mode.value},
+    )
+    with create_stream(settings) as stream:
+        for _t in range(3):
+            for _p in range(2):
+                stream.append(np.zeros((16, 16), dtype="uint16"))
+
+    ome = _get_full_ome(settings)
+    assert [img.pixels.size_t for img in ome.images] == [3, 3]
+    assert [img.pixels.tiff_data_blocks[0].plane_count for img in ome.images] == [3, 3]
+
+
+@pytest.mark.parametrize("mode", MULTI_FILE_MODES)
 def test_5d_with_physical_sizes(tmp_path: Path, mode: MultiFileMetadata) -> None:
     """Test full 5D acquisition with physical pixel sizes."""
     dimensions = [
