@@ -343,7 +343,8 @@ def test_prepare_meta(tmp_path: Path, multi_file_metadata: str) -> None:
 
     # Check for companion file in metadata based on structure mode
     metadata_mode = MultiFileMetadata(multi_file_metadata)
-    companion_path = str(Path(settings.output_path) / settings.format.companion_file)
+    output_path = Path(settings.output_path)
+    companion_path = str(output_path / f"{output_path.name}.companion.ome")
     assert (companion_path in meta) == (metadata_mode == MultiFileMetadata.COMPANION)
 
 
@@ -609,8 +610,8 @@ def _get_full_ome(settings: AcquisitionSettings) -> ome_types.OME:
     metadata_mode = MultiFileMetadata(settings.format.multi_file_metadata)
 
     if metadata_mode == MultiFileMetadata.COMPANION:
-        # Use exact companion filename from settings
-        companion_path = output_path / settings.format.companion_file
+        # Default companion filename, recognized by Bio-Formats
+        companion_path = output_path / f"{output_path.name}.companion.ome"
         with open(companion_path, encoding="utf-8") as f:
             return from_xml(f.read())
     elif metadata_mode == MultiFileMetadata.MASTER_TIFF:
@@ -1058,7 +1059,7 @@ def test_tiff_global_metadata_multi_file_modes(
         assert per_pos[1] == []
     else:  # MultiFileMetadata.COMPANION
         assert per_pos[0] == [] and per_pos[1] == []
-        companion = from_xml((d / "companion.ome").read_text())
+        companion = from_xml((d / f"{d.name}.companion.ome").read_text())
         c_anns = _anns_by_ns(companion, "ns")
         assert len(c_anns) == 1 and _decode_map(c_anns[0]) == summary
 
@@ -1190,7 +1191,7 @@ def test_tiff_global_metadata_post_close_multi_file_modes(
         assert per_pos[1] == []
     else:  # MultiFileMetadata.COMPANION
         assert per_pos[0] == [] and per_pos[1] == []
-        companion = from_xml((d / "companion.ome").read_text())
+        companion = from_xml((d / f"{d.name}.companion.ome").read_text())
         c_anns = _anns_by_ns(companion, "ns")
         assert len(c_anns) == 1 and _decode_map(c_anns[0]) == summary
 
