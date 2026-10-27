@@ -236,7 +236,9 @@ def prepare_metadata(settings: AcquisitionSettings) -> dict[str, OmeXMLMirror]:
     elif metadata_mode == MultiFileMetadata.COMPANION:
         # Companion file goes in the output directory alongside TIFF files
         output_path = Path(settings.output_path)
-        companion_filename = settings.format.companion_file
+        companion_filename = (
+            settings.format.companion_file or f"{output_path.name}.companion.ome"
+        )
         companion_path = str(output_path / companion_filename)
         companion_uuid = _make_uuid()
 
