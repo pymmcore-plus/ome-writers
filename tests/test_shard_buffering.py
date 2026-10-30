@@ -5,7 +5,9 @@ from __future__ import annotations
 import random
 import threading
 import time
+from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -23,23 +25,18 @@ H, W = 8, 10
 Y = Dimension(name="y", count=H, chunk_size=H, type="space")
 X = Dimension(name="x", count=W, chunk_size=W, type="space")
 P = Dimension(name="p", type="position", coords=["a", "b"])
+OME = {"storage_order": "ome"}
 UNBOUNDED = 10**9  # stand-in count, for computing indices of unbounded dimensions
 
 
 def _dim(name: str, type_: str) -> Any:
-    def make(count: int | None, chunk: int = 1, shard: int | None = None) -> Dimension:
-        return Dimension(
-            name=name,
-            count=count,
-            chunk_size=chunk,
-            shard_size_chunks=shard,
-            type=type_,
-        )
-
-    return make
+    return lambda count, chunk=1, shard=None: Dimension(
+        name=name, count=count, chunk_size=chunk, shard_size_chunks=shard, type=type_
+    )
 
 
 T, C, Z = _dim("t", "time"), _dim("c", "channel"), _dim("z", "space")
+SPATIAL_SHARDS = [_dim(name, "space")(100, 32, 2) for name in "yx"]
 
 
 def _settings(
@@ -80,14 +77,12 @@ def _write_and_verify(settings: AcquisitionSettings, ops: list[int]) -> None:
         for op in ops:
             if op < 0:
                 stream.skip(frames=-op)
-                seen.extend(next(router)[1] for _ in range(-op))
-                i += -op
-                continue
-            for _ in range(op):
+            for _ in range(abs(op)):
                 pos, idx = next(router)
-                stream.append(_frame(i, frame_shape))
-                written.append((pos, idx, i + 1))
                 seen.append(idx)
+                if op > 0:
+                    stream.append(_frame(i, frame_shape))
+                    written.append((pos, idx, i + 1))
                 i += 1
 
     index_shape = tuple(
@@ -104,7 +99,6 @@ def _write_and_verify(settings: AcquisitionSettings, ops: list[int]) -> None:
         got = read_array_data(
             root if len(positions) == 1 else f"{root}/{position.name}"
         )
-        assert got.shape == want.shape
         np.testing.assert_array_equal(got, want)
 
 
@@ -126,37 +120,11 @@ def buffered_backend(zarr_backend: str) -> str:
         pytest.param([T(100, 1, 10), Y, X], 95, {}, id="early-stop-shard"),
         pytest.param([T(100, 10), Y, X], 95, {}, id="early-stop-chunk"),
         pytest.param([T(4, 1, 2), C(2, 1, 2), Z(10, 1, 5), Y, X], 80, {}, id="3-dims"),
-        pytest.param(
-            [T(3), Z(4, 1, 2), C(2, 1, 2), Y, X],
-            24,
-            {"storage_order": "ome"},
-            id="transposed",
-        ),
+        pytest.param([T(3), Z(4, 1, 2), C(2, 1, 2), Y, X], 24, OME, id="transposed"),
         pytest.param([T(20, 1, 5), P, Y, X], 40, {}, id="t-p"),
         pytest.param([P, T(20, 1, 5), Y, X], 40, {}, id="p-t"),
         pytest.param([T(30, 2, 5), Y, X], 30, {}, id="chunk-2-shard-5"),
-        pytest.param(
-            [
-                T(6),
-                Dimension(
-                    name="y",
-                    count=100,
-                    chunk_size=32,
-                    shard_size_chunks=2,
-                    type="space",
-                ),
-                Dimension(
-                    name="x",
-                    count=100,
-                    chunk_size=32,
-                    shard_size_chunks=2,
-                    type="space",
-                ),
-            ],
-            6,
-            {},
-            id="frame-not-multiple-of-spatial-shard",
-        ),
+        pytest.param([T(6), *SPATIAL_SHARDS], 6, {}, id="frame-not-multiple-of-shard"),
     ],
 )
 def test_all_frames_reach_disk(
@@ -168,17 +136,8 @@ def test_all_frames_reach_disk(
     _write_and_verify(settings, [n_frames])
 
 
-@pytest.mark.parametrize(
-    ("count", "ops"),
-    [
-        pytest.param(30, [5, -1, 24], id="mid-shard"),
-        pytest.param(30, [10, -10, 10], id="whole-shard"),
-        pytest.param(30, [9, -1, 20], id="completes-shard"),
-        pytest.param(None, [5, -1, 24], id="unbounded-mid-shard"),
-        pytest.param(None, [10, -10, 10], id="unbounded-whole-shard"),
-        pytest.param(None, [12, -3], id="unbounded-trailing"),
-    ],
-)
+@pytest.mark.parametrize("count", [30, None])
+@pytest.mark.parametrize("ops", [[5, -1, 24], [10, -10, 10], [9, -1, 20], [12, -3]])
 def test_skips(
     tmp_path: Path, buffered_backend: str, count: int | None, ops: list[int]
 ) -> None:
@@ -186,22 +145,23 @@ def test_skips(
     _write_and_verify(settings, ops)
 
 
-def test_one_write_per_shard(
+def test_each_shard_written_once_and_readable_during_write(
     tmp_path: Path, buffered_backend: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     settings = _settings(tmp_path, buffered_backend, [T(95, 1, 10), Y, X])
+    seen = []
     with create_stream(settings) as stream:
+        view = stream.view(dynamic_shape=True, strict=False)
         write = stream._backend._write
-        calls = []
 
-        def counting_write(*args: Any) -> None:
-            calls.append(args)
+        def checking_write(*args: Any) -> None:
+            seen.append(np.asarray(view[i]).max())  # not on disk yet
             write(*args)
 
-        monkeypatch.setattr(stream._backend, "_write", counting_write)
+        monkeypatch.setattr(stream._backend, "_write", checking_write)
         for i in range(95):
             stream.append(_frame(i))
-    assert len(calls) == 10
+    assert seen == [*range(10, 100, 10), 95]
 
 
 def test_skips_release_shards(tmp_path: Path, buffered_backend: str) -> None:
@@ -229,12 +189,7 @@ LIVE_CASES = [
     pytest.param([T(None, 1, 10), Y, X], 25, {}, id="unbounded-shard"),
     pytest.param([T(None, 10), Y, X], 25, {}, id="unbounded-chunk"),
     pytest.param([T(3), Z(10, 1, 5), Y, X], 30, {}, id="t-z-shards"),
-    pytest.param(
-        [T(2), Z(6, 1, 2), C(3, 1, 3), Y, X],
-        36,
-        {"storage_order": "ome"},
-        id="transposed",
-    ),
+    pytest.param([T(2), Z(6, 1, 2), C(3, 1, 3), Y, X], 36, OME, id="transposed"),
     pytest.param([T(10, 1, 5), P, Y, X], 20, {}, id="t-p"),
     pytest.param([P, T(10, 1, 5), Y, X], 20, {}, id="p-t"),
 ]
@@ -291,69 +246,28 @@ def test_reader_thread_sees_every_finished_frame(
     assert not wrong
 
 
-@pytest.mark.parametrize(("failures", "recovers"), [(2, True), (100, False)])
+@pytest.mark.parametrize(
+    ("failures", "outcome"), [(2, nullcontext()), (100, pytest.raises(PermissionError))]
+)
 def test_disk_read_retries_permission_error(
-    failures: int, recovers: bool, monkeypatch: pytest.MonkeyPatch
+    failures: int, outcome: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(time, "sleep", lambda _: None)
-
-    class LockedArray:
-        shape = (4, H, W)
-        dtype = np.dtype("uint16")
-        n_failures = failures
-
-        def __getitem__(self, key: Any) -> np.ndarray:
-            if self.n_failures:
-                self.n_failures -= 1
-                raise PermissionError(13, "Permission denied")
-            return np.zeros(self.shape, self.dtype)[key]
-
+    disk = MagicMock(shape=(4, H, W), dtype=np.dtype("uint16"))
+    disk.__getitem__.side_effect = [PermissionError] * failures + [np.zeros((H, W))]
     buffer = ChunkBuffer((4,), (2,), (H, W), "uint16")
     buffer.add_frame((0,), _frame(0))
-    array = _BufferedArray(LockedArray(), buffer)
-    if recovers:
-        np.testing.assert_array_equal(array[0], _frame(0))
-    else:
-        with pytest.raises(PermissionError):
-            array[0]
-
-
-def test_chunk_stays_readable_during_flush(
-    tmp_path: Path, buffered_backend: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    settings = _settings(tmp_path, buffered_backend, [T(10, 1, 5), Y, X])
-    seen = []
-    with create_stream(settings) as stream:
-        view = stream.view(dynamic_shape=True, strict=False)
-        write = stream._backend._write
-
-        def checking_write(*args: Any) -> None:
-            seen.append(np.asarray(view[4]).max())  # not on disk yet
-            write(*args)
-
-        monkeypatch.setattr(stream._backend, "_write", checking_write)
-        for i in range(5):
-            stream.append(_frame(i))
-    assert seen == [5]
+    with outcome:
+        np.testing.assert_array_equal(_BufferedArray(disk, buffer)[0], _frame(0))
 
 
 def test_tensorstore_holds_chunk_until_commit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pytest.importorskip("tensorstore")
-
-    class PendingWrite:
-        callback: Any = None
-
-        def add_done_callback(self, callback: Any) -> None:
-            self.callback = callback
-
-        def result(self) -> None: ...
-
     settings = _settings(tmp_path, "tensorstore", [T(10, 1, 5), Y, X])
     with create_stream(settings) as stream:
-        pending = PendingWrite()
-        backend = stream._backend
+        backend, pending = stream._backend, MagicMock()
         monkeypatch.setattr(
             backend, "_write", lambda *_: backend._futures.append(pending)
         )
@@ -366,8 +280,11 @@ def test_tensorstore_holds_chunk_until_commit(
         assert not buffer._active_chunks
         np.testing.assert_array_equal(view[4], _frame(4))
 
-        pending.callback(pending)
+        pending.add_done_callback.call_args.args[0](pending)
         assert not buffer._flushing
+
+
+KINDS = ("int", "all", "slice")
 
 
 def _random_index(rng: random.Random, size: int, kind: str) -> int | slice:
@@ -380,24 +297,13 @@ def _random_index(rng: random.Random, size: int, kind: str) -> int | slice:
 
 
 def _random_key(
-    rng: random.Random, shape: tuple[int, ...], uniform_index_kind: bool
+    rng: random.Random, shape: tuple[int, ...], transposed: bool
 ) -> tuple[int | slice, ...]:
-    kinds = ("int", "int", "all", "slice", "slice")
-    n_index = len(shape) - 2
-    if uniform_index_kind:
-        # mixing the two on transposed storage hits an unrelated `StreamView` error
-        first = rng.choice(("int", "slice"))
-        index_kinds = ["int" if first == "int" else rng.choice(kinds[2:])] * n_index
-    else:
-        index_kinds = [rng.choice(kinds) for _ in range(n_index)]
-    key = [
-        _random_index(rng, size, kind)
-        for size, kind in zip(shape, index_kinds, strict=False)
-    ]
-    n_frame_keys = rng.randint(0, 2) if len(key) == n_index else 0
-    for size in shape[n_index:][:n_frame_keys]:
-        key.append(_random_index(rng, size, rng.choice(kinds)))
-    return tuple(key)
+    n = len(shape) - 2
+    # mixing kinds on transposed storage hits an unrelated `StreamView` error
+    kinds = [rng.choice(KINDS)] * n if transposed else rng.choices(KINDS, k=n)
+    kinds += rng.choices(KINDS, k=rng.randint(0, 2))  # optional frame-dim keys
+    return tuple(_random_index(rng, s, k) for s, k in zip(shape, kinds, strict=False))
 
 
 @pytest.mark.parametrize(
@@ -408,10 +314,7 @@ def _random_key(
         pytest.param([T(20, 1, 5), C(3, 1, 3), Y, X], 50, {}, id="t-c-shards"),
         pytest.param([T(20, 1, 5), P, Y, X], 33, {}, id="t-p"),
         pytest.param(
-            [T(4, 1, 2), Z(4, 1, 2), C(3, 1, 3), Y, X],
-            30,
-            {"storage_order": "ome"},
-            id="transposed",
+            [T(4, 1, 2), Z(4, 1, 2), C(3, 1, 3), Y, X], 30, OME, id="transposed"
         ),
     ],
 )
@@ -429,7 +332,7 @@ def test_random_keys_match_numpy_mid_acquisition(
             stream.append(frame)
             want[_key(settings, i)] = frame
         for _ in range(100):
-            key = _random_key(rng, shape, uniform_index_kind=bool(kwargs))
+            key = _random_key(rng, shape, transposed=bool(kwargs))
             np.testing.assert_array_equal(view[key], want[key], err_msg=str(key))
 
 
@@ -459,17 +362,12 @@ UNBOUNDED_KEYS = [
 
 
 @pytest.mark.parametrize("n_frames", [3, 10, 13, 25])
-@pytest.mark.parametrize(("chunk", "shard"), [(1, 10), (10, None)])
+@pytest.mark.parametrize("t", [T(None, 1, 10), T(None, 10)], ids=["shard", "chunk"])
 @pytest.mark.parametrize("make_key", UNBOUNDED_KEYS)
 def test_slices_on_unbounded_dimension(
-    tmp_path: Path,
-    buffered_backend: str,
-    chunk: int,
-    shard: int | None,
-    n_frames: int,
-    make_key: Any,
+    tmp_path: Path, buffered_backend: str, t: Dimension, n_frames: int, make_key: Any
 ) -> None:
-    settings = _settings(tmp_path, buffered_backend, [T(None, chunk, shard), Y, X])
+    settings = _settings(tmp_path, buffered_backend, [t, Y, X])
     with create_stream(settings) as stream:
         view = stream.view(dynamic_shape=True, strict=False)
         want = np.empty((n_frames, H, W), dtype="uint16")
