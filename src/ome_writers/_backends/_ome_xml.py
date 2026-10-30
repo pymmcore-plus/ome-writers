@@ -267,6 +267,30 @@ def prepare_metadata(settings: AcquisitionSettings) -> dict[str, OmeXMLMirror]:
     return mirrors
 
 
+def initial_tiff_xml(mirrors: dict[str, OmeXMLMirror]) -> dict[str, str]:
+    """Return the OME-XML of each TIFF mirror freshly created by `prepare_metadata`.
+
+    The full OME models differ only by their root UUID (one per file in "redundant"
+    mode), and serializing one is O(n_positions), so only the first is serialized.
+    """
+    xmls: dict[str, str] = {}
+    full_xml = full_uuid = ""
+    for path, mirror in mirrors.items():
+        model = mirror.model
+        if not mirror.is_tiff:
+            continue
+        assert model.uuid, "prepare_metadata gives every model a UUID"
+        if model.binary_only is not None:
+            xmls[path] = model.to_xml()
+        elif not full_xml:
+            xmls[path] = full_xml = model.to_xml()
+            full_uuid = model.uuid
+        else:
+            # the root element's UUID is the first one in the document
+            xmls[path] = full_xml.replace(full_uuid, model.uuid, 1)
+    return xmls
+
+
 # ---------------------------------------------------------------------------
 # Helper types and functions
 # ---------------------------------------------------------------------------

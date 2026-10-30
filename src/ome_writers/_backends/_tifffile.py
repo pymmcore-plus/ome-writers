@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Literal, cast
 import numpy as np
 
 from ome_writers._backends._backend import ArrayBackend
-from ome_writers._backends._ome_xml import prepare_metadata
+from ome_writers._backends._ome_xml import initial_tiff_xml, prepare_metadata
 from ome_writers._backends._tiff_array import FinalizedTiffArray, LiveTiffArray
 
 if TYPE_CHECKING:
@@ -185,6 +185,7 @@ class TiffBackend(ArrayBackend):
         # Prepare OME-XML metadata mirrors
         # mapping of filepath -> OmeXMLMirror
         metas = prepare_metadata(settings)
+        xmls = initial_tiff_xml(metas)
 
         # Create writer thread for each position
         for fname, meta_mirror in metas.items():
@@ -201,7 +202,7 @@ class TiffBackend(ArrayBackend):
                     shape=shape,
                     dtype=self._dtype,
                     image_queue=q,
-                    ome_xml=meta_mirror.model.to_xml(),
+                    ome_xml=xmls[fname],
                     has_unbounded=has_unbounded,
                     compression=compression,
                 )
