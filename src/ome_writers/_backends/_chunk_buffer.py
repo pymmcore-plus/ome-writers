@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import math
+import time
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 if TYPE_CHECKING:
     from ome_writers._backends._backend import ArrayLike
+
+# seconds to wait after each disk read that fails with a `PermissionError`
+_READ_RETRY_DELAYS = (0.01, 0.02, 0.04, 0.08, 0.16)
 
 
 class ChunkBuffer:
@@ -198,7 +202,7 @@ class _BufferedArray:
         # Snapshot BEFORE reading disk: a chunk missing from the snapshot was fully
         # written before the disk read began, so that read is guaranteed to see it.
         chunks = self._buffer.snapshot()
-        result = np.asarray(self._array[key])
+        result = self._read_disk(key)
         if not chunks:
             return result
 
@@ -220,6 +224,15 @@ class _BufferedArray:
             values = np.squeeze(values, axis=drop) if drop else values
             result[np.ix_(*out) if out else ()] = values
         return result
+
+    def _read_disk(self, key: Any) -> np.ndarray:
+        """Read from disk, retrying a `PermissionError` (likely a rename on Windows)."""
+        for delay in _READ_RETRY_DELAYS:
+            try:
+                return np.asarray(self._array[key])
+            except PermissionError:
+                time.sleep(delay)
+        return np.asarray(self._array[key])
 
 
 def _selection(
