@@ -18,7 +18,7 @@ import numpy as np
 
 from ome_writers import __version__
 from ome_writers._backends._backend import ArrayBackend
-from ome_writers._backends._chunk_buffer import ChunkBuffer
+from ome_writers._backends._chunk_buffer import ChunkBuffer, _BufferedArray
 from ome_writers._schema import is_channel_dim
 from ome_writers._util import spatial_role_indices
 
@@ -225,9 +225,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
             frame_dims = storage_dims[-2:]  # Y, X
 
             index_shape = tuple(d.count for d in index_dims)
-            chunk_shape = tuple(
-                d.chunk_size if d.chunk_size is not None else 1 for d in index_dims
-            )
+            chunk_shape = tuple(d.buffer_size for d in index_dims)
             frame_shape = tuple(d.count for d in frame_dims)
 
             # Create one buffer per position
@@ -249,8 +247,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         """Resize array if needed to accommodate the given indices.
 
         This method calculates the maximum extent across all provided indices
-        and resizes the array once if needed. It also updates chunk buffer
-        index_shape for buffered backends.
+        and resizes the array once if needed.
         """
         array = self._arrays[position_index]
         current_shape = list(array.shape)
@@ -264,8 +261,6 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         # Resize only once if needed
         if new_shape != current_shape:
             self._resize(array, new_shape)
-            if self._chunk_buffers:
-                self._chunk_buffers[position_index].index_shape = new_shape[:-2]
 
     def write(
         self,
@@ -297,8 +292,8 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         """Efficiently resize arrays once based on maximum extent of skipped indices.
 
         For Zarr backends, skipping frames only requires resizing arrays to
-        accommodate the new indices. No data is written - skipped regions use
-        the array's fill_value.
+        accommodate the new indices, and flushing any buffered chunks they complete.
+        Skipped regions use the array's fill_value.
         """
         if self._finalized:  # pragma: no cover
             raise RuntimeError("Cannot advance after finalize().")
@@ -311,6 +306,11 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         # For each position, resize once to accommodate all indices
         for pos_idx, storage_indices in position_indices.items():
             self._ensure_array_size(pos_idx, storage_indices)
+            if self._chunk_buffers:
+                buffer = self._chunk_buffers[pos_idx]
+                for idx in storage_indices:
+                    if (coords := buffer.skip_frame(idx)) is not None:
+                        self._flush_chunk(buffer, self._arrays[pos_idx], coords)
 
     def _store_frame_metadata(
         self,
@@ -338,8 +338,24 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
 
         # If chunk is complete, flush it
         if chunk_coords is not None:
-            storage_start, chunk_data = buffer.get_chunk_for_flush(chunk_coords)
-            self._write_chunk(array, storage_start, chunk_data)
+            self._flush_chunk(buffer, array, chunk_coords)
+
+    def _flush_chunk(
+        self,
+        buffer: ChunkBuffer,
+        array: _AT,
+        coords: tuple[int, ...],
+        *,
+        trim: bool = False,
+    ) -> None:
+        """Write a buffered chunk, keeping it readable until the write is visible."""
+        start, data = buffer.begin_flush(coords, trim=trim)
+        self._write_chunk(array, start, data)
+        self._after_flush(buffer, coords)
+
+    def _after_flush(self, buffer: ChunkBuffer, coords: tuple[int, ...]) -> None:
+        """Release a chunk after `_write_chunk`. Async writers must await the write."""
+        buffer.end_flush(coords)
 
     def _write_chunk(
         self, array: _AT, start_index: tuple[int, ...], chunk_data: np.ndarray
@@ -362,6 +378,14 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
     def get_arrays(self) -> Sequence[ArrayLike]:
         """Return array-like objects for each position."""
         if self._arrays:
+            if self._chunk_buffers:
+                # Keeps working after finalize, when its buffer is empty.
+                return [
+                    _BufferedArray(array, buffer)  # type: ignore[arg-type]
+                    for array, buffer in zip(
+                        self._arrays, self._chunk_buffers, strict=True
+                    )
+                ]
             return self._arrays  # type: ignore
         if self._finalized and self._root and self._image_group_paths:
             return self._reopen_arrays()
@@ -456,21 +480,15 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
             self._finalized = True
 
     def _finalize_chunk_buffers(self) -> None:
-        # Flush any remaining partial chunks.
-        # NOTE:
-        # This is defensive code that should never execute in normal operation.
-        # With sequential frame writing via OMEStream.append(), chunks are either:
-        # (1) fully complete and auto-flushed immediately via _write_with_buffering
-        # (2) never started (no frames written yet). This code only executes if
-        # frames are written out-of-order (e.g., direct backend.write() calls) or if
-        # there's a bug in chunk completion logic. It ensures no buffered data is
-        # silently lost during finalization.
-        if self._chunk_buffers:  # pragma: no cover
+        # Flush any remaining partial chunks: these are routine, for example when an
+        # unbounded dimension ends mid-shard, an acquisition stops early, or frames
+        # were skipped.  Trimmed because unbounded chunks extend past the array.
+        if self._chunk_buffers:
             for pos_idx, buffer in enumerate(self._chunk_buffers):
                 if self._arrays:  # Arrays may have been cleared already
                     array = self._arrays[pos_idx]
-                    for storage_start, chunk_data in buffer.flush_all_partial():
-                        self._write_chunk(array, storage_start, chunk_data)
+                    for coords in list(buffer._active_chunks):
+                        self._flush_chunk(buffer, array, coords, trim=True)
         self._chunk_buffers = None
 
     def _resize(self, array: _AT, new_shape: Sequence[int]) -> None:
@@ -521,13 +539,10 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
         """Check if chunk buffering would be beneficial.
 
         Returns True if any index dimension (excluding last 2 frame dims)
-        has chunk_size > 1.
+        has chunks or shards spanning more than one frame.
         """
         # Only check index dimensions (exclude frame dimensions)
-        for dim in storage_dims[:-2]:
-            if dim.chunk_size is not None and dim.chunk_size > 1:
-                return True
-        return False
+        return any(dim.buffer_size > 1 for dim in storage_dims[:-2])
 
 
 # -----------------------------------------------------------------------------
