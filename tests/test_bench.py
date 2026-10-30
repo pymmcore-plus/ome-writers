@@ -67,6 +67,18 @@ BENCHMARK_CASES = [
         AcquisitionSettings(
             root_path="tmp",
             dimensions=[
+                D(name="t", count=200, chunk_size=1, shard_size_chunks=20, type="time"),
+                D(name="y", count=128, chunk_size=128, type="space"),
+                D(name="x", count=128, chunk_size=128, type="space"),
+            ],
+            dtype="uint16",
+        ),
+        id="time_lapse_t_shards",
+    ),
+    pytest.param(
+        AcquisitionSettings(
+            root_path="tmp",
+            dimensions=[
                 D(name="z", count=64, chunk_size=16, type="space"),
                 D(name="y", count=512, chunk_size=128, type="space"),
                 D(name="x", count=512, chunk_size=128, type="space"),
