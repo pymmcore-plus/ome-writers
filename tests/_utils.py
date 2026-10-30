@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from contextlib import suppress
 from pathlib import Path
@@ -98,13 +99,14 @@ def wait_for_frames(
                 time.sleep(0.01)  # Small sleep to avoid busy-waiting
 
 
-def wait_for_pending_callbacks(
-    stream: OMEStream, timeout: float = 1.0, barriers: int = 20
-) -> None:
+def wait_for_pending_callbacks(stream: OMEStream, timeout: float = 5.0) -> None:
     """Wait for all pending async callbacks to complete (for testing).
 
-    Submits barrier tasks serially to ensure all prior work completes tests.
+    Every worker must reach the barrier, which it can only do after finishing what it's
+    running and everything queued ahead of the barrier.
     """
     if executor := stream._callback_executor:
-        for _ in range(barriers):
-            executor.submit(lambda: None).result(timeout=timeout)
+        n_workers = executor._max_workers
+        barrier = threading.Barrier(n_workers, timeout=timeout)
+        for future in [executor.submit(barrier.wait) for _ in range(n_workers)]:
+            future.result(timeout=timeout)
