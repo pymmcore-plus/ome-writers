@@ -17,7 +17,7 @@ WIN = sys.platform == "win32"
 
 def warn_if_high_memory_usage(settings: AcquisitionSettings) -> None:
     # Skip if not using chunk buffering
-    if not any(d.chunk_size and d.chunk_size > 1 for d in settings.index_dimensions):
+    if not any(d.buffer_size > 1 for d in settings.index_dimensions):
         return None
 
     # we only estimate memory on windows for now
@@ -75,7 +75,7 @@ def _max_chunks(settings: AcquisitionSettings) -> int:
     storage_pos = {d.name: i for i, d in enumerate(storage_dims[:-2])}
     max_chunks = 1
     for stor_dim in storage_dims[:-2]:
-        if not stor_dim.chunk_size or stor_dim.chunk_size <= 1:
+        if stor_dim.buffer_size <= 1:
             continue
         acq_idx = next(
             (i for i, d in enumerate(index_dims) if d.name == stor_dim.name), None
@@ -86,14 +86,14 @@ def _max_chunks(settings: AcquisitionSettings) -> int:
         for faster_acq_dim in index_dims[acq_idx + 1 :]:
             if faster_acq_dim.count and faster_acq_dim.name in storage_pos:
                 faster_storage_dim = storage_dims[storage_pos[faster_acq_dim.name]]
-                chunk_size = faster_storage_dim.chunk_size or 1
-                chunks_from_faster *= math.ceil(faster_acq_dim.count / chunk_size)
+                buffer_size = faster_storage_dim.buffer_size
+                chunks_from_faster *= math.ceil(faster_acq_dim.count / buffer_size)
         max_chunks = max(max_chunks, chunks_from_faster)
     return max_chunks
 
 
 def _bytes_per_chunk(settings: AcquisitionSettings) -> int:
-    chunk_shape = tuple(d.chunk_size or 1 for d in settings.index_dimensions)
+    chunk_shape = tuple(d.buffer_size for d in settings.index_dimensions)
     frame_shape = tuple(d.count or 1 for d in settings.frame_dimensions)
     bytes_per_pixel = np.dtype(settings.dtype).itemsize
     return int(np.prod(chunk_shape + frame_shape)) * bytes_per_pixel
@@ -108,7 +108,7 @@ def _concurrent_positions(settings: AcquisitionSettings) -> int:
             (
                 i
                 for i, d in enumerate(settings.dimensions)
-                if isinstance(d, Dimension) and (d.chunk_size or 1) > 1
+                if isinstance(d, Dimension) and d.buffer_size > 1
             ),
             None,
         )

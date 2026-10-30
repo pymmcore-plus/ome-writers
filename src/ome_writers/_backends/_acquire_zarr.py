@@ -61,6 +61,10 @@ class AcquireZarrBackend(YaozarrsBackend):
 
         return custom_writer
 
+    def _should_use_chunk_buffering(self, storage_dims: list[Dimension]) -> bool:
+        """Return False: acquire-zarr appends chunks itself; arrays are placeholders."""
+        return False
+
     def _post_prepare(self, settings: AcquisitionSettings) -> None:
         """Create acquire-zarr stream after yaozarrs creates metadata."""
         assert self._root is not None
