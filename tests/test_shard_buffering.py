@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 from ome_writers import AcquisitionSettings, Dimension, create_stream
+from ome_writers._backends._chunk_buffer import ChunkBuffer, _BufferedArray
 from ome_writers._memory import _bytes_per_chunk, _max_chunks
 from ome_writers._router import FrameRouter
 from tests._utils import read_array_data
@@ -270,7 +271,7 @@ def test_reader_thread_sees_every_finished_frame(
                 if not np.array_equal(view[_key(settings, i)], _frame(i)):
                     wrong.append(i)
             except Exception as e:
-                wrong.append(e)
+                wrong.append(f"{type(e).__name__}: {e}")  # str(e) has the filename
             n_reads += 1
 
     with create_stream(settings) as stream:
@@ -288,6 +289,33 @@ def test_reader_thread_sees_every_finished_frame(
             stop.set()
             thread.join()
     assert not wrong
+
+
+@pytest.mark.parametrize(("failures", "recovers"), [(2, True), (100, False)])
+def test_disk_read_retries_permission_error(
+    failures: int, recovers: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(time, "sleep", lambda _: None)
+
+    class LockedArray:
+        shape = (4, H, W)
+        dtype = np.dtype("uint16")
+        n_failures = failures
+
+        def __getitem__(self, key: Any) -> np.ndarray:
+            if self.n_failures:
+                self.n_failures -= 1
+                raise PermissionError(13, "Permission denied")
+            return np.zeros(self.shape, self.dtype)[key]
+
+    buffer = ChunkBuffer((4,), (2,), (H, W), "uint16")
+    buffer.add_frame((0,), _frame(0))
+    array = _BufferedArray(LockedArray(), buffer)
+    if recovers:
+        np.testing.assert_array_equal(array[0], _frame(0))
+    else:
+        with pytest.raises(PermissionError):
+            array[0]
 
 
 def test_chunk_stays_readable_during_flush(
