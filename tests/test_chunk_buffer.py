@@ -42,7 +42,7 @@ def test_complete_chunks(
         frame = np.ones((2, 2), dtype=np.uint16) * sum(idx)
         if result := buffer.add_frame(idx, frame):
             completed.append(result)
-            _, chunk_data = buffer.get_chunk_for_flush(result)
+            _, chunk_data = buffer.begin_flush(result)
             assert chunk_data.dtype == np.uint16
             assert chunk_data.shape[: len(chunk_shape)] == chunk_shape
 
@@ -75,7 +75,7 @@ def test_partial_chunks(
         result = buffer.add_frame(idx, np.ones((2, 2), dtype=np.uint16))
 
     assert result == expected_coords
-    _, chunk_data = buffer.get_chunk_for_flush(result)
+    _, chunk_data = buffer.begin_flush(result)
     assert chunk_data.shape == expected_shape
 
 
@@ -88,23 +88,74 @@ def test_unlimited_dimension() -> None:
         for j in range(4):
             if result := buffer.add_frame((i, j), np.ones((2, 2), dtype=np.uint16)):
                 completed.append(result)
-                buffer.get_chunk_for_flush(result)
+                buffer.begin_flush(result)
 
     # 10x4 frames with 2x2 chunks = 5x2 = 10 chunks
     assert len(completed) == 10
 
 
-def test_flush_all_partial() -> None:
-    """Test flushing incomplete chunks during finalize."""
-    buffer = ChunkBuffer((6, 6), (2, 2), (2, 2), np.uint16)
+def test_trimmed_flush() -> None:
+    """Test partial flushes stop at the frames added so far."""
+    buffer = ChunkBuffer((None, 4), (10, 4), (2, 2), np.uint16)
+    for idx in [(0, 0), (0, 1), (1, 0), (2, 1)]:
+        buffer.add_frame(idx, np.ones((2, 2), dtype=np.uint16))
+    assert buffer._active_chunks[(0, 0)].shape == (10, 4, 2, 2)
 
-    # Add one frame to three different chunks
-    for i, pos in enumerate([(0, 0), (2, 2), (0, 4)]):
-        buffer.add_frame(pos, np.ones((2, 2), dtype=np.uint16) * i)
+    start, data = buffer.begin_flush((0, 0), trim=True)
+    assert start == (0, 0)
+    assert data.shape == (3, 2, 2, 2)
+    assert not buffer._active_chunks
 
-    assert len(buffer._active_chunks) == 3
 
-    chunks = buffer.flush_all_partial()
-    assert len(chunks) == 3
-    assert {start for start, _ in chunks} == {(0, 0), (2, 2), (0, 4)}
-    assert len(buffer._active_chunks) == 0
+def test_trim_is_relative_to_chunk_start() -> None:
+    buffer = ChunkBuffer((None,), (10,), (2, 2), np.uint16)
+    for i in range(10):
+        buffer.add_frame((i,), np.ones((2, 2), dtype=np.uint16))
+    buffer.begin_flush((0,))
+    for i in range(10, 13):
+        buffer.add_frame((i,), np.ones((2, 2), dtype=np.uint16))
+
+    start, data = buffer.begin_flush((1,), trim=True)
+    assert start == (10,)
+    assert data.shape == (3, 2, 2)
+
+
+def test_flush_keeps_chunk_in_snapshot_until_end_flush() -> None:
+    buffer = ChunkBuffer((2,), (2,), (2, 2), np.uint16)
+    assert buffer.snapshot() == []
+    buffer.add_frame((0,), np.ones((2, 2), dtype=np.uint16))
+    assert [coords for coords, _ in buffer.snapshot()] == [(0,)]
+
+    buffer.begin_flush((0,))
+    assert not buffer._active_chunks
+    assert [coords for coords, _ in buffer.snapshot()] == [(0,)]
+
+    buffer.end_flush((0,))
+    assert buffer.snapshot() == []
+
+
+def test_skip_completes_chunk() -> None:
+    """Test a skip that fills the rest of an active chunk asks for a flush."""
+    buffer = ChunkBuffer((4,), (2,), (2, 2), np.uint16)
+    frame = np.ones((2, 2), dtype=np.uint16)
+    assert buffer.add_frame((0,), frame) is None
+    assert buffer.skip_frame((1,)) == (0,)
+    start, data = buffer.begin_flush((0,))
+    assert start == (0,)
+    assert data.shape == (2, 2, 2)
+
+
+def test_skip_before_frames_counts_toward_completion() -> None:
+    """Test skips recorded before a chunk is allocated aren't forgotten."""
+    buffer = ChunkBuffer((4,), (2,), (2, 2), np.uint16)
+    assert buffer.skip_frame((0,)) is None
+    assert not buffer._active_chunks
+    assert buffer.add_frame((1,), np.ones((2, 2), dtype=np.uint16)) == (0,)
+
+
+def test_chunk_of_only_skips_needs_no_flush() -> None:
+    buffer = ChunkBuffer((4,), (2,), (2, 2), np.uint16)
+    assert buffer.skip_frame((0,)) is None
+    assert buffer.skip_frame((1,)) is None
+    assert not buffer._active_chunks
+    assert not buffer._filled_count

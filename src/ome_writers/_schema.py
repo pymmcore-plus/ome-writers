@@ -399,7 +399,9 @@ class Dimension(_BaseModel):
         default=None,
         description="Number of chunks per shard (*NOT* number of pixels per shard), "
         "for storage backends that support sharding (e.g. Zarr v3). If not specified, "
-        "no sharding is used (i.e. chunks are the unit of storage).",
+        "no sharding is used (i.e. chunks are the unit of storage). On non-frame "
+        "dimensions, zarr backends hold frames in memory until a whole shard can be "
+        "written, and `OMEStream.view()` reads them from there.",
     )
     unit: str | None = Field(
         default=None,
@@ -429,6 +431,11 @@ class Dimension(_BaseModel):
         "for `x`/`y`), this is relative to the corresponding `Position` coordinate "
         "(if any).",
     )
+
+    @property
+    def buffer_size(self) -> int:
+        """Number of elements in a chunk (or shard, if sharded) along this dimension."""
+        return (self.chunk_size or 1) * (self.shard_size_chunks or 1)
 
     @model_validator(mode="before")
     @classmethod

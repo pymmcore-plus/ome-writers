@@ -24,6 +24,31 @@ worse depending on the specific data shape and chunking/sharding strategy used.
     The documentation for zarr-python also has some [tips for chunk
     optimization](https://zarr.readthedocs.io/en/latest/user-guide/performance/#chunk-optimizations)
 
+## Chunk and shard buffering
+
+Writing a single frame into a chunk or shard that spans several frames means
+reading, modifying, and rewriting it, at a cost that grows as it fills.  So when
+`chunk_size` or `shard_size_chunks` exceeds one element on a non-frame dimension
+(`t`, `c`, `z`...), the tensorstore, zarr-python, and zarrs-python backends hold
+frames in memory until the whole chunk or shard is complete, then write it once.
+Sharding only the frame dimensions (`y`, `x`) doesn't need buffering, since a
+frame write already covers those shards.
+
+Buffered frames remain readable through
+[`OMEStream.view`][ome_writers.OMEStream.view], so live viewers keep showing every
+frame as it arrives.  The tradeoffs of buffering are:
+
+- **Crashes:** buffered frames are lost on a hard crash: up to one chunk or shard
+  per position, or more with a storage order that differs from the acquisition
+  order.  (`close()` writes whatever is still buffered.)
+- **Other readers:** other processes reading the store directly won't see buffered
+  frames until they are written.
+- **Memory:** up to one chunk or shard per position stays in memory, and storage
+  orders that differ from the acquisition order can hold many at once.  With
+  tensorstore, finished shards can also stay in memory until their write commits:
+  this raised peak memory from 1493 MB to 2777 MB in the worst case we measured
+  (3245 MB with a live reader).
+
 ## Benchmarking
 
 The `tools/benchmark.py` script can be used to benchmark the performance of
