@@ -680,6 +680,43 @@ def test_multiposition_frames_written(
     )
 
 
+@pytest.mark.parametrize(
+    ("frame_metadata", "rewritten"),
+    [(None, []), ({"exposure_time": 10.0}, ["test_p000", "test_p001"])],
+)
+def test_finalize_rewrites_only_changed_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    frame_metadata: dict | None,
+    rewritten: list[str],
+) -> None:
+    """Closing a complete acquisition doesn't rewrite OME-XML that is still right."""
+    calls: list[str] = []
+    tiffcomment = tifffile.tiffcomment
+
+    def counting_tiffcomment(path: str, *args: Any, **kwargs: Any) -> Any:
+        calls.append(Path(path).name.split(".")[0])
+        return tiffcomment(path, *args, **kwargs)
+
+    monkeypatch.setattr(tifffile, "tiffcomment", counting_tiffcomment)
+    settings = AcquisitionSettings(
+        root_path=tmp_path / "test.ome.tiff",
+        dimensions=[
+            Dimension(name="t", count=2, type="time"),
+            Dimension(name="p", type="position", coords=["Pos0", "Pos1"]),
+            Dimension(name="y", count=16, type="space"),
+            Dimension(name="x", count=16, type="space"),
+        ],
+        dtype="uint16",
+        format={"name": "ome-tiff", "multi_file_metadata": "redundant"},
+    )
+    with create_stream(settings) as stream:
+        for _ in range(4):
+            stream.append(np.zeros((16, 16), "uint16"), frame_metadata=frame_metadata)
+
+    assert sorted(calls) == rewritten
+
+
 def test_finalize_waits_for_slow_writer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

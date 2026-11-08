@@ -61,7 +61,6 @@ class PositionManager:
 
     def __post_init__(self) -> None:
         self._lock = threading.Lock()
-        self._metadata_dirty: bool = False
 
     def update_metadata(self, metadata: ome.OME, flush: bool = False) -> None:
         """Update cached metadata and mark as dirty.  Optionally flush to file."""
@@ -174,6 +173,8 @@ class TiffBackend(ArrayBackend):
                     compression=compression,
                 )
                 thread.start()
+            else:  # (no writer thread writes the companion file's initial OME-XML)
+                meta_mirror.mark_dirty()
             self._position_managers[meta_mirror.pos_idx] = PositionManager(
                 file_path=fname,
                 thread=thread,
@@ -338,6 +339,7 @@ class TiffBackend(ArrayBackend):
                 # unbounded dims and incomplete bounded dims) in each full OME model
                 index_dims = self._storage_dims[:-2] if self._storage_dims else ()
                 inner_prod = math.prod(d.count or 1 for d in index_dims[1:])
+                outer = f"size_{index_dims[0].name.lower()}" if index_dims else ""
                 frames_written = {
                     p: m.thread.frames_written for p, m in managers.items() if m.thread
                 }
@@ -346,15 +348,20 @@ class TiffBackend(ArrayBackend):
                     mirror = managers[target].metadata_mirror
                     for p, n_frames in frames_written.items():
                         pixels = mirror.model.images[p].pixels
-                        pixels.tiff_data_blocks[0].plane_count = n_frames
-                        if index_dims:  # round up to keep a partial outer index
-                            size = max(1, -(-n_frames // inner_prod))
-                            setattr(pixels, f"size_{index_dims[0].name.lower()}", size)
-                    mirror.mark_dirty()
-                    full_mirrors[managers[target].file_path] = mirror
+                        block = pixels.tiff_data_blocks[0]
+                        size = max(1, -(-n_frames // inner_prod))  # (partial counts)
+                        if block.plane_count != n_frames or (
+                            outer and getattr(pixels, outer) != size
+                        ):
+                            block.plane_count = n_frames
+                            if outer:
+                                setattr(pixels, outer, size)
+                            mirror.mark_dirty()
+                    if mirror.dirty:
+                        full_mirrors[managers[target].file_path] = mirror
 
                 # no metadata update has made the full OME models differ yet, so
-                # serialize them once (stubs are unchanged, and not written again)
+                # serialize them once (unchanged models are not written again)
                 xmls = tiff_xmls(full_mirrors)
                 for manager in managers.values():
                     # (skips the files of stalled writers)

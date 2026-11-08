@@ -97,6 +97,11 @@ class OmeXMLMirror:
         self._dirty = True
 
     @property
+    def dirty(self) -> bool:
+        """Whether the OME-XML has changed since it was last written."""
+        return self._dirty
+
+    @property
     def is_tiff(self) -> bool:
         """Whether the OME-XML is stored in a TIFF file."""
         return self.path.lower().endswith((".tiff", ".tif"))

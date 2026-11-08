@@ -1,7 +1,8 @@
 # Notes on the #139 rework (TEMPORARY: delete before merging)
 
 Branch `fix/tiff-multifile-metadata-rework` on tlambert03/ome-writers: Aaron's
-#139 commit (`8bfce4c`), the rework on top, and a merge of main after #141.
+#139 commit (`8bfce4c`), the rework on top, and merges of main (latest after
+#143, which this branch conflicted with only in test imports).
 Nothing has been pushed to Aaron's branch, and #139 on GitHub is untouched.
 
 - Everything vs. current main: `git diff upstream/main HEAD -- src tests`
@@ -92,6 +93,14 @@ In `src/ome_writers/_backends/_tifffile.py` unless noted:
    root UUID alone: true from `prepare` until `finalize`, NOT after a user
    `update_metadata`, so post-finalize writes still serialize each model.
 
+9. `finalize` only marks a full model changed (and so rewrites it) when a frame
+   count or size actually differs, or something else already changed it (frame
+   metadata, global metadata). Complete acquisitions no longer rewrite the
+   OME-XML at close; main always did for bounded ones. The companion mirror
+   starts dirty in `prepare`, since no writer thread writes its initial XML.
+   Removed the dead `PositionManager._metadata_dirty`. `OmeXMLMirror` gained a
+   read-only `dirty` property.
+
 Tests (`tests/test_tiff_metadata.py`):
 
 - `_get_full_ome` in redundant mode reads *every* TIFF with frames, asserts
@@ -107,6 +116,22 @@ Tests (`tests/test_tiff_metadata.py`):
   monkeypatch `tifffile.TiffWriter.write` and `_tifffile.WRITER_STALL_TIMEOUT`.
   Both fail against the broken variant they target.
 - `test_initial_tiff_xml` renamed `test_tiff_xmls`.
+
+## Benchmarks on main (#144), local, min of rounds (what CodSpeed should show)
+
+| benchmark | main | this branch |
+|---|---|---|
+| acquisition[16_positions-tifffile] | 128.8 ms | 56.9 ms |
+| acquisition[unbounded_t-tifffile] | 10.4 ms | 10.6 ms |
+| append[3d_chunking-tifffile] | 6.1 ms | 4.6 ms |
+| append[large_2d-tifffile] | 1.0 ms | 0.9 ms |
+| append[t5_c2_z3_xy256-tifffile] | 2.2 ms | 0.9 ms |
+| append[time_lapse_small_2d-tifffile] | 5.3 ms | 3.9 ms |
+
+(Before item 9, `large_2d-tifffile` was 2.45x slower than main: it rewrote
+unchanged OME-XML at close.) On CI, 16_positions-tifffile is ~1.3 s on main,
+10x slower than locally, mostly waiting rather than CPU; unexplained (GIL
+contention between writer threads and the main thread is the guess).
 
 ## Performance (96 positions x 10 timepoints, 32x32 px frames, close time)
 
@@ -162,10 +187,11 @@ Create time in redundant mode (~1.1 s) is the per-file deep copy in
   (Bio-Formats needs the `.companion.ome` suffix). Added `tests/_bf_reader.py`.
 - #141 (merged): redundant mode serializes the full OME-XML once at `prepare`
   (384 positions: create_stream 44 s -> 5 s). Item 8 reuses it at close.
-- #143 (open, branch `fix/binaryonly-metadata-file-name`): BinaryOnly stubs
-  stored the absolute path in MetadataFile, so Bio-Formats never followed a
-  stub (verified: a bare filename fixes it). Conflicts with this branch only
-  in the test file's import lines; resolve whichever lands second.
+- #143 (merged): BinaryOnly stubs now name their metadata file instead of
+  its absolute path, so Bio-Formats follows them. Its Bio-Formats test opens
+  every file of a dataset, stubs included.
+- #144 (merged): benchmarks write to /dev/shm (disk made rounds bimodal), and
+  `test_bench_acquisition` times whole acquisitions with frame metadata.
 
 ## Follow-ups
 
