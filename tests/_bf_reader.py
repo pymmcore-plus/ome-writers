@@ -84,3 +84,26 @@ def read_core_meta_with_bioformats(path: str) -> CoreMeta:
 
     reader.close()
     return meta
+
+
+def read_series_with_bioformats(path: str) -> tuple[str, list[np.ndarray]]:
+    """Return the reader class name and the planes of every series in `path`."""
+    ImageReader = jimport("loci.formats.ImageReader")
+    reader = ImageReader()
+    reader.setMetadataStore(ome_xml_service().createOMEXMLMetadata())
+    reader.setId(path)
+
+    series = []
+    for s in range(reader.getSeriesCount()):
+        reader.setSeries(s)
+        dtype = pixtype2dtype(reader.getPixelType(), reader.isLittleEndian())
+        shape = (reader.getSizeY(), reader.getSizeX())
+        planes = [
+            np.frombuffer(bytes(reader.openBytes(i)), dtype).reshape(shape)
+            for i in range(reader.getImageCount())
+        ]
+        series.append(np.stack(planes))
+
+    reader_class = reader.getReader().getClass().getSimpleName()
+    reader.close()
+    return reader_class, series
