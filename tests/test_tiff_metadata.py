@@ -27,7 +27,11 @@ except ImportError:
 
 from pathlib import Path
 
-from ome_writers._backends._ome_xml import MultiFileMetadata, prepare_metadata
+from ome_writers._backends._ome_xml import (
+    MultiFileMetadata,
+    initial_tiff_xml,
+    prepare_metadata,
+)
 
 
 def test_update_metadata_single_file(tmp_path: Path, tiff_backend: str) -> None:
@@ -346,6 +350,29 @@ def test_prepare_meta(tmp_path: Path, multi_file_metadata: str) -> None:
     output_path = Path(settings.output_path)
     companion_path = str(output_path / f"{output_path.name}.companion.ome")
     assert (companion_path in meta) == (metadata_mode == MultiFileMetadata.COMPANION)
+
+
+@pytest.mark.parametrize("positions", [["Pos0"], ["Pos0", "Pos1", "Pos2"]])
+@pytest.mark.parametrize("mode", ["redundant", "master-tiff", "companion-file"])
+def test_initial_tiff_xml(tmp_path: Path, mode: str, positions: list[str]) -> None:
+    """Serializing once and swapping the root UUID matches serializing each model."""
+    settings = AcquisitionSettings(
+        root_path=tmp_path / "test.ome.tiff",
+        dimensions=[
+            Dimension(name="p", type="position", coords=positions),
+            Dimension(name="t", count=2, type="time"),
+            Dimension(name="y", count=32, type="space"),
+            Dimension(name="x", count=32, type="space"),
+        ],
+        dtype="uint16",
+        format={"name": "ome-tiff", "multi_file_metadata": mode},
+    )
+    mirrors = prepare_metadata(settings)
+    assert initial_tiff_xml(mirrors) == {
+        path: mirror.model.to_xml()
+        for path, mirror in mirrors.items()
+        if mirror.is_tiff
+    }
 
 
 def test_channel_metadata_in_tiff(tmp_path: Path, tiff_backend: str) -> None:
