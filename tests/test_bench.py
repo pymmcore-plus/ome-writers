@@ -4,11 +4,20 @@ To run this file, explicitly run:
 pytest tests/test_bench.py
 
 or use `pytest --benchmark-only` or `--codspeed` with pytest-codspeed.
+
+These measure ome-writers and how it drives each backend, not the disk, so output
+goes to RAM (`/dev/shm`) where available. `tools/benchmark.py` measures real-disk
+throughput.
 """
 
 from __future__ import annotations
 
+import os
+import shutil
 import sys
+import tempfile
+from itertools import count
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -18,7 +27,7 @@ from ome_writers import AcquisitionSettings, Dimension, create_stream
 from tests import conftest
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Iterator
 
     from pytest_benchmark.fixture import BenchmarkFixture
 
@@ -91,6 +100,49 @@ BENCHMARK_CASES = [
     ),
 ]
 
+# Whole acquisitions with metadata on every frame (as pymmcore-plus sends it),
+# where the bookkeeping of ome-writers matters as much as the pixels written:
+# (dimensions, number of frames appended)
+ACQUISITION_CASES = [
+    pytest.param(
+        [
+            D(name="t", count=4, type="time"),
+            D(name="p", type="position", coords=[f"P{i}" for i in range(16)]),
+            D(name="y", count=64, type="space"),
+            D(name="x", count=64, type="space"),
+        ],
+        64,
+        id="16_positions",
+    ),
+    pytest.param(
+        [
+            D(name="t", count=None, type="time"),
+            D(name="c", count=2, type="channel"),
+            D(name="y", count=128, type="space"),
+            D(name="x", count=128, type="space"),
+        ],
+        40,
+        id="unbounded_t",
+    ),
+]
+
+
+@pytest.fixture
+def out_dir(tmp_path: Path) -> Iterator[Path]:
+    """Directory for benchmark output, in RAM where possible.
+
+    On a real disk, fsync and writeback make the walltimes bimodal from run to run.
+    """
+    shm = Path("/dev/shm")
+    if not (shm.is_dir() and os.access(shm, os.W_OK)):
+        yield tmp_path
+        return
+    path = Path(tempfile.mkdtemp(prefix="ome-writers-bench-", dir=shm))
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
+
 
 def _name_case(case: AcquisitionSettings) -> str:
     """Generate a readable name for a benchmark case."""
@@ -125,7 +177,7 @@ def test_bench_append(
     backend: str,
     case: AcquisitionSettings,
     benchmark: BenchmarkFixture,
-    tmp_path: Path,
+    out_dir: Path,
 ) -> None:
     """Benchmark append() loop performance with pre-generated data."""
     if len(case.array_dimensions) < 3 and backend == "acquire-zarr":
@@ -136,7 +188,7 @@ def test_bench_append(
     settings = AcquisitionSettings.model_validate(
         {
             **case.model_dump(),
-            "root_path": str(tmp_path / "output"),
+            "root_path": str(out_dir / "output"),
             "format": backend,
             "overwrite": True,
         }
@@ -156,3 +208,38 @@ def test_bench_append(
         stream.close()  # flush async writes
 
     benchmark.pedantic(append_all_frames, setup=setup, rounds=15)
+
+
+@pytest.mark.parametrize("backend", conftest.AVAILABLE_BACKENDS)
+@pytest.mark.parametrize(("dims", "n_frames"), ACQUISITION_CASES)
+def test_bench_acquisition(
+    backend: str,
+    dims: list[Dimension],
+    n_frames: int,
+    benchmark: BenchmarkFixture,
+    out_dir: Path,
+) -> None:
+    """Benchmark a whole acquisition: create_stream, append with metadata, close."""
+    shape = (dims[-2].count or 1, dims[-1].count or 1)
+    frame = np.random.randint(0, np.iinfo("uint16").max, shape, dtype="uint16")
+    metadata = [
+        {"delta_t": i * 0.1, "exposure_time": 10.0, "temperature": 37.0}
+        for i in range(n_frames)
+    ]
+    rounds = count()
+
+    def setup() -> tuple[tuple, dict]:
+        """Settings writing to a fresh path for each round (not timed)."""
+        root = out_dir / f"round{next(rounds)}" / "output"
+        settings = AcquisitionSettings(
+            root_path=str(root), dimensions=dims, dtype="uint16", format=backend
+        )
+        return (settings,), {}
+
+    def acquire(settings: AcquisitionSettings) -> None:
+        with create_stream(settings) as stream:
+            for meta in metadata:
+                stream.append(frame, frame_metadata=meta)
+
+    # (rounds vary by < 3% in RAM, and the slowest round takes > 1 s on CI)
+    benchmark.pedantic(acquire, setup=setup, rounds=5)
