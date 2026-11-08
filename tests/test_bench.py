@@ -241,4 +241,5 @@ def test_bench_acquisition(
             for meta in metadata:
                 stream.append(frame, frame_metadata=meta)
 
-    benchmark.pedantic(acquire, setup=setup, rounds=15)
+    # (rounds vary by < 3% in RAM, and the slowest round takes > 1 s on CI)
+    benchmark.pedantic(acquire, setup=setup, rounds=5)
