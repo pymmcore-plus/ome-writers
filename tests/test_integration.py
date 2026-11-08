@@ -544,7 +544,7 @@ def _assert_bioformats_reads_ome_tiff(case: AcquisitionSettings) -> None:
 
 @pytest.mark.parametrize("mode", ["redundant", "master-tiff", "companion-file"])
 def test_bioformats_reads_multi_file_ome_tiff(tmp_path: Path, mode: str) -> None:
-    """Bio-Formats reads every position from the file holding the full OME-XML."""
+    """Bio-Formats reads every position from any file of a multi-file dataset."""
     bf_reader = pytest.importorskip("tests._bf_reader")
 
     settings = AcquisitionSettings(
@@ -563,18 +563,13 @@ def test_bioformats_reads_multi_file_ome_tiff(tmp_path: Path, mode: str) -> None
         for i in range(8):
             stream.append(np.full((8, 8), i, dtype="uint16"))
 
-    output_dir = Path(settings.output_path)
-    if mode == "companion-file":
-        files = output_dir.iterdir()
-        (metadata_file,) = (f for f in files if not f.name.endswith(".ome.tiff"))
-    else:
-        metadata_file = output_dir / f"{output_dir.name}_p000.ome.tiff"
-
-    reader_class, series = bf_reader.read_series_with_bioformats(str(metadata_file))
-    assert reader_class == "OMETiffReader"
-    assert len(series) == 2
-    for p, planes in enumerate(series):
-        assert [plane.max() for plane in planes] == [4 * p + i for i in range(4)]
+    # BinaryOnly stubs point to the file holding the full OME-XML
+    for path in sorted(Path(settings.output_path).iterdir()):
+        reader_class, series = bf_reader.read_series_with_bioformats(str(path))
+        assert reader_class == "OMETiffReader", path.name
+        assert len(series) == 2
+        for p, planes in enumerate(series):
+            assert [plane.max() for plane in planes] == [4 * p + i for i in range(4)]
 
 
 def _assert_valid_ome_zarr(case: AcquisitionSettings) -> None:
