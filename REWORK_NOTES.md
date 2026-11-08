@@ -8,11 +8,12 @@ Nothing has been pushed to Aaron's branch, and #139 on GitHub is untouched.
 - Rework only, vs. Aaron's commit merged onto main:
   `git diff $(git merge-tree --write-tree upstream/main 8bfce4c) HEAD -- src tests`
 
-Plan (decided 2026-11-08): close #139 with a thank-you comment, and open a new
+Proposed, NOT decided yet: close #139 with a thank-you comment, and open a new
 PR from this branch with Aaron's commit kept in history, so the squash merge
 credits him as co-author (check the `Co-authored-by:` line when merging).
-Mention "based on #139 by aaronkanzer" in the body. Talley also leans toward
-splitting the writer-timeout change (item 6 below) into its own PR.
+Mention "based on #139 by aaronkanzer" in the body. Claude also suggested
+splitting the writer-timeout change (item 6 below) into its own PR; Talley
+has not weighed in on that.
 
 ## The original bug (#139)
 
@@ -138,8 +139,9 @@ Create time in redundant mode (~1.1 s) is the per-file deep copy in
 
 ## Open decisions / not done
 
-- Empty positions (decided direction 2026-11-08: delete, in a separate PR
-  after this one). Measured on this branch's output: keeping the 0-IFD file,
+- Empty positions: Talley leans toward deleting the file (not final; would be
+  a separate PR after this one). Measured on this branch's output: keeping the
+  0-IFD file,
   tifffile raises KeyError opening p000; deleting the file *alone* makes
   Bio-Formats refuse the whole dataset ("Missing file ... associated with
   UUID"); a placeholder frame makes tifffile show a fake all-zero image.
