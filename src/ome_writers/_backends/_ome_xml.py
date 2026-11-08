@@ -227,7 +227,7 @@ def prepare_metadata(settings: AcquisitionSettings) -> dict[str, OmeXMLMirror]:
                 model=ome_types.OME(
                     uuid=info.uuid,
                     binary_only=BinaryOnly(
-                        metadata_file=master_info.path,
+                        metadata_file=Path(master_info.path).name,
                         uuid=master_info.uuid,
                     ),
                 ),
@@ -258,7 +258,7 @@ def prepare_metadata(settings: AcquisitionSettings) -> dict[str, OmeXMLMirror]:
                 model=ome_types.OME(
                     uuid=info.uuid,
                     binary_only=BinaryOnly(
-                        metadata_file=companion_path,
+                        metadata_file=companion_filename,
                         uuid=companion_uuid,
                     ),
                 ),

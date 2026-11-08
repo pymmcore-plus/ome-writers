@@ -6,7 +6,6 @@ import json
 import threading
 import time
 from itertools import count
-from pathlib import Path as PathlibPath
 from typing import Any
 
 import numpy as np
@@ -1019,7 +1018,7 @@ def test_file_structure_by_mode(tmp_path: Path, mode: MultiFileMetadata) -> None
                 ome = from_tiff(str(tiff_file))
                 assert ome.binary_only is not None
                 assert ome.binary_only.uuid == master_ome.uuid
-                assert PathlibPath(ome.binary_only.metadata_file).name == master.name
+                assert ome.binary_only.metadata_file == master.name
 
     elif mode == MultiFileMetadata.COMPANION:
         # Companion has full metadata, all TIFFs have BinaryOnly
@@ -1038,10 +1037,7 @@ def test_file_structure_by_mode(tmp_path: Path, mode: MultiFileMetadata) -> None
             ome = from_tiff(str(tiff_file))
             assert ome.binary_only is not None
             assert ome.binary_only.uuid == companion_ome.uuid
-            assert (
-                PathlibPath(ome.binary_only.metadata_file).name
-                == companion_files[0].name
-            )
+            assert ome.binary_only.metadata_file == companion_files[0].name
 
 
 @pytest.mark.parametrize("mode", MULTI_FILE_MODES)
