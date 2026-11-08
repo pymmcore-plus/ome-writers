@@ -42,12 +42,10 @@ jobs:
         with:
           filters: |
             bench:
-              - 'src/ome_writers/_stream.py'
-              - 'src/ome_writers/_schema.py'
-              - 'src/ome_writers/_router.py'
-              - 'src/ome_writers/_backends/**'
+              - 'src/ome_writers/**'
               - 'tests/test_bench.py'
               - 'pyproject.toml'
+              - '.github/workflows/ci.yml'
 
   benchmarks:
     needs: changes
@@ -65,6 +63,10 @@ jobs:
 
       - name: Install the project
         run: pip install . --group test-codspeed
+
+      # (benchmark jumps can come from a new release of a backend)
+      - name: Show installed versions
+        run: pip freeze
 
       - name: Run walltime benchmarks
         uses: CodSpeedHQ/action@v5
