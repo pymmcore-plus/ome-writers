@@ -33,8 +33,8 @@ from pathlib import Path
 from ome_writers._backends import _tifffile
 from ome_writers._backends._ome_xml import (
     MultiFileMetadata,
-    initial_tiff_xml,
     prepare_metadata,
+    tiff_xmls,
 )
 
 
@@ -358,7 +358,7 @@ def test_prepare_meta(tmp_path: Path, multi_file_metadata: str) -> None:
 
 @pytest.mark.parametrize("positions", [["Pos0"], ["Pos0", "Pos1", "Pos2"]])
 @pytest.mark.parametrize("mode", ["redundant", "master-tiff", "companion-file"])
-def test_initial_tiff_xml(tmp_path: Path, mode: str, positions: list[str]) -> None:
+def test_tiff_xmls(tmp_path: Path, mode: str, positions: list[str]) -> None:
     """Serializing once and swapping the root UUID matches serializing each model."""
     settings = AcquisitionSettings(
         root_path=tmp_path / "test.ome.tiff",
@@ -372,7 +372,7 @@ def test_initial_tiff_xml(tmp_path: Path, mode: str, positions: list[str]) -> No
         format={"name": "ome-tiff", "multi_file_metadata": mode},
     )
     mirrors = prepare_metadata(settings)
-    assert initial_tiff_xml(mirrors) == {
+    assert tiff_xmls(mirrors) == {
         path: mirror.model.to_xml()
         for path, mirror in mirrors.items()
         if mirror.is_tiff
@@ -585,16 +585,26 @@ def _get_full_ome(settings: AcquisitionSettings) -> ome_types.OME:
         master = next(f for f in output_path.glob("*_p000.ome.tiff"))
         return from_tiff(str(master))
     else:  # metadata_mode == MultiFileMetadata.REDUNDANT
-        # Every TIFF file with frames has the same full metadata (but its own UUID)
-        first, *others = [
-            ome_types.from_xml(xml)
+        # Every TIFF file with frames has the same full metadata, but its own UUID
+        docs = {
+            f.name: ome_types.from_xml(xml)
             for f in sorted(output_path.glob("*.ome.tiff"))
             if (xml := _read_description(f))
-        ]
+        }
+        first, *others = docs.values()
         for other in others:
             assert other.model_dump(exclude={"uuid"}) == first.model_dump(
                 exclude={"uuid"}
             )
+        file_uuids = {
+            td.uuid.file_name: td.uuid.value
+            for img in first.images
+            for td in img.pixels.tiff_data_blocks
+            if td.uuid
+        }
+        assert {name: doc.uuid for name, doc in docs.items()} == {
+            name: file_uuids[name] for name in docs
+        }
         return first
 
 

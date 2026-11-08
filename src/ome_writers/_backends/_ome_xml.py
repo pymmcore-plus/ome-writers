@@ -101,12 +101,12 @@ class OmeXMLMirror:
         """Whether the OME-XML is stored in a TIFF file."""
         return self.path.lower().endswith((".tiff", ".tif"))
 
-    def flush(self, *, force: bool = False) -> None:
-        """Mark the OME-XML as clean (not modified)."""
+    def flush(self, *, force: bool = False, xml: str | None = None) -> None:
+        """Write the OME-XML if modified (or forced), given `xml` if pre-serialized."""
         if not self._dirty and not force:  # pragma: no cover
             return
 
-        xml_bytes = self.model.to_xml().encode("utf-8")
+        xml_bytes = (xml or self.model.to_xml()).encode("utf-8")
         if self.is_tiff:
             try:
                 tifffile.tiffcomment(self.path, comment=xml_bytes)
@@ -267,11 +267,12 @@ def prepare_metadata(settings: AcquisitionSettings) -> dict[str, OmeXMLMirror]:
     return mirrors
 
 
-def initial_tiff_xml(mirrors: dict[str, OmeXMLMirror]) -> dict[str, str]:
-    """Return the OME-XML of each TIFF mirror freshly created by `prepare_metadata`.
+def tiff_xmls(mirrors: dict[str, OmeXMLMirror]) -> dict[str, str]:
+    """Return the OME-XML of each TIFF mirror.
 
-    The full OME models differ only by their root UUID (one per file in "redundant"
-    mode), and serializing one is O(n_positions), so only the first is serialized.
+    The full OME models must differ only by their root UUID (one per file in
+    "redundant" mode), as they do from `prepare_metadata` until the stream is
+    finalized. Serializing one is O(n_positions + n_planes), so only the first is.
     """
     xmls: dict[str, str] = {}
     full_xml = full_uuid = ""

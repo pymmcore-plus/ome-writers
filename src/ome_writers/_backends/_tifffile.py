@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Literal, cast
 import numpy as np
 
 from ome_writers._backends._backend import ArrayBackend
-from ome_writers._backends._ome_xml import initial_tiff_xml, prepare_metadata
+from ome_writers._backends._ome_xml import prepare_metadata, tiff_xmls
 from ome_writers._backends._tiff_array import FinalizedTiffArray, LiveTiffArray
 
 if TYPE_CHECKING:
@@ -77,12 +77,12 @@ class PositionManager:
         if self.queue is not None:
             self.queue.put(None)
 
-    def flush(self, force: bool = False) -> None:
+    def flush(self, force: bool = False, xml: str | None = None) -> None:
         """Write the OME-XML to file if it has been modified (or if forced)."""
         # A TIFF file must be closed, with a frame (IFD) to hold the OME-XML
         thread = self.thread
         if thread is None or (thread.frames_written and not thread.is_alive()):
-            self.metadata_mirror.flush(force=force)
+            self.metadata_mirror.flush(force=force, xml=xml)
 
 
 class TiffBackend(ArrayBackend):
@@ -152,7 +152,7 @@ class TiffBackend(ArrayBackend):
         # Prepare OME-XML metadata mirrors
         # mapping of filepath -> OmeXMLMirror
         metas = prepare_metadata(settings)
-        xmls = initial_tiff_xml(metas)
+        xmls = tiff_xmls(metas)
 
         # Create writer thread for each position
         for fname, meta_mirror in metas.items():
@@ -341,6 +341,7 @@ class TiffBackend(ArrayBackend):
                 frames_written = {
                     p: m.thread.frames_written for p, m in managers.items() if m.thread
                 }
+                full_mirrors: dict[str, OmeXMLMirror] = {}
                 for target in self._global_target_pos_idxs():
                     mirror = managers[target].metadata_mirror
                     for p, n_frames in frames_written.items():
@@ -350,9 +351,14 @@ class TiffBackend(ArrayBackend):
                             size = max(1, -(-n_frames // inner_prod))
                             setattr(pixels, f"size_{index_dims[0].name.lower()}", size)
                     mirror.mark_dirty()
+                    full_mirrors[managers[target].file_path] = mirror
 
+                # no metadata update has made the full OME models differ yet, so
+                # serialize them once (stubs are unchanged, and not written again)
+                xmls = tiff_xmls(full_mirrors)
                 for manager in managers.values():
-                    manager.flush()  # (skips the files of stalled writers)
+                    # (skips the files of stalled writers)
+                    manager.flush(xml=xmls.get(manager.file_path))
             finally:
                 # writers are closed, so later metadata updates can flush directly
                 self._finalized = True
