@@ -642,9 +642,9 @@ def test_basic_multiposition(tmp_path: Path, mode: MultiFileMetadata) -> None:
     ("t_count", "n_frames", "size_t", "plane_count"),
     [
         (None, 12, [3, 3], [6, 6]),  # 3 complete timepoints
-        (None, 7, [2, 2], [4, 3]),  # stopped partway through a timepoint
-        (None, 1, [1, 1], [1, 0]),  # stopped before Pos1 got any frame
-        (5, 7, [2, 2], [4, 3]),  # bounded, but stopped early
+        (None, 7, [2, 2], [4, 4]),  # stopped mid-timepoint (Pos1 padded to 4)
+        (None, 1, [1, 1], [2, 0]),  # stopped before Pos1 got any frame
+        (5, 7, [2, 2], [4, 4]),  # bounded, but stopped early
     ],
 )
 def test_multiposition_frames_written(
@@ -701,7 +701,7 @@ def test_early_stop_with_permuted_storage_order(tmp_path: Path) -> None:
 
     pixels = from_tiff(settings.output_path).images[0].pixels
     assert (pixels.size_t, pixels.size_z) == (1, 3)
-    assert pixels.tiff_data_blocks[0].plane_count == 2
+    assert pixels.tiff_data_blocks[0].plane_count == 3  # (t0, z2) zero-padded
     assert [(p.the_t, p.the_z) for p in pixels.planes] == [(0, 0), (0, 1)]
 
 

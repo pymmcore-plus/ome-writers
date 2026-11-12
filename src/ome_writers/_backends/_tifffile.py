@@ -59,6 +59,7 @@ class PositionManager:
     queue: Queue[np.ndarray | None]
     metadata_mirror: OmeXMLMirror
     writer: tifffile.TiffWriter | None
+    n_queued: int = 0  # frames (incl. placeholders) sent to the writer thread
 
     def __post_init__(self) -> None:
         self._lock = threading.Lock()
@@ -212,6 +213,7 @@ class TiffBackend(ArrayBackend):
 
         manager = self._position_managers[position_index]
         manager.queue.put(frame)
+        manager.n_queued += 1
 
         # Accumulate frame metadata with storage index
         if frame_metadata is not None:
@@ -238,6 +240,7 @@ class TiffBackend(ArrayBackend):
             manager = self._position_managers[pos_idx]
             # Send to WriterThread queue (same path as regular writes)
             manager.queue.put(placeholder)
+            manager.n_queued += 1
 
     def _append_frame_metadata(
         self,
@@ -336,6 +339,16 @@ class TiffBackend(ArrayBackend):
             if self._finalized or not managers:
                 return
 
+            # Pad a partial last outer index (e.g. timepoint) with zero frames:
+            # Bio-Formats can't read a single-file OME-TIFF that ends mid-timepoint
+            index_dims = self._acq_index_dims
+            inner_prod = math.prod(d.count or 1 for d in index_dims[1:])
+            placeholder = np.zeros(self._frame_shape, dtype=self._dtype)
+            for manager in managers.values():
+                if manager.thread is not None:
+                    for _ in range(-manager.n_queued % inner_prod):
+                        manager.queue.put(placeholder)
+
             # Signal all threads to stop (parallel shutdown begins), then wait for
             # every one: each full OME model describes the frames of all positions.
             for manager in managers.values():
@@ -347,8 +360,6 @@ class TiffBackend(ArrayBackend):
             try:
                 # Record the frames actually written to each position (handles both
                 # unbounded dims and incomplete bounded dims) in each full OME model
-                index_dims = self._acq_index_dims
-                inner_prod = math.prod(d.count or 1 for d in index_dims[1:])
                 outer = f"size_{index_dims[0].name.lower()}" if index_dims else ""
                 frames_written = {
                     p: m.thread.frames_written for p, m in managers.items() if m.thread
