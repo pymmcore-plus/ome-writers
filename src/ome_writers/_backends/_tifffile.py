@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import threading
+import time
 import warnings
 import weakref
 from contextlib import suppress
@@ -82,6 +83,12 @@ class PositionManager:
         thread = self.thread
         if thread is None or (thread.frames_written and not thread.is_alive()):
             self.metadata_mirror.flush(force=force, xml=xml)
+        elif force:
+            warnings.warn(
+                f"OME-XML not written to {self.file_path}: the file has no frames, "
+                "or its writer thread is still running.",
+                stacklevel=3,
+            )
 
 
 class TiffBackend(ArrayBackend):
@@ -134,6 +141,8 @@ class TiffBackend(ArrayBackend):
         self._storage_dims = storage_dims = settings.array_storage_dimensions
         # Extract index keys, excluding Y and X, example: ['t', 'c', 'z']
         self._index_keys = [d.name for d in storage_dims[:-2]]
+        # frames (IFDs) are written sequentially, in acquisition order
+        self._acq_index_dims = settings.index_dimensions
         self._dtype = settings.dtype
         self._frame_shape = tuple(d.count or 1 for d in self._storage_dims[-2:])
 
@@ -182,6 +191,7 @@ class TiffBackend(ArrayBackend):
                 metadata_mirror=meta_mirror,
                 writer=writer,
             )
+        self._full_pos_idxs = self._global_target_pos_idxs()
 
     def write(
         self,
@@ -255,7 +265,7 @@ class TiffBackend(ArrayBackend):
         plane = ome.Plane(**plane_kwargs)
 
         # Every mirror holding the full OME model describes this position's Image
-        for pos_idx in self._global_target_pos_idxs():
+        for pos_idx in self._full_pos_idxs:
             mirror = self._position_managers[pos_idx].metadata_mirror
             model = mirror.model
             if annotation is not None:
@@ -337,7 +347,7 @@ class TiffBackend(ArrayBackend):
             try:
                 # Record the frames actually written to each position (handles both
                 # unbounded dims and incomplete bounded dims) in each full OME model
-                index_dims = self._storage_dims[:-2] if self._storage_dims else ()
+                index_dims = self._acq_index_dims
                 inner_prod = math.prod(d.count or 1 for d in index_dims[1:])
                 outer = f"size_{index_dims[0].name.lower()}" if index_dims else ""
                 frames_written = {
@@ -624,19 +634,20 @@ class WriterThread(threading.Thread):
 def _join_writers(threads: Mapping[str, WriterThread]) -> list[str]:
     """Wait for writer threads to finish, and return the keys of stalled ones.
 
-    A writer is waited on for as long as it keeps writing frames (however long its
-    queue takes to drain), but one that writes none for `WRITER_STALL_TIMEOUT`
-    seconds is given up on (e.g. stuck on an unresponsive network drive).
+    Writers are waited on for as long as any of them keeps writing frames (however
+    long the queues take to drain), but once none has written a frame for
+    `WRITER_STALL_TIMEOUT` seconds, all remaining writers are given up on together
+    (e.g. stuck on an unresponsive network drive).
     """
-    stalled = []
-    for key, thread in threads.items():
-        n_frames = -1
-        while thread.is_alive() and n_frames != thread.frames_written:
-            n_frames = thread.frames_written
-            thread.join(WRITER_STALL_TIMEOUT)
-        if thread.is_alive():
-            stalled.append(key)
-    return stalled
+    total, deadline = -1, 0.0
+    for thread in threads.values():
+        while thread.is_alive():
+            if (n := sum(t.frames_written for t in threads.values())) != total:
+                total, deadline = n, time.monotonic() + WRITER_STALL_TIMEOUT
+            if (remaining := deadline - time.monotonic()) <= 0:
+                break
+            thread.join(remaining)
+    return [key for key, thread in threads.items() if thread.is_alive()]
 
 
 _thread_counter = count()

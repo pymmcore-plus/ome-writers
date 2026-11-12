@@ -680,6 +680,31 @@ def test_multiposition_frames_written(
     )
 
 
+def test_early_stop_with_permuted_storage_order(tmp_path: Path) -> None:
+    """TIFF pages are written in acquisition order, whatever the storage order."""
+    settings = AcquisitionSettings(
+        root_path=tmp_path / "test.ome.tiff",
+        dimensions=[
+            Dimension(name="t", count=2, type="time"),
+            Dimension(name="z", count=3, type="space"),
+            Dimension(name="y", count=16, type="space"),
+            Dimension(name="x", count=16, type="space"),
+        ],
+        storage_order=["z", "t", "y", "x"],
+        dtype="uint16",
+        overwrite=True,
+    )
+    with create_stream(settings) as stream:
+        for i in range(2):  # stop after (t0, z0), (t0, z1)
+            frame = np.zeros((16, 16), dtype="uint16")
+            stream.append(frame, frame_metadata={"delta_t": float(i)})
+
+    pixels = from_tiff(settings.output_path).images[0].pixels
+    assert (pixels.size_t, pixels.size_z) == (1, 3)
+    assert pixels.tiff_data_blocks[0].plane_count == 2
+    assert [(p.the_t, p.the_z) for p in pixels.planes] == [(0, 0), (0, 1)]
+
+
 @pytest.mark.parametrize(
     ("frame_metadata", "rewritten"),
     [(None, []), ({"exposure_time": 10.0}, ["test_p000", "test_p001"])],
