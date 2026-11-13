@@ -37,7 +37,6 @@ if TYPE_CHECKING:
     from typing import Literal, Protocol
 
     from typing_extensions import Self
-    from yaozarrs.write.v05._write import CompressionName
 
     from ome_writers._backends._backend import ArrayLike
     from ome_writers._router import FrameRouter
@@ -46,6 +45,7 @@ if TYPE_CHECKING:
         Dimension,
         Plate,
         Position,
+        ZarrCompression,
     )
 
     class YaozArray(Protocol):
@@ -137,7 +137,7 @@ class YaozarrsBackend(ArrayBackend, Generic[_AT]):
             for pos in positions
         ]
 
-        compression = cast("CompressionName", settings.compression or "none")
+        compression = cast("ZarrCompression", settings.compression or "none")
 
         # Get writer from hook (subclasses can override)
         writer = self._get_yaozarrs_writer()
