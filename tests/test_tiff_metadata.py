@@ -1393,6 +1393,29 @@ def test_tiff_global_metadata_post_close_multi_file_modes(
         assert len(c_anns) == 1 and _decode_map(c_anns[0]) == summary
 
 
+def test_tiff_global_metadata_post_close_empty_position(tmp_path: Path) -> None:
+    """A post-close write skips (and warns about) a file that never got a frame."""
+    d = tmp_path / "out"
+    settings = AcquisitionSettings(
+        root_path=str(d),
+        dimensions=[
+            Dimension(name="t", count=None, type="time"),
+            Dimension(name="p", type="position", coords=["A", "B"]),
+            Dimension(name="y", count=8, type="space"),
+            Dimension(name="x", count=8, type="space"),
+        ],
+        dtype="uint16",
+        format={"name": "ome-tiff", "multi_file_metadata": "redundant"},
+    )
+    with create_stream(settings) as stream:
+        stream.append(np.zeros((8, 8), dtype=np.uint16))  # B never gets a frame
+
+    with pytest.warns(UserWarning, match=r"OME-XML not written to .*out_p001"):
+        stream.set_global_metadata("ns", {"v": 1})
+    anns = _anns_by_ns(from_tiff(d / "out_p000.ome.tiff"), "ns")
+    assert len(anns) == 1 and _decode_map(anns[0]) == {"v": 1}
+
+
 def test_tiff_global_metadata_pre_and_post_close(
     tmp_path: Path, tiff_backend: str
 ) -> None:
