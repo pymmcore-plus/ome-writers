@@ -46,7 +46,8 @@ PLANE_KEYS = {
     "position_z",
 }
 
-# Seconds a writer thread may go without writing a frame before `finalize` gives up
+# Minimum seconds without any writer writing a frame before `finalize` gives up
+# (detection can take up to ~2x this; see `_join_writers`)
 WRITER_STALL_TIMEOUT = 60.0
 
 
@@ -662,9 +663,10 @@ def _join_writers(threads: Mapping[str, WriterThread]) -> list[str]:
     """Wait for writer threads to finish, and return the keys of stalled ones.
 
     Writers are waited on for as long as any of them keeps writing frames (however
-    long the queues take to drain), but once none has written a frame for
+    long the queues take to drain), but once none has written a frame for at least
     `WRITER_STALL_TIMEOUT` seconds, all remaining writers are given up on together
-    (e.g. stuck on an unresponsive network drive).
+    (e.g. stuck on an unresponsive network drive). Progress is only checked when a
+    wait ends, so that can take up to ~2x `WRITER_STALL_TIMEOUT`.
     """
     total, deadline = -1, 0.0
     for thread in threads.values():

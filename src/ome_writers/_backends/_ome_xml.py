@@ -276,8 +276,9 @@ def tiff_xmls(mirrors: dict[str, OmeXMLMirror]) -> dict[str, str]:
     """Return the OME-XML of each TIFF mirror.
 
     The full OME models must differ only by their root UUID (one per file in
-    "redundant" mode), as they do from `prepare_metadata` until the stream is
-    finalized. Serializing one is O(n_positions + n_planes), so only the first is.
+    "redundant" mode), as they do from `prepare_metadata` until a user
+    `update_metadata` (see `TiffBackend._models_in_sync`). Serializing one is
+    O(n_positions + n_planes), so only the first is.
     """
     xmls: dict[str, str] = {}
     full_xml = full_uuid = ""
