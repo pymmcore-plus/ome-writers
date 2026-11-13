@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import math
 import sys
 import warnings
 import weakref
@@ -9,13 +10,13 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final, Literal, NoReturn, TypeAlias
 
+import numpy as np
+
 from ome_writers._coord_tracker import CoordUpdate
 from ome_writers._router import FrameRouter
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
-
-    import numpy as np
 
     from ome_writers._backends._backend import ArrayBackend
     from ome_writers._coord_tracker import CoordTracker
@@ -67,11 +68,15 @@ class OMEStream:
         "_backend",
         "_callback_executor",
         "_coord_tracker",
+        "_current_frame",
         "_event_handlers",
         "_expected_frames",
         "_finalizer",
+        "_frame_nbytes",
+        "_frame_offset",
         "_frames_written",
         "_iterator",
+        "_metadata_frame",
         "_router",
         "_settings",
         "_state",
@@ -88,6 +93,17 @@ class OMEStream:
 
         # Track frame count for mid-acquisition tracker initialization
         self._frames_written = 0
+
+        # For backends that accept appends of any size: bytes per frame (else 0),
+        # bytes written so far into the current (unfinished) frame, the
+        # (pos_idx, idx) of that frame, and the frame number that last got metadata.
+        self._frame_nbytes = 0
+        if backend.accepts_partial_frames:
+            frame_size = math.prod(d.count or 1 for d in settings.dimensions[-2:])
+            self._frame_nbytes = frame_size * np.dtype(settings.dtype).itemsize
+        self._frame_offset = 0
+        self._current_frame: tuple[int, tuple[int, ...]] = (0, ())
+        self._metadata_frame = 0
 
         # Lazy coordinate tracking - only created when first event handler registered
         self._coord_tracker: CoordTracker | None = None
@@ -131,7 +147,20 @@ class OMEStream:
         IndexError
             If attempting to append more frames than expected based on dimensions
             (for finite dimensions only). Unlimited dimensions never raise this error.
+
+        Notes
+        -----
+        Backends that accept partial frames (acquire-zarr) take buffers of any size:
+        they continue the flat stream of data in acquisition order, and may span
+        frames and positions. `frame_metadata` then belongs to the frame that the
+        buffer starts in; it is discarded with a warning if that frame already has
+        metadata.
         """
+        if self._frame_nbytes and (
+            self._frame_offset or frame.nbytes != self._frame_nbytes
+        ):
+            self._append_partial(frame, frame_metadata)
+            return
         try:
             pos_idx, idx = next(self._iterator)
         except StopIteration:
@@ -155,6 +184,9 @@ class OMEStream:
           For unlimited dimensions, the array is resized to accommodate the skip.
         - **TIFF backend**: Writes zero-filled placeholder frames to maintain the
           sequential IFD structure required by the format.
+
+        If called partway through a frame (see `append`), the rest of that frame is
+        zero-filled, and counts as the first of the skipped `frames`.
 
         Parameters
         ----------
@@ -187,6 +219,15 @@ class OMEStream:
         """
         if frames <= 0:
             raise ValueError(f"frames must be positive, got {frames}")
+
+        if self._frame_offset:  # mid-frame: zero-fill the rest, as the first skip
+            pos_idx, idx = self._current_frame
+            fill = np.zeros(self._frame_nbytes - self._frame_offset, dtype=np.uint8)
+            self._backend.write(pos_idx, idx, fill)
+            self._frame_offset = 0
+            frames -= 1
+            if not frames:
+                return
 
         # Collect all indices to skip and pass batch to backend
         try:
@@ -384,6 +425,56 @@ class OMEStream:
             self._coord_tracker.set_needs_current_indices(True)
 
     # ----------------------- Internal Methods -----------------------
+
+    def _append_partial(self, buffer: np.ndarray, frame_metadata: dict | None) -> None:
+        """Append a buffer of any size, splitting it at frame boundaries."""
+        # flat byte view of the buffer (copies only if it isn't C-contiguous)
+        data = np.ascontiguousarray(buffer).reshape(-1).view(np.uint8)
+        frame_nbytes = self._frame_nbytes
+        # bounded: refuse the whole buffer up front if it would overflow, so
+        # nothing is written and the stream stays usable
+        frame_offset = self._frame_offset
+        if self._expected_frames is not None:
+            # bytes in the frames not yet started...
+            bytes_left = (self._expected_frames - self._frames_written) * frame_nbytes
+            # ...plus whatever is left of the frame in progress
+            if frame_offset:
+                bytes_left += frame_nbytes - frame_offset
+            if data.size > bytes_left:
+                self._handle_stop_iteration("append frame")
+
+        # walk through the buffer one frame-sized piece at a time
+        start = 0  # position in `data` of the next byte to write
+        while start < data.size:
+            # at a frame boundary: take the next (pos_idx, idx) from the router
+            if not frame_offset:
+                self._current_frame = next(self._iterator)
+                self._frames_written += 1  # numbers the frame now in progress
+                if self._coord_tracker is not None:
+                    if update := self._coord_tracker.update():
+                        self._emit_coord_events(update)
+            # metadata goes with the first piece only (the frame the buffer
+            # starts in); `_metadata_frame` remembers which frame last got some
+            if frame_metadata is not None:
+                if self._metadata_frame == self._frames_written:
+                    warnings.warn(
+                        "frame_metadata was already given for this frame; "
+                        "discarding the new frame_metadata.",
+                        stacklevel=3,
+                    )
+                    frame_metadata = None
+                self._metadata_frame = self._frames_written
+
+            # piece = the rest of the current frame, or the rest of the buffer
+            stop = min(start + frame_nbytes - self._frame_offset, data.size)
+            pos_idx, idx = self._current_frame
+            chunk = data[start:stop]
+            self._backend.write(pos_idx, idx, chunk, frame_metadata=frame_metadata)
+            frame_metadata = None  # later pieces belong to later frames
+            # advance within the frame; wraps to 0 when the frame is complete
+            self._frame_offset = (self._frame_offset + chunk.size) % frame_nbytes
+            start = stop
+        self._state["has_appended"] = True
 
     def _handle_stop_iteration(self, operation: str, frame_count: int = 1) -> NoReturn:
         """Convert StopIteration to ValueError with helpful message."""
