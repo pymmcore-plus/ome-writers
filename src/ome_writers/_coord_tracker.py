@@ -109,14 +109,14 @@ class CoordTracker(ABC):
 
         # Dimension names for _indices_to_dict
         self._non_frame_dim_names = [d.name for d in self._non_frame_dims]
-        self._frame_dim_dict = {d.name: 0 for d in dims[-2:]}
+        self._frame_dim_dict = {d.name: 0 for d in settings.frame_dimensions}
 
         # Base coords (frame dims always full range)
         self._base_coords: dict[Hashable, Sequence] = {
             d.name: range(1) for d in dims[:-2]
         }
-        for d in dims[-2:]:
-            self._base_coords[d.name] = range(d.count)
+        for d, n in zip(settings.frame_dimensions, settings.frame_shape, strict=True):
+            self._base_coords[d.name] = range(n)
 
         # Initialized by subclasses
         self._current_max_indices: list[int]
