@@ -62,8 +62,8 @@ class OmeXMLMirror:
         """Mark the OME-XML as dirty (modified)."""
         self._dirty = True
 
-    def set_map_annotation(self, namespace: str, value: ome.Map) -> None:
-        """Set a `MapAnnotation` keyed by `namespace`, preserving order.
+    def set_map_annotation(self, new_ann: ome.MapAnnotation) -> None:
+        """Set a `MapAnnotation` keyed by its `namespace`, preserving order.
 
         If a `MapAnnotation` with the given `namespace` already exists in
         `structured_annotations.map_annotations`, it is replaced *in place*
@@ -78,7 +78,7 @@ class OmeXMLMirror:
         if not (structured := self.model.structured_annotations):
             self.model.structured_annotations = structured = ome.StructuredAnnotations()
 
-        new_ann = ome.MapAnnotation(namespace=namespace, value=value)
+        namespace = new_ann.namespace
         existing = structured.map_annotations
         idx = next(
             (i for i, a in enumerate(existing) if a.namespace == namespace),

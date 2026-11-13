@@ -193,6 +193,8 @@ class TiffBackend(ArrayBackend):
                 writer=writer,
             )
         self._full_pos_idxs = self._global_target_pos_idxs()
+        # full OME models differ only by root UUID until a user `update_metadata`
+        self._models_in_sync = True
 
     def write(
         self,
@@ -321,16 +323,28 @@ class TiffBackend(ArrayBackend):
             value = ome.Map.model_validate(
                 {k: json.dumps(v) for k, v in metadata.items()}
             )
-
-            for pos_idx in self._global_target_pos_idxs():
-                manager = self._position_managers[pos_idx]
+            # while in sync, one annotation (and ID) is shared by every full model, so
+            # they stay identical apart from their root UUID. After `update_metadata`
+            # (which keeps the caller's objects, uncopied), each gets its own.
+            annotation = ome.MapAnnotation(namespace=namespace, value=value)
+            managers = [
+                self._position_managers[i] for i in self._global_target_pos_idxs()
+            ]
+            for manager in managers:
+                if not self._models_in_sync:
+                    annotation = ome.MapAnnotation(namespace=namespace, value=value)
                 with manager._lock:
-                    manager.metadata_mirror.set_map_annotation(namespace, value)
+                    manager.metadata_mirror.set_map_annotation(annotation)
 
-                    # Post-finalize: writer threads are joined and files are
-                    # closed, so flush directly.
-                    if self._finalized:
-                        manager.flush(force=True)
+            # Post-finalize: writer threads are joined and files are closed, so
+            # flush directly, serializing once while no user update has made the
+            # full models differ (as in `finalize`)
+            if self._finalized:
+                mirrors = {m.file_path: m.metadata_mirror for m in managers}
+                xmls = tiff_xmls(mirrors) if self._models_in_sync else {}
+                for manager in managers:
+                    with manager._lock:
+                        manager.flush(force=True, xml=xmls.get(manager.file_path))
 
     def finalize(self) -> None:
         """Flush and close all TIFF writers."""
@@ -524,19 +538,21 @@ class TiffBackend(ArrayBackend):
                 f"got {type(metadata)}"
             )
 
-        for pos_idx, meta in metadata.items():
-            if not isinstance(meta, ome.OME):
-                raise TypeError(
-                    f"Expected ome_types.model.OME for position {pos_idx}, "
-                    f"got {type(meta)}"
-                )
+        with self._state_lock:
+            self._models_in_sync = False
+            for pos_idx, meta in metadata.items():
+                if not isinstance(meta, ome.OME):
+                    raise TypeError(
+                        f"Expected ome_types.model.OME for position {pos_idx}, "
+                        f"got {type(meta)}"
+                    )
 
-            try:
-                # not calling deep copy here, since this is currently only ever called
-                # after finalize().  i.e. we're done.
-                self._position_managers[pos_idx].update_metadata(meta, flush=True)
-            except KeyError as e:  # pragma: no cover
-                raise KeyError(f"Unknown position index: {pos_idx}") from e
+                try:
+                    # not calling deep copy here, since this is currently only ever
+                    # called after finalize().  i.e. we're done.
+                    self._position_managers[pos_idx].update_metadata(meta, flush=True)
+                except KeyError as e:  # pragma: no cover
+                    raise KeyError(f"Unknown position index: {pos_idx}") from e
 
 
 class WriterThread(threading.Thread):
