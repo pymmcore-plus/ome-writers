@@ -279,3 +279,19 @@ def test_acquire_zarr_append_overflow(
             stream.append(np.full(int(too_much * FRAME), 999, "uint16"))
         stream.append(flat[n:])
     _assert_positions(root, sizes, data)
+
+
+def test_acquire_zarr_strided_append_mid_frame(tmp_path: Path) -> None:
+    """A non-contiguous buffer can continue a frame that is partly written."""
+    root = tmp_path / "out.zarr"
+    sizes = {"t": 3}
+    flat = _test_data(sizes).ravel()
+    wide = np.zeros((Y, 2 * X), "uint16")
+    wide[:, ::2] = flat[HALF : HALF + FRAME].reshape(Y, X)
+    strided = wide[:, ::2]  # one frame's worth, every other column of `wide`
+    assert not strided.flags.c_contiguous
+    with create_stream(_settings(root, sizes)) as stream:
+        stream.append(flat[:HALF])
+        stream.append(strided)  # spans the end of t0 and the start of t1
+        stream.append(flat[HALF + FRAME :])
+    _assert_positions(root, sizes, _test_data(sizes))

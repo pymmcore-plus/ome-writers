@@ -433,13 +433,12 @@ class OMEStream:
         frame_nbytes = self._frame_nbytes
         # bounded: refuse the whole buffer up front if it would overflow, so
         # nothing is written and the stream stays usable
-        frame_offset = self._frame_offset
         if self._expected_frames is not None:
             # bytes in the frames not yet started...
             bytes_left = (self._expected_frames - self._frames_written) * frame_nbytes
             # ...plus whatever is left of the frame in progress
-            if frame_offset:
-                bytes_left += frame_nbytes - frame_offset
+            if self._frame_offset:
+                bytes_left += frame_nbytes - self._frame_offset
             if data.size > bytes_left:
                 self._handle_stop_iteration("append frame")
 
@@ -447,7 +446,7 @@ class OMEStream:
         start = 0  # position in `data` of the next byte to write
         while start < data.size:
             # at a frame boundary: take the next (pos_idx, idx) from the router
-            if not frame_offset:
+            if not self._frame_offset:
                 self._current_frame = next(self._iterator)
                 self._frames_written += 1  # numbers the frame now in progress
                 if self._coord_tracker is not None:
