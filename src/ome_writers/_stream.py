@@ -734,6 +734,7 @@ def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:
 
     # Try each candidate in order
     attempted = []
+    incompatible: list[str] = []
     for backend_name in candidates:
         meta = AVAILABLE_BACKENDS[backend_name]
         attempted.append(backend_name)
@@ -757,10 +758,17 @@ def _create_backend(settings: AcquisitionSettings) -> ArrayBackend:
                     f"Backend '{type(backend_instance).__name__}' does not support "
                     f"settings: {incompatibility_reason}"
                 )
-            continue  # pragma: no cover
+            incompatible.append(f"{meta.name}: {incompatibility_reason}")
+            continue
 
         # Success - use this backend
         return backend_instance
+
+    if incompatible:
+        raise NotImplementedError(
+            f"No available {target_format} backend supports these settings: "
+            + "; ".join(incompatible)
+        )
 
     # If no backend found
     raise ValueError(  # pragma: no cover

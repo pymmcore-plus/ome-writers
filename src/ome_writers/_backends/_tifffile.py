@@ -19,6 +19,7 @@ import numpy as np
 from ome_writers._backends._backend import ArrayBackend
 from ome_writers._backends._ome_xml import prepare_metadata, tiff_xmls
 from ome_writers._backends._tiff_array import FinalizedTiffArray, LiveTiffArray
+from ome_writers._schema import ome_dtype_error
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Sequence
@@ -113,6 +114,8 @@ class TiffBackend(ArrayBackend):
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         """Check if settings are compatible with TIFF backend."""
+        if error := ome_dtype_error(settings.dtype, "ome-tiff"):
+            return error
         # for now, assume we use the same compression strings as tifffile
         if settings.compression not in (None, "none") and not hasattr(
             tifffile.COMPRESSION, settings.compression.upper()

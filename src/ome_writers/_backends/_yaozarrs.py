@@ -624,6 +624,11 @@ def _build_yaozarrs_image_model(
     ]
     channel_dim = next((d for d in dims if is_channel_dim(d)), None)
     if channel_dim is not None and channel_dim.coords:
+        # Default to the full range of integer dtypes, else 0-1
+        if np.issubdtype(dtype, np.integer):
+            lo, hi = int(np.iinfo(dtype).min), int(np.iinfo(dtype).max)
+        else:
+            lo, hi = 0, 1
         omero_channels = []
         for c in channel_dim.coords:
             # Default color to white if not specified
@@ -632,12 +637,7 @@ def _build_yaozarrs_image_model(
                 if c.color
                 else "FFFFFF"
             )
-            # Default to full range window for the given dtype
-            dtype_min = np.iinfo(dtype).min
-            dtype_max = np.iinfo(dtype).max
-            window = v05.OmeroWindow(
-                min=dtype_min, max=dtype_max, start=dtype_min, end=dtype_max
-            )
+            window = v05.OmeroWindow(min=lo, max=hi, start=lo, end=hi)
             omero_channels.append(
                 v05.OmeroChannel(label=c.name, color=color, window=window)
             )

@@ -146,6 +146,38 @@ def _validate_dtype(dtype: Any) -> str:
 
 DTypeStr: TypeAlias = Annotated[str, BeforeValidator(_validate_dtype)]
 
+# numpy dtypes that OME-TIFF can store, mapped to their OME `PixelType`.  OME-XML
+# also allows `complex` and `double-complex`, but Bio-Formats can't read them, and
+# `bit` (bool), but tifffile's contiguous mode keeps only the first bool frame.
+OME_TIFF_PIXEL_TYPES: dict[str, str] = {
+    "int8": "int8",
+    "int16": "int16",
+    "int32": "int32",
+    "uint8": "uint8",
+    "uint16": "uint16",
+    "uint32": "uint32",
+    "float32": "float",
+    "float64": "double",
+}
+# the Zarr v3 core data types
+OME_ZARR_DTYPES: frozenset[str] = frozenset(
+    ["bool", "float16", "float32", "float64", "complex64", "complex128"]
+    + [f"{s}int{b}" for s in ("", "u") for b in (8, 16, 32, 64)]
+)
+
+
+def ome_dtype_error(dtype: str, format_name: str) -> str | None:
+    """Return why `dtype` can't be written to `format_name`, or None if it can."""
+    if format_name == "ome-tiff":
+        label, supported = "OME-TIFF", sorted(OME_TIFF_PIXEL_TYPES)
+    elif format_name == "ome-zarr":
+        label, supported = "OME-Zarr", sorted(OME_ZARR_DTYPES)
+    else:
+        return None
+    if dtype in supported:
+        return None
+    return f"dtype '{dtype}' is not supported for {label}. Supported: {supported}."
+
 
 # =======================================
 # Dimensions and Related Coordinate Types
@@ -978,6 +1010,8 @@ class AcquisitionSettings(_BaseModel):
         default="",
         description="Data type of the pixel data to be written, e.g. 'uint8', "
         "'uint16', 'float32', etc. Must be a valid numpy DTypeLike string. "
+        "OME-TIFF supports int8-int32, uint8-uint32, float32 and float64. OME-Zarr "
+        "supports bool, int8-int64, uint8-uint64, float16-float64 and complex. "
         "May be empty at construction time, but must be set before creating a stream.",
     )
     format: Format = Field(  # type: ignore
@@ -1167,6 +1201,13 @@ class AcquisitionSettings(_BaseModel):
                     f"Supported: {zarr_args}."
                 )
 
+        return self
+
+    @model_validator(mode="after")
+    def _validate_format_dtype(self) -> AcquisitionSettings:
+        """Validate dtype is supported for selected format."""
+        if self.dtype and (error := ome_dtype_error(self.dtype, self.format.name)):
+            raise ValueError(error)
         return self
 
     @model_validator(mode="after")
