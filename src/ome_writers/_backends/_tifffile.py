@@ -6,9 +6,9 @@ import json
 import math
 import threading
 import time
+import traceback
 import warnings
 import weakref
-from contextlib import suppress
 from dataclasses import dataclass
 from itertools import count
 from queue import Queue
@@ -21,7 +21,7 @@ from ome_writers._backends._ome_xml import prepare_metadata, tiff_xmls
 from ome_writers._backends._tiff_array import FinalizedTiffArray, LiveTiffArray
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping, Sequence
+    from collections.abc import Callable, Iterator, Mapping, Sequence
     from typing import Any
 
     from ome_writers._backends._backend import ArrayLike
@@ -84,7 +84,15 @@ class PositionManager:
         # A TIFF file must be closed, with a frame (IFD) to hold the OME-XML
         thread = self.thread
         if thread is None or (thread.frames_written and not thread.is_alive()):
-            self.metadata_mirror.flush(force=force, xml=xml)
+            try:
+                self.metadata_mirror.flush(force=force, xml=xml)
+            except Exception as e:
+                # writing to the file of a failed writer may fail too (e.g. disk full)
+                if thread is None or thread.error is None:
+                    raise
+                warnings.warn(
+                    f"OME-XML not written to {self.file_path}: {e}", stacklevel=3
+                )
         elif force:
             warnings.warn(
                 f"OME-XML not written to {self.file_path}: the file has no frames, "
@@ -110,6 +118,7 @@ class TiffBackend(ArrayBackend):
         self._position_managers: dict[int, PositionManager] = {}
         self._storage_dims: tuple[Dimension, ...] | None = None
         self._dtype: str = ""
+        self._failed: WriterThread | None = None  # the first writer that failed
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         """Check if settings are compatible with TIFF backend."""
@@ -140,6 +149,7 @@ class TiffBackend(ArrayBackend):
         """Initialize OME-TIFF files and writer threads."""
 
         self._finalized = False
+        self._failed = None
         self._storage_dims = storage_dims = settings.array_storage_dimensions
         # Extract index keys, excluding Y and X, example: ['t', 'c', 'z']
         self._index_keys = [d.name for d in storage_dims[:-2]]
@@ -182,6 +192,7 @@ class TiffBackend(ArrayBackend):
                     ome_xml=xmls[fname],
                     has_unbounded=has_unbounded,
                     compression=compression,
+                    on_error=self._writer_failed,
                 )
                 thread.start()
             else:  # (no writer thread writes the companion file's initial OME-XML)
@@ -213,6 +224,8 @@ class TiffBackend(ArrayBackend):
             raise RuntimeError("Cannot write after finalize().")
         if not self._position_managers:  # pragma: no cover
             raise RuntimeError("Backend not prepared. Call prepare() first.")
+        if self._failed is not None:
+            raise self._writer_error([self._failed]) from self._failed.error
 
         manager = self._position_managers[position_index]
         manager.queue.put(frame)
@@ -234,6 +247,8 @@ class TiffBackend(ArrayBackend):
         if not self._position_managers:  # pragma: no cover
             raise RuntimeError("Backend not prepared. Call prepare() first.")
 
+        if self._failed is not None:
+            raise self._writer_error([self._failed]) from self._failed.error
         if not indices:  # pragma: no cover
             return
 
@@ -244,6 +259,24 @@ class TiffBackend(ArrayBackend):
             # Send to WriterThread queue (same path as regular writes)
             manager.queue.put(placeholder)
             manager.n_queued += 1
+
+    def _writer_failed(self, thread: WriterThread) -> None:
+        """Record a writer thread that failed (called from that thread)."""
+        if self._failed is None:
+            self._failed = thread
+
+    def _writer_error(
+        self, threads: Sequence[WriterThread], also: Sequence[str] = ()
+    ) -> RuntimeError:
+        """Return the error for failed writer `threads`, and mark them reported."""
+        msgs = []
+        for t in threads:
+            t.error_reported = True
+            msgs.append(
+                f"TIFF writer for {t.path} failed after {t.frames_written} frames: "
+                f"{t.error!r}"
+            )
+        return RuntimeError("; ".join([*msgs, *also]))
 
     def _append_frame_metadata(
         self,
@@ -372,12 +405,15 @@ class TiffBackend(ArrayBackend):
                 {m.file_path: m.thread for m in managers.values() if m.thread}
             )
 
+            flush_errors: list[tuple[str, Exception]] = []
             try:
                 # Record the frames actually written to each position (handles both
                 # unbounded dims and incomplete bounded dims) in each full OME model
                 outer = f"size_{index_dims[0].name.lower()}" if index_dims else ""
                 frames_written = {
-                    p: m.thread.frames_written for p, m in managers.items() if m.thread
+                    p: _frames_to_record(m.thread, inner_prod)
+                    for p, m in managers.items()
+                    if m.thread
                 }
                 full_mirrors: dict[str, OmeXMLMirror] = {}
                 for target in self._global_target_pos_idxs():
@@ -401,16 +437,38 @@ class TiffBackend(ArrayBackend):
                 xmls = tiff_xmls(full_mirrors)
                 for manager in managers.values():
                     # (skips the files of stalled writers)
-                    manager.flush(xml=xmls.get(manager.file_path))
+                    try:
+                        manager.flush(xml=xmls.get(manager.file_path))
+                    except Exception as e:  # e.g. disk full: still try the others
+                        flush_errors.append((manager.file_path, e))
             finally:
                 # writers are closed, so later metadata updates can flush directly
                 self._finalized = True
 
+            # (errors already raised by `write` or `advance` are not raised again)
+            failed = [
+                m.thread
+                for m in managers.values()
+                if m.thread and m.thread.error and not m.thread.error_reported
+            ]
+            not_written = [
+                f"OME-XML not written to {p}: {e!r}" for p, e in flush_errors
+            ]
+            first_flush_error = flush_errors[0][1] if flush_errors else None
+            if failed:
+                if stalled:
+                    not_written.append(f"and these TIFF writers stalled: {stalled}")
+                raise self._writer_error(failed, not_written) from failed[0].error
             if stalled:
-                raise TimeoutError(
+                msg = (
                     f"TIFF writers wrote no frame for {WRITER_STALL_TIMEOUT} s, "
                     f"so these files may be incomplete: {stalled}"
                 )
+                raise TimeoutError(
+                    "; ".join([msg, *not_written])
+                ) from first_flush_error
+            if first_flush_error is not None:
+                raise first_flush_error
 
     def get_arrays(self) -> list[ArrayLike]:
         """Return array-like objects backed by TIFF files.
@@ -569,9 +627,14 @@ class WriterThread(threading.Thread):
         pixelsize: float = 1.0,
         has_unbounded: bool = False,
         compression: tifffile.COMPRESSION | None = None,
+        on_error: Callable[[WriterThread], None] | None = None,
     ) -> None:
         super().__init__(daemon=True, name=f"TiffWriterThread-{next(_thread_counter)}")
         self._writer = writer
+        self.path = writer.filehandle.path
+        self._on_error = on_error
+        self.error: Exception | None = None  # the exception that stopped writing
+        self.error_reported = False
         self._shape = shape
         self._dtype = dtype
         self._image_queue = image_queue
@@ -594,7 +657,7 @@ class WriterThread(threading.Thread):
         # Wait for first frame - if None, close writer and return
         first_frame = self._image_queue.get()
         if first_frame is None:
-            self._writer.close()
+            self._close_writer()
             return
 
         def _queue_iterator() -> Iterator[np.ndarray]:
@@ -647,16 +710,45 @@ class WriterThread(threading.Thread):
                     # only see frames that are fully written
                     self.frames_written += 1
 
-        except Exception as e:  # pragma: no cover
-            # Unexpected errors - log and continue
-            warnings.warn(
-                f"Unexpected error during TIFF write: {e}",
-                RuntimeWarning,
-                stacklevel=2,
-            )
+        except Exception as e:
+            # e.g. disk full: the backend raises it from the next write or finalize
+            self._fail(e)
         finally:
-            with suppress(Exception):
-                self._writer.close()
+            sentinel_queued = self.error is not None  # (stopped before the sentinel)
+            self._close_writer()
+
+        if sentinel_queued:
+            # discard frames until the stop sentinel, so they don't pile up in memory
+            # (and so a producer never blocks on a full queue)
+            while self._image_queue.get() is not None:
+                pass
+
+    def _close_writer(self) -> None:
+        """Close the TIFF file, recording an error if it's the first."""
+        try:
+            # (in contiguous mode, all IFDs but the first are written here)
+            self._writer.close()
+        except Exception as e:
+            if self.error is None:
+                self._fail(e)
+
+    def _fail(self, error: Exception) -> None:
+        """Record the `error` that stopped writing, and report it to the backend."""
+        # free the locals of its traceback's frames (e.g. frame buffers), which the
+        # stored error would otherwise keep alive (the traceback itself is kept)
+        traceback.clear_frames(error.__traceback__)
+        self.error = error
+        if self._on_error is not None:
+            self._on_error(self)
+
+
+def _frames_to_record(thread: WriterThread, inner_prod: int) -> int:
+    """Return the frames to record in the OME-XML for a writer `thread`."""
+    # a failed writer can't be padded to a whole outer index (e.g. timepoint), so
+    # only its whole ones are recorded: Bio-Formats misreads every plane of a
+    # single-file OME-TIFF that ends mid-timepoint
+    n = thread.frames_written
+    return n - n % inner_prod if thread.error is not None else n
 
 
 def _join_writers(threads: Mapping[str, WriterThread]) -> list[str]:
