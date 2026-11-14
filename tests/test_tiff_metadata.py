@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import threading
 import time
@@ -15,6 +16,7 @@ from ome_writers import (
     AcquisitionSettings,
     Channel,
     Dimension,
+    OMEStream,
     Plate,
     Position,
     create_stream,
@@ -32,6 +34,7 @@ from pathlib import Path
 from ome_writers._backends import _tifffile
 from ome_writers._backends._ome_xml import (
     MultiFileMetadata,
+    OmeXMLMirror,
     prepare_metadata,
     tiff_xmls,
 )
@@ -817,6 +820,189 @@ def test_finalize_abandons_stalled_writer(
         assert [i.pixels.tiff_data_blocks[0].plane_count for i in images] == plane_count
     with tifffile.TiffFile(pos1) as tf:
         assert len(tf.pages) == 2
+
+
+FRAME = np.zeros((16, 16), dtype="uint16")
+
+
+def _fail_settings(
+    tmp_path: Path, t: int, c: int = 1, mode: str | None = None
+) -> AcquisitionSettings:
+    """`t` timepoints of `c` channels, at 2 positions if a multi-file `mode`."""
+    dims = [Dimension(name="t", count=t, type="time")]
+    if mode:
+        dims.append(Dimension(name="p", type="position", coords=["Pos0", "Pos1"]))
+    if c > 1:
+        dims.append(Dimension(name="c", count=c, type="channel"))
+    return AcquisitionSettings(
+        root_path=tmp_path / "test.ome.tiff",
+        dimensions=[
+            *dims,
+            Dimension(name="y", count=16, type="space"),
+            Dimension(name="x", count=16, type="space"),
+        ],
+        dtype="uint16",
+        format={"name": "ome-tiff", "multi_file_metadata": mode or "redundant"},
+    )
+
+
+def _failing_stream(
+    monkeypatch: pytest.MonkeyPatch,
+    settings: AcquisitionSettings,
+    suffix: str,
+    after: int,
+    n_frames: int,
+    gated: bool = True,
+) -> OMEStream:
+    """Append `n_frames`, with writes to `suffix` files failing after `after` frames.
+
+    If `gated`, the failing write waits until all frames are appended; otherwise
+    this waits until the backend has recorded the failure.
+    """
+    write, n_writes = tifffile.TiffWriter.write, count()
+    gate, failed = threading.Event(), threading.Event()
+    writer_failed = _tifffile.TiffBackend._writer_failed
+
+    def failing_write(self: tifffile.TiffWriter, *args: Any, **kwargs: Any) -> Any:
+        if self.filehandle.name.endswith(suffix) and next(n_writes) >= after:
+            gate.wait()
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return write(self, *args, **kwargs)
+
+    def recording(self: _tifffile.TiffBackend, thread: _tifffile.WriterThread) -> None:
+        writer_failed(self, thread)
+        failed.set()
+
+    monkeypatch.setattr(tifffile.TiffWriter, "write", failing_write)
+    monkeypatch.setattr(_tifffile.TiffBackend, "_writer_failed", recording)
+    if not gated:
+        gate.set()
+    stream = create_stream(settings)
+    for _ in range(n_frames):
+        stream.append(FRAME)
+    gate.set()
+    assert gated or failed.wait(10)
+    return stream
+
+
+def test_writer_error_raised_from_append(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """After a TIFF write fails, append() and skip() raise, and close() not again."""
+    settings = _fail_settings(tmp_path, t=10)
+    stream = _failing_stream(monkeypatch, settings, "test.ome.tiff", 2, 3, gated=False)
+    with pytest.raises(RuntimeError, match=r"test\.ome\.tiff .*after 2 frames") as e:
+        stream.append(FRAME)
+    assert isinstance(e.value.__cause__, OSError)
+    assert e.value.__cause__.errno == errno.ENOSPC
+    with pytest.raises(RuntimeError, match="after 2 frames"):
+        stream.skip()
+    stream.close()
+
+    # frames sent after the failure are discarded, not left in the queue
+    (manager,) = stream._backend._position_managers.values()
+    assert not manager.thread.is_alive() and manager.queue.empty()
+
+
+def test_writer_error_raised_once_from_with_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A writer error raised by append() is not raised again on leaving `with`."""
+    settings = _fail_settings(tmp_path, t=10)
+    stream = _failing_stream(monkeypatch, settings, "test.ome.tiff", 2, 3, gated=False)
+    with pytest.raises(RuntimeError, match="after 2 frames") as e, stream:
+        stream.append(FRAME)
+    assert e.value.__context__ is None
+
+
+def test_writer_error_raised_from_close(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A write that fails after the last append() makes close() raise."""
+    settings = _fail_settings(tmp_path, t=10)
+    stream = _failing_stream(monkeypatch, settings, "test.ome.tiff", 2, 4)
+    with pytest.raises(RuntimeError, match="after 2 frames"):
+        stream.close()
+
+    # the frames written before the failure are recorded in the metadata
+    pixels = from_tiff(settings.output_path).images[0].pixels
+    assert (pixels.size_t, pixels.tiff_data_blocks[0].plane_count) == (2, 2)
+
+
+@pytest.mark.parametrize("mode", MULTI_FILE_MODES)
+def test_writer_error_multiposition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: MultiFileMetadata
+) -> None:
+    """A failed position records its complete timepoints, the others all frames."""
+    settings = _fail_settings(tmp_path, t=3, c=2, mode=mode.value)
+    stream = _failing_stream(monkeypatch, settings, "_p001.ome.tiff", 3, 12)
+    with pytest.raises(RuntimeError, match=r"_p001\.ome\.tiff") as e:
+        stream.close()
+    assert "_p000" not in str(e.value)
+
+    # Pos1 stopped mid-timepoint (3 frames, C=2): only its whole timepoint is kept
+    # (Bio-Formats misreads every plane of a single file that ends mid-timepoint)
+    px = [img.pixels for img in _get_full_ome(settings).images]
+    assert [(p.size_t, p.tiff_data_blocks[0].plane_count) for p in px] == [
+        (3, 6),
+        (1, 2),
+    ]
+
+
+def test_writer_error_from_tifffile_close(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A write that fails while tifffile closes the file makes close() raise."""
+    # (in contiguous mode, tifffile writes all IFDs but the first on close)
+    fh_write, writer_close = tifffile.FileHandle.write, tifffile.TiffWriter.close
+    closing = threading.Event()
+
+    def failing_write(self: tifffile.FileHandle, *args: Any, **kwargs: Any) -> Any:
+        if closing.is_set():  # the disk filled up after the last frame's data
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return fh_write(self, *args, **kwargs)
+
+    def close(self: tifffile.TiffWriter) -> None:
+        closing.set()
+        writer_close(self)
+
+    monkeypatch.setattr(tifffile.FileHandle, "write", failing_write)
+    monkeypatch.setattr(tifffile.TiffWriter, "close", close)
+    stream = create_stream(_fail_settings(tmp_path, t=10))
+    for _ in range(10):
+        stream.append(FRAME)
+    with pytest.raises(RuntimeError, match="after 10 frames: OSError"):
+        stream.close()
+
+
+@pytest.mark.parametrize("all_files", [False, True])
+def test_writer_error_metadata_flush_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, all_files: bool
+) -> None:
+    """If metadata can't be written (e.g. disk full), the writer error is raised."""
+    mirror_flush = OmeXMLMirror.flush
+
+    def failing_flush(self: OmeXMLMirror, **kwargs: Any) -> None:
+        if all_files or self.path.endswith("_p000.ome.tiff"):
+            raise OSError(errno.ENOSPC, "No space left on device")
+        mirror_flush(self, **kwargs)
+
+    monkeypatch.setattr(OmeXMLMirror, "flush", failing_flush)
+    settings = _fail_settings(tmp_path, t=2, mode="redundant")
+    stream = _failing_stream(monkeypatch, settings, "_p000.ome.tiff", 1, 4)
+    with (
+        pytest.warns(UserWarning, match=r"OME-XML not written to .*_p000"),
+        pytest.raises(RuntimeError, match=r"_p000\.ome\.tiff failed") as e,
+    ):
+        stream.close()
+
+    if all_files:  # the other file's failed metadata write is in the error message
+        assert "OME-XML not written to" in str(e.value)
+        assert "_p001.ome.tiff" in str(e.value)
+    else:  # ... or else its metadata is written
+        pos1 = next(Path(settings.output_path).glob("*_p001.ome.tiff"))
+        images = from_tiff(pos1).images
+        assert [i.pixels.tiff_data_blocks[0].plane_count for i in images] == [1, 2]
 
 
 @pytest.mark.parametrize("mode", MULTI_FILE_MODES)

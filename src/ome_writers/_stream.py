@@ -131,6 +131,10 @@ class OMEStream:
         IndexError
             If attempting to append more frames than expected based on dimensions
             (for finite dimensions only). Unlimited dimensions never raise this error.
+        RuntimeError
+            (TIFF only) If a background writer failed to write an earlier frame (e.g.
+            the disk is full), with the original error as its `__cause__`. The error
+            surfaces on a *later* append (or on `close()`), not necessarily the next.
         """
         try:
             pos_idx, idx = next(self._iterator)
@@ -169,6 +173,9 @@ class OMEStream:
             If skipping would exceed the total number of frames expected based on
             dimensions (for finite dimensions only). Unlimited dimensions never raise
             this error.
+        RuntimeError
+            (TIFF only) If a background writer failed to write an earlier frame, as in
+            `append()`.
 
         Examples
         --------
@@ -272,7 +279,14 @@ class OMEStream:
         self.close()
 
     def close(self) -> None:
-        """Finalize the backend, flush any pending writes, and release resources."""
+        """Finalize the backend, flush any pending writes, and release resources.
+
+        Raises
+        ------
+        RuntimeError
+            (TIFF only) If a background writer failed, and that error was not already
+            raised by `append()` or `skip()`.
+        """
         try:
             # Detach returns the callback args if finalizer was still alive, else None
             if self._finalizer.detach():
