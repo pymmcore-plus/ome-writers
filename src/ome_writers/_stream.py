@@ -314,13 +314,15 @@ class OMEStream:
 
     def close(self) -> None:
         """Finalize the backend, flush any pending writes, and release resources."""
-        # Detach returns the callback args if finalizer was still alive, None otherwise
-        if self._finalizer.detach():
-            self._backend.finalize()
-        # Shutdown callback executor if it exists
-        if self._callback_executor is not None:
-            self._callback_executor.shutdown(wait=False)
-            self._callback_executor = None
+        try:
+            # Detach returns the callback args if finalizer was still alive, else None
+            if self._finalizer.detach():
+                self._backend.finalize()
+        finally:
+            # Shutdown callback executor if it exists
+            if self._callback_executor is not None:
+                self._callback_executor.shutdown(wait=False)
+                self._callback_executor = None
 
     @property
     def closed(self) -> bool:

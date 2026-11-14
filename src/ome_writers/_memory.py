@@ -94,7 +94,7 @@ def _max_chunks(settings: AcquisitionSettings) -> int:
 
 def _bytes_per_chunk(settings: AcquisitionSettings) -> int:
     chunk_shape = tuple(d.buffer_size for d in settings.index_dimensions)
-    frame_shape = tuple(d.count or 1 for d in settings.frame_dimensions)
+    frame_shape = settings.frame_shape
     bytes_per_pixel = np.dtype(settings.dtype).itemsize
     return int(np.prod(chunk_shape + frame_shape)) * bytes_per_pixel
 

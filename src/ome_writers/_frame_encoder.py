@@ -116,7 +116,7 @@ def frame_generator(
     """
     router = FrameRouter(settings)
     storage_names = tuple(d.name for d in settings.storage_index_dimensions)
-    frame_shape = tuple((d.count or 1) for d in settings.frame_dimensions)
+    frame_shape = settings.frame_shape
     total = math.prod(d.count or real_unbounded_count for d in settings.dimensions[:-2])
     encoding_sizes = sizes_for_dtype(settings.dtype)
     dtype = np.dtype(settings.dtype)

@@ -572,6 +572,46 @@ def test_bioformats_reads_multi_file_ome_tiff(tmp_path: Path, mode: str) -> None
             assert [plane.max() for plane in planes] == [4 * p + i for i in range(4)]
 
 
+T, C, Z = (
+    Dimension(name=n, count=c, type=k)
+    for n, c, k in [("t", None, "time"), ("c", 2, "channel"), ("z", 3, "space")]
+)
+P = Dimension(name="p", type="position", coords=["A", "B"])
+
+
+@pytest.mark.parametrize(
+    ("dims", "n_frames", "expected"),
+    [
+        ([T, C], 3, [[1, 2, 3, 0]]),
+        ([T, Z], 4, [[1, 2, 3, 4, 0, 0]]),
+        ([T, C, Z], 8, [[1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0]]),
+        ([T, P, C], 7, [[1, 2, 5, 6], [3, 4, 7, 0]]),
+    ],
+)
+def test_bioformats_reads_partial_last_timepoint(
+    tmp_path: Path, dims: list[Dimension], n_frames: int, expected: list[list[int]]
+) -> None:
+    """A stream stopped mid-timepoint is padded with zero frames up to a full one."""
+    bf_reader = pytest.importorskip("tests._bf_reader")
+
+    settings = AcquisitionSettings(
+        root_path=tmp_path / "test.ome.tiff",
+        dimensions=[
+            *dims,
+            Dimension(name="y", count=8, type="space"),
+            Dimension(name="x", count=8, type="space"),
+        ],
+        dtype="uint16",
+    )
+    with create_stream(settings) as stream:
+        for i in range(n_frames):
+            stream.append(np.full((8, 8), i + 1, dtype="uint16"))
+
+    path = sorted(Path(tmp_path).rglob("*.ome.tiff"))[0]
+    _, series = bf_reader.read_series_with_bioformats(str(path))
+    assert [[int(plane.max()) for plane in planes] for planes in series] == expected
+
+
 def _assert_valid_ome_zarr(case: AcquisitionSettings) -> None:
     root = Path(case.output_path)
     group = yaozarrs.validate_zarr_store(root)

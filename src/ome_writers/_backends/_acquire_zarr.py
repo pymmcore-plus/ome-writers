@@ -75,9 +75,7 @@ class AcquireZarrBackend(YaozarrsBackend):
 
         # Store dtype and frame shape for advance() method
         self._dtype = settings.dtype
-        self._frame_shape = tuple(
-            d.count for d in settings.array_storage_dimensions[-2:]
-        )
+        self._frame_shape = settings.frame_shape
 
         # Backup zarr.json files created by yaozarrs before acquire-zarr
         # potentially overwrites them (will be restored in finalize)

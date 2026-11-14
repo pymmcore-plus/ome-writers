@@ -59,6 +59,19 @@ def test_schema_unlimited_first_only() -> None:
         )
 
 
+def test_schema_frame_dims_bounded() -> None:
+    """The frame dimensions (the last two) can't be unbounded, even if first."""
+    with pytest.raises(ValidationError, match="last two dimensions must have a count"):
+        AcquisitionSettings(
+            root_path="test.zarr",
+            dimensions=[
+                Dimension(name="y", count=None, type="space"),
+                Dimension(name="x", count=64, type="space"),
+            ],
+            dtype="uint16",
+        )
+
+
 def test_plate_metadata() -> None:
     """Test Plate is structural metadata only."""
     plate = Plate(

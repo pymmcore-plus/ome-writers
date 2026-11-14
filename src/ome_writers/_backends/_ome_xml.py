@@ -62,8 +62,8 @@ class OmeXMLMirror:
         """Mark the OME-XML as dirty (modified)."""
         self._dirty = True
 
-    def set_map_annotation(self, namespace: str, value: ome.Map) -> None:
-        """Set a `MapAnnotation` keyed by `namespace`, preserving order.
+    def set_map_annotation(self, new_ann: ome.MapAnnotation) -> None:
+        """Set a `MapAnnotation` keyed by its `namespace`, preserving order.
 
         If a `MapAnnotation` with the given `namespace` already exists in
         `structured_annotations.map_annotations`, it is replaced *in place*
@@ -78,7 +78,7 @@ class OmeXMLMirror:
         if not (structured := self.model.structured_annotations):
             self.model.structured_annotations = structured = ome.StructuredAnnotations()
 
-        new_ann = ome.MapAnnotation(namespace=namespace, value=value)
+        namespace = new_ann.namespace
         existing = structured.map_annotations
         idx = next(
             (i for i, a in enumerate(existing) if a.namespace == namespace),
@@ -97,16 +97,21 @@ class OmeXMLMirror:
         self._dirty = True
 
     @property
+    def dirty(self) -> bool:
+        """Whether the OME-XML has changed since it was last written."""
+        return self._dirty
+
+    @property
     def is_tiff(self) -> bool:
         """Whether the OME-XML is stored in a TIFF file."""
         return self.path.lower().endswith((".tiff", ".tif"))
 
-    def flush(self, *, force: bool = False) -> None:
-        """Mark the OME-XML as clean (not modified)."""
+    def flush(self, *, force: bool = False, xml: str | None = None) -> None:
+        """Write the OME-XML if modified (or forced), given `xml` if pre-serialized."""
         if not self._dirty and not force:  # pragma: no cover
             return
 
-        xml_bytes = self.model.to_xml().encode("utf-8")
+        xml_bytes = (xml or self.model.to_xml()).encode("utf-8")
         if self.is_tiff:
             try:
                 tifffile.tiffcomment(self.path, comment=xml_bytes)
@@ -267,11 +272,13 @@ def prepare_metadata(settings: AcquisitionSettings) -> dict[str, OmeXMLMirror]:
     return mirrors
 
 
-def initial_tiff_xml(mirrors: dict[str, OmeXMLMirror]) -> dict[str, str]:
-    """Return the OME-XML of each TIFF mirror freshly created by `prepare_metadata`.
+def tiff_xmls(mirrors: dict[str, OmeXMLMirror]) -> dict[str, str]:
+    """Return the OME-XML of each TIFF mirror.
 
-    The full OME models differ only by their root UUID (one per file in "redundant"
-    mode), and serializing one is O(n_positions), so only the first is serialized.
+    The full OME models must differ only by their root UUID (one per file in
+    "redundant" mode), as they do from `prepare_metadata` until a user
+    `update_metadata` (see `TiffBackend._models_in_sync`). Serializing one is
+    O(n_positions + n_planes), so only the first is.
     """
     xmls: dict[str, str] = {}
     full_xml = full_uuid = ""

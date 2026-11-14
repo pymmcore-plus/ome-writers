@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import threading
+import time
 import warnings
 import weakref
 from contextlib import suppress
@@ -16,7 +17,7 @@ from typing import TYPE_CHECKING, Literal, cast
 import numpy as np
 
 from ome_writers._backends._backend import ArrayBackend
-from ome_writers._backends._ome_xml import initial_tiff_xml, prepare_metadata
+from ome_writers._backends._ome_xml import prepare_metadata, tiff_xmls
 from ome_writers._backends._tiff_array import FinalizedTiffArray, LiveTiffArray
 
 if TYPE_CHECKING:
@@ -45,6 +46,10 @@ PLANE_KEYS = {
     "position_z",
 }
 
+# Minimum seconds without any writer writing a frame before `finalize` gives up
+# (detection can take up to ~2x this; see `_join_writers`)
+WRITER_STALL_TIMEOUT = 60.0
+
 
 @dataclass
 class PositionManager:
@@ -55,10 +60,10 @@ class PositionManager:
     queue: Queue[np.ndarray | None]
     metadata_mirror: OmeXMLMirror
     writer: tifffile.TiffWriter | None
+    n_queued: int = 0  # frames (incl. placeholders) sent to the writer thread
 
     def __post_init__(self) -> None:
         self._lock = threading.Lock()
-        self._metadata_dirty: bool = False
 
     def update_metadata(self, metadata: ome.OME, flush: bool = False) -> None:
         """Update cached metadata and mark as dirty.  Optionally flush to file."""
@@ -67,54 +72,25 @@ class PositionManager:
             self.metadata_mirror.mark_dirty()
 
         # careful... our lock is not re-entrant, so avoid deadlock
-        self.metadata_mirror.flush(force=flush)
+        self.flush(force=flush)
 
     def signal_stop(self) -> None:
         """Signal the writer thread to stop by sending None sentinel."""
         if self.queue is not None:
             self.queue.put(None)
 
-    def finalize(self, index_dims: tuple[Dimension, ...] | None) -> None:
-        """Wait for thread completion and update metadata with actual frames written.
-
-        Parameters
-        ----------
-        index_dims : tuple[Dimension, ...] | None
-            Dimensions used for storage indexing, or None if unavailable.
-            (usually just T, C, Z)
-        """
-        # Wait for thread to finish
-        if self.thread:
-            self.thread.join(timeout=5)
-
-        # Update metadata based on actual frames written
-        if self.thread is None:
-            # No thread means no TIFF file (e.g., companion OME-XML only)
-            self.metadata_mirror.flush(force=True)
-            return
-
-        # Update dimension sizes and plane count based on actual frames written
-        images = self.metadata_mirror.model.images
-        if self.thread.frames_written and index_dims and images:
-            pixels = images[0].pixels
-
-            # Update the outermost dimension's size based on frames written
-            # This handles both unbounded dims and incomplete bounded dims
-            if index_dims:
-                first, *inner = index_dims
-                # Calculate actual size of outermost dimension
-                inner_prod = math.prod([d.count or 1 for d in inner])
-                actual_outer_size = max(1, self.thread.frames_written // inner_prod)
-                setattr(pixels, f"size_{first.name.lower()}", actual_outer_size)
-
-            # Update plane count
-            if data_blocks := pixels.tiff_data_blocks:
-                data_blocks[0].plane_count = self.thread.frames_written
-            self.metadata_mirror.flush(force=True)
-        else:
-            # Fallback: flush if any in-memory modifications have been made (e.g.
-            # set_global_metadata on a 2D-only or zero-frame acquisition).  No force.
-            self.metadata_mirror.flush()
+    def flush(self, force: bool = False, xml: str | None = None) -> None:
+        """Write the OME-XML to file if it has been modified (or if forced)."""
+        # A TIFF file must be closed, with a frame (IFD) to hold the OME-XML
+        thread = self.thread
+        if thread is None or (thread.frames_written and not thread.is_alive()):
+            self.metadata_mirror.flush(force=force, xml=xml)
+        elif force:
+            warnings.warn(
+                f"OME-XML not written to {self.file_path}: the file has no frames, "
+                "or its writer thread is still running.",
+                stacklevel=3,
+            )
 
 
 class TiffBackend(ArrayBackend):
@@ -134,7 +110,6 @@ class TiffBackend(ArrayBackend):
         self._position_managers: dict[int, PositionManager] = {}
         self._storage_dims: tuple[Dimension, ...] | None = None
         self._dtype: str = ""
-        self._frame_metadata: dict[int, list[dict[str, Any]]] = {}
 
     def is_incompatible(self, settings: AcquisitionSettings) -> Literal[False] | str:
         """Check if settings are compatible with TIFF backend."""
@@ -168,8 +143,10 @@ class TiffBackend(ArrayBackend):
         self._storage_dims = storage_dims = settings.array_storage_dimensions
         # Extract index keys, excluding Y and X, example: ['t', 'c', 'z']
         self._index_keys = [d.name for d in storage_dims[:-2]]
+        # frames (IFDs) are written sequentially, in acquisition order
+        self._acq_index_dims = settings.index_dimensions
         self._dtype = settings.dtype
-        self._frame_shape = tuple(d.count or 1 for d in self._storage_dims[-2:])
+        self._frame_shape = settings.frame_shape
 
         # Extract and validate compression
         compression = None
@@ -185,7 +162,7 @@ class TiffBackend(ArrayBackend):
         # Prepare OME-XML metadata mirrors
         # mapping of filepath -> OmeXMLMirror
         metas = prepare_metadata(settings)
-        xmls = initial_tiff_xml(metas)
+        xmls = tiff_xmls(metas)
 
         # Create writer thread for each position
         for fname, meta_mirror in metas.items():
@@ -207,6 +184,8 @@ class TiffBackend(ArrayBackend):
                     compression=compression,
                 )
                 thread.start()
+            else:  # (no writer thread writes the companion file's initial OME-XML)
+                meta_mirror.mark_dirty()
             self._position_managers[meta_mirror.pos_idx] = PositionManager(
                 file_path=fname,
                 thread=thread,
@@ -214,6 +193,9 @@ class TiffBackend(ArrayBackend):
                 metadata_mirror=meta_mirror,
                 writer=writer,
             )
+        self._full_pos_idxs = self._global_target_pos_idxs()
+        # full OME models differ only by root UUID until a user `update_metadata`
+        self._models_in_sync = True
 
     def write(
         self,
@@ -234,6 +216,7 @@ class TiffBackend(ArrayBackend):
 
         manager = self._position_managers[position_index]
         manager.queue.put(frame)
+        manager.n_queued += 1
 
         # Accumulate frame metadata with storage index
         if frame_metadata is not None:
@@ -260,6 +243,7 @@ class TiffBackend(ArrayBackend):
             manager = self._position_managers[pos_idx]
             # Send to WriterThread queue (same path as regular writes)
             manager.queue.put(placeholder)
+            manager.n_queued += 1
 
     def _append_frame_metadata(
         self,
@@ -267,42 +251,34 @@ class TiffBackend(ArrayBackend):
         index: tuple[int, ...],
         frame_metadata: dict[str, Any],
     ) -> None:
-        if position_index not in self._frame_metadata:
-            self._frame_metadata[position_index] = []
-        # self._frame_metadata[position_index].append(meta_with_idx)
+        # {"the_z": 0, "the_c": 1, ...}
+        plane_kwargs = {
+            f"the_{k}": v for k, v in zip(self._index_keys, index, strict=False)
+        }
+        plane_kwargs.update({f"the_{k}": 0 for k in "tcz" if k not in self._index_keys})
 
-        mirror = self._position_managers[position_index].metadata_mirror
-        model = mirror.model
-        if not (structured := model.structured_annotations):
-            model.structured_annotations = structured = ome.StructuredAnnotations()
+        extra_kwargs = {}
+        for key, value in frame_metadata.items():
+            if key in PLANE_KEYS:
+                plane_kwargs[key] = value
+            else:
+                extra_kwargs[key] = value
 
-        map_annotations = structured.map_annotations
-        if images := model.images:
-            # {"the_z": 0, "the_c": 1, ...}
-            plane_kwargs = {
-                f"the_{k}": v for k, v in zip(self._index_keys, index, strict=False)
-            }
-            plane_kwargs.update(
-                {f"the_{k}": 0 for k in "tcz" if k not in self._index_keys}
-            )
+        annotation = None
+        if extra_kwargs:
+            annotation = ome.MapAnnotation(value=ome.Map.model_validate(extra_kwargs))
+            plane_kwargs["annotation_refs"] = [ome.AnnotationRef(id=annotation.id)]
+        plane = ome.Plane(**plane_kwargs)
 
-            extra_kwargs = {}
-            for key, value in frame_metadata.items():
-                if key in PLANE_KEYS:
-                    plane_kwargs[key] = value
-                else:
-                    extra_kwargs[key] = value
-
-            # meta_with_idx = {**frame_metadata, "storage_index": index}
-            annotation_refs: list[ome.AnnotationRef] = []
-            if extra_kwargs:
-                annotation = ome.MapAnnotation(
-                    value=ome.Map.model_validate(extra_kwargs)
-                )
-                map_annotations.append(annotation)
-                annotation_refs.append(ome.AnnotationRef(id=annotation.id))
-            planes = images[position_index].pixels.planes
-            planes.append(ome.Plane(**plane_kwargs, annotation_refs=annotation_refs))
+        # Every mirror holding the full OME model describes this position's Image
+        for pos_idx in self._full_pos_idxs:
+            mirror = self._position_managers[pos_idx].metadata_mirror
+            model = mirror.model
+            if annotation is not None:
+                if model.structured_annotations is None:
+                    model.structured_annotations = ome.StructuredAnnotations()
+                model.structured_annotations.map_annotations.append(annotation)
+            model.images[position_index].pixels.planes.append(plane)
             mirror.mark_dirty()
 
     def _global_target_pos_idxs(self) -> list[int]:
@@ -348,33 +324,93 @@ class TiffBackend(ArrayBackend):
             value = ome.Map.model_validate(
                 {k: json.dumps(v) for k, v in metadata.items()}
             )
-
-            for pos_idx in self._global_target_pos_idxs():
-                manager = self._position_managers[pos_idx]
+            # while in sync, one annotation (and ID) is shared by every full model, so
+            # they stay identical apart from their root UUID. After `update_metadata`
+            # (which keeps the caller's objects, uncopied), each gets its own.
+            annotation = ome.MapAnnotation(namespace=namespace, value=value)
+            managers = [
+                self._position_managers[i] for i in self._global_target_pos_idxs()
+            ]
+            for manager in managers:
+                if not self._models_in_sync:
+                    annotation = ome.MapAnnotation(namespace=namespace, value=value)
                 with manager._lock:
-                    manager.metadata_mirror.set_map_annotation(namespace, value)
+                    manager.metadata_mirror.set_map_annotation(annotation)
 
-                    # Post-finalize: writer threads are joined and files are
-                    # closed, so flush directly.
-                    if self._finalized:
-                        manager.metadata_mirror.flush(force=True)
+            # Post-finalize: writer threads are joined and files are closed, so
+            # flush directly, serializing once while no user update has made the
+            # full models differ (as in `finalize`)
+            if self._finalized:
+                mirrors = {m.file_path: m.metadata_mirror for m in managers}
+                xmls = tiff_xmls(mirrors) if self._models_in_sync else {}
+                for manager in managers:
+                    with manager._lock:
+                        manager.flush(force=True, xml=xmls.get(manager.file_path))
 
     def finalize(self) -> None:
         """Flush and close all TIFF writers."""
         with self._state_lock:
-            if self._finalized:
+            managers = self._position_managers
+            if self._finalized or not managers:
                 return
 
-            # Signal all threads to stop (parallel shutdown begins)
-            for manager in self._position_managers.values():
+            # Pad a partial last outer index (e.g. timepoint) with zero frames:
+            # Bio-Formats can't read a single-file OME-TIFF that ends mid-timepoint
+            index_dims = self._acq_index_dims
+            inner_prod = math.prod(d.count or 1 for d in index_dims[1:])
+            placeholder = np.zeros(self._frame_shape, dtype=self._dtype)
+            for manager in managers.values():
+                if manager.thread is not None:
+                    for _ in range(-manager.n_queued % inner_prod):
+                        manager.queue.put(placeholder)
+
+            # Signal all threads to stop (parallel shutdown begins), then wait for
+            # every one: each full OME model describes the frames of all positions.
+            for manager in managers.values():
                 manager.signal_stop()
+            stalled = _join_writers(
+                {m.file_path: m.thread for m in managers.values() if m.thread}
+            )
 
-            # Finalize each position (wait for thread and update metadata)
-            for manager in self._position_managers.values():
-                index_dims = self._storage_dims[:-2] if self._storage_dims else None
-                manager.finalize(index_dims)
+            try:
+                # Record the frames actually written to each position (handles both
+                # unbounded dims and incomplete bounded dims) in each full OME model
+                outer = f"size_{index_dims[0].name.lower()}" if index_dims else ""
+                frames_written = {
+                    p: m.thread.frames_written for p, m in managers.items() if m.thread
+                }
+                full_mirrors: dict[str, OmeXMLMirror] = {}
+                for target in self._global_target_pos_idxs():
+                    mirror = managers[target].metadata_mirror
+                    for p, n_frames in frames_written.items():
+                        pixels = mirror.model.images[p].pixels
+                        block = pixels.tiff_data_blocks[0]
+                        size = max(1, -(-n_frames // inner_prod))  # (partial counts)
+                        if block.plane_count != n_frames or (
+                            outer and getattr(pixels, outer) != size
+                        ):
+                            block.plane_count = n_frames
+                            if outer:
+                                setattr(pixels, outer, size)
+                            mirror.mark_dirty()
+                    if mirror.dirty:
+                        full_mirrors[managers[target].file_path] = mirror
 
-            self._finalized = True
+                # no metadata update has made the full OME models differ yet, so
+                # serialize them once (unchanged models are not written again)
+                xmls = tiff_xmls(full_mirrors)
+                for manager in managers.values():
+                    # (skips the files of stalled writers)
+                    manager.flush(xml=xmls.get(manager.file_path))
+            finally:
+                # writers are closed, so later metadata updates can flush directly
+                self._finalized = True
+
+            if stalled:
+                raise TimeoutError(
+                    f"TIFF writers wrote no frame for {WRITER_STALL_TIMEOUT} s, "
+                    f"so these files may be incomplete: {stalled}"
+                )
 
     def get_arrays(self) -> list[ArrayLike]:
         """Return array-like objects backed by TIFF files.
@@ -503,19 +539,21 @@ class TiffBackend(ArrayBackend):
                 f"got {type(metadata)}"
             )
 
-        for pos_idx, meta in metadata.items():
-            if not isinstance(meta, ome.OME):
-                raise TypeError(
-                    f"Expected ome_types.model.OME for position {pos_idx}, "
-                    f"got {type(meta)}"
-                )
+        with self._state_lock:
+            self._models_in_sync = False
+            for pos_idx, meta in metadata.items():
+                if not isinstance(meta, ome.OME):
+                    raise TypeError(
+                        f"Expected ome_types.model.OME for position {pos_idx}, "
+                        f"got {type(meta)}"
+                    )
 
-            try:
-                # not calling deep copy here, since this is currently only ever called
-                # after finalize().  i.e. we're done.
-                self._position_managers[pos_idx].update_metadata(meta, flush=True)
-            except KeyError as e:  # pragma: no cover
-                raise KeyError(f"Unknown position index: {pos_idx}") from e
+                try:
+                    # not calling deep copy here, since this is currently only ever
+                    # called after finalize().  i.e. we're done.
+                    self._position_managers[pos_idx].update_metadata(meta, flush=True)
+                except KeyError as e:  # pragma: no cover
+                    raise KeyError(f"Unknown position index: {pos_idx}") from e
 
 
 class WriterThread(threading.Thread):
@@ -619,6 +657,26 @@ class WriterThread(threading.Thread):
         finally:
             with suppress(Exception):
                 self._writer.close()
+
+
+def _join_writers(threads: Mapping[str, WriterThread]) -> list[str]:
+    """Wait for writer threads to finish, and return the keys of stalled ones.
+
+    Writers are waited on for as long as any of them keeps writing frames (however
+    long the queues take to drain), but once none has written a frame for at least
+    `WRITER_STALL_TIMEOUT` seconds, all remaining writers are given up on together
+    (e.g. stuck on an unresponsive network drive). Progress is only checked when a
+    wait ends, so that can take up to ~2x `WRITER_STALL_TIMEOUT`.
+    """
+    total, deadline = -1, 0.0
+    for thread in threads.values():
+        while thread.is_alive():
+            if (n := sum(t.frames_written for t in threads.values())) != total:
+                total, deadline = n, time.monotonic() + WRITER_STALL_TIMEOUT
+            if (remaining := deadline - time.monotonic()) <= 0:
+                break
+            thread.join(remaining)
+    return [key for key, thread in threads.items() if thread.is_alive()]
 
 
 _thread_counter = count()
