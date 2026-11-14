@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import threading
-import time
 from itertools import count
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -742,50 +742,84 @@ def test_finalize_rewrites_only_changed_metadata(
     assert sorted(calls) == rewritten
 
 
-def test_finalize_waits_for_slow_writer(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+class _FakeWriter:
+    """A writer thread on a fake clock, writing a frame at each of `frame_times`."""
+
+    def __init__(
+        self, clock: SimpleNamespace, frame_times: list[float], end: float | None
+    ) -> None:
+        self._clock = clock
+        self._frame_times = frame_times
+        self._end = end  # None: never finishes
+
+    @property
+    def frames_written(self) -> int:
+        return sum(t <= self._clock.now for t in self._frame_times)
+
+    def is_alive(self) -> bool:
+        return self._end is None or self._clock.now < self._end
+
+    def join(self, timeout: float) -> None:
+        stop = self._clock.now + timeout
+        self._clock.now = stop if self._end is None else min(stop, self._end)
+
+
+@pytest.mark.parametrize(
+    ("writers", "stalled", "returns_at"),
+    [
+        # still writing frames: waited on far beyond the stall timeout
+        ({"a": ([0.5, 1, 1.5, 2, 2.5, 3], 3.2)}, [], 3.2),
+        # wrote nothing for 1 s: given up on (noticed when the next wait ends)
+        ({"a": ([0.5], None)}, ["a"], 2),
+        # waited on while another writer is still writing, then given up on together
+        ({"a": ([], None), "b": ([0.5, 1, 1.5, 2], 2.2)}, ["a"], 3),
+        ({"a": ([], None), "b": ([], None)}, ["a", "b"], 1),
+        # finished writers are not returned
+        ({"a": ([0.5], 0.7), "b": ([0.2, 0.4], 0.6)}, [], 0.7),
+    ],
+    ids=["slow", "stalled", "other-writing", "all-stalled", "finished"],
+)
+def test_join_writers(
+    monkeypatch: pytest.MonkeyPatch,
+    writers: dict[str, tuple[list[float], float | None]],
+    stalled: list[str],
+    returns_at: float,
 ) -> None:
-    """A writer still draining its queue is waited on, beyond the stall timeout."""
-    monkeypatch.setattr(_tifffile, "WRITER_STALL_TIMEOUT", 0.4)
-    write = tifffile.TiffWriter.write
+    """`_join_writers` gives up once no writer wrote a frame for the stall timeout."""
+    clock = SimpleNamespace(now=0.0)
+    monkeypatch.setattr(_tifffile, "time", SimpleNamespace(monotonic=lambda: clock.now))
+    monkeypatch.setattr(_tifffile, "WRITER_STALL_TIMEOUT", 1.0)
+    threads = {k: _FakeWriter(clock, *args) for k, args in writers.items()}
 
-    def slow_write(self: tifffile.TiffWriter, *args: Any, **kwargs: Any) -> Any:
-        time.sleep(0.02)
-        return write(self, *args, **kwargs)
-
-    monkeypatch.setattr(tifffile.TiffWriter, "write", slow_write)
-    settings = AcquisitionSettings(
-        root_path=tmp_path / "test.ome.tiff",
-        dimensions=[
-            Dimension(name="t", count=None, type="time"),
-            Dimension(name="y", count=16, type="space"),
-            Dimension(name="x", count=16, type="space"),
-        ],
-        dtype="uint16",
-    )
-    # the writer needs ~0.8 s to drain its queue when the stream is closed
-    with create_stream(settings) as stream:
-        for _ in range(40):
-            stream.append(np.zeros((16, 16), dtype="uint16"))
-
-    assert from_tiff(settings.output_path).images[0].pixels.size_t == 40
+    assert _tifffile._join_writers(threads) == stalled  # type: ignore[arg-type]
+    assert clock.now == pytest.approx(returns_at)
 
 
 def test_finalize_abandons_stalled_writer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A writer that stops writing frames makes close() raise, instead of hang."""
-    monkeypatch.setattr(_tifffile, "WRITER_STALL_TIMEOUT", 0.1)
-    resume = threading.Event()
+    stalled, resume = threading.Event(), threading.Event()
     write = tifffile.TiffWriter.write
     pos1_writes = count()
 
     def stalling_write(self: tifffile.TiffWriter, *args: Any, **kwargs: Any) -> Any:
         if self.filehandle.name.endswith("_p001.ome.tiff") and next(pos1_writes):
+            stalled.set()
             resume.wait()  # Pos1 stalls after its first frame
         return write(self, *args, **kwargs)
 
+    def join_writers(threads: dict[str, _tifffile.WriterThread]) -> list[str]:
+        # instead of a stall timeout: Pos1 is stalled exactly while blocked above
+        stalled.wait()
+        pos1 = [p for p in threads if p.endswith("_p001.ome.tiff")]
+        for path, thread in threads.items():
+            if path not in pos1:
+                thread.join()
+        return pos1
+
     monkeypatch.setattr(tifffile.TiffWriter, "write", stalling_write)
+    monkeypatch.setattr(_tifffile, "_join_writers", join_writers)
     settings = AcquisitionSettings(
         root_path=tmp_path / "test.ome.tiff",
         dimensions=[
