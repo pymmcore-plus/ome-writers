@@ -451,18 +451,24 @@ class TiffBackend(ArrayBackend):
                 for m in managers.values()
                 if m.thread and m.thread.error and not m.thread.error_reported
             ]
+            not_written = [
+                f"OME-XML not written to {p}: {e!r}" for p, e in flush_errors
+            ]
+            first_flush_error = flush_errors[0][1] if flush_errors else None
             if failed:
-                also = [f"OME-XML not written to {p}: {e!r}" for p, e in flush_errors]
                 if stalled:
-                    also.append(f"and these TIFF writers stalled: {stalled}")
-                raise self._writer_error(failed, also) from failed[0].error
-            if flush_errors:
-                raise flush_errors[0][1]
+                    not_written.append(f"and these TIFF writers stalled: {stalled}")
+                raise self._writer_error(failed, not_written) from failed[0].error
             if stalled:
-                raise TimeoutError(
+                msg = (
                     f"TIFF writers wrote no frame for {WRITER_STALL_TIMEOUT} s, "
                     f"so these files may be incomplete: {stalled}"
                 )
+                raise TimeoutError(
+                    "; ".join([msg, *not_written])
+                ) from first_flush_error
+            if first_flush_error is not None:
+                raise first_flush_error
 
     def get_arrays(self) -> list[ArrayLike]:
         """Return array-like objects backed by TIFF files.
@@ -651,7 +657,7 @@ class WriterThread(threading.Thread):
         # Wait for first frame - if None, close writer and return
         first_frame = self._image_queue.get()
         if first_frame is None:
-            self._writer.close()
+            self._close_writer()
             return
 
         def _queue_iterator() -> Iterator[np.ndarray]:
@@ -709,18 +715,22 @@ class WriterThread(threading.Thread):
             self._fail(e)
         finally:
             sentinel_queued = self.error is not None  # (stopped before the sentinel)
-            try:
-                # (in contiguous mode, all IFDs but the first are written here)
-                self._writer.close()
-            except Exception as e:
-                if self.error is None:
-                    self._fail(e)
+            self._close_writer()
 
         if sentinel_queued:
             # discard frames until the stop sentinel, so they don't pile up in memory
             # (and so a producer never blocks on a full queue)
             while self._image_queue.get() is not None:
                 pass
+
+    def _close_writer(self) -> None:
+        """Close the TIFF file, recording an error if it's the first."""
+        try:
+            # (in contiguous mode, all IFDs but the first are written here)
+            self._writer.close()
+        except Exception as e:
+            if self.error is None:
+                self._fail(e)
 
     def _fail(self, error: Exception) -> None:
         """Record the `error` that stopped writing, and report it to the backend."""

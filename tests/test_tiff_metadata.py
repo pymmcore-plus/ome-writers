@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import errno
 import json
+import re
 import threading
 import time
 from itertools import count
@@ -973,6 +974,68 @@ def test_writer_error_from_tifffile_close(
         stream.append(FRAME)
     with pytest.raises(RuntimeError, match="after 10 frames: OSError"):
         stream.close()
+
+
+def test_writer_error_closing_empty_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A writer that got no frames but failed to close its file: close() raises."""
+    writer_close = tifffile.TiffWriter.close
+
+    def failing_close(self: tifffile.TiffWriter) -> None:
+        writer_close(self)
+        if self.filehandle.name.endswith("_p001.ome.tiff"):
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(tifffile.TiffWriter, "close", failing_close)
+    stream = create_stream(_fail_settings(tmp_path, t=1, mode="redundant"))
+    stream.append(FRAME)  # (Pos1 gets no frame)
+    with pytest.raises(RuntimeError, match=r"_p001\.ome\.tiff failed after 0 frames"):
+        stream.close()
+
+
+def test_stalled_writer_and_metadata_flush_fail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed metadata write doesn't hide a stalled writer."""
+    resume = threading.Event()
+    write, mirror_flush = tifffile.TiffWriter.write, OmeXMLMirror.flush
+    pos1_writes = count()
+
+    def stalling_write(self: tifffile.TiffWriter, *args: Any, **kwargs: Any) -> Any:
+        if self.filehandle.name.endswith("_p001.ome.tiff") and next(pos1_writes):
+            resume.wait()  # Pos1 stalls after its first frame
+        return write(self, *args, **kwargs)
+
+    def failing_flush(self: OmeXMLMirror, **kwargs: Any) -> None:
+        if self.path.endswith("_p000.ome.tiff"):
+            raise OSError(errno.ENOSPC, "No space left on device")
+        mirror_flush(self, **kwargs)
+
+    def join_writers(threads: dict[str, _tifffile.WriterThread]) -> list[str]:
+        # (no timing: wait for every writer but Pos1's, which is "stalled")
+        stalled = [key for key in threads if key.endswith("_p001.ome.tiff")]
+        for key, thread in threads.items():
+            if key not in stalled:
+                thread.join()
+        return stalled
+
+    monkeypatch.setattr(tifffile.TiffWriter, "write", stalling_write)
+    monkeypatch.setattr(OmeXMLMirror, "flush", failing_flush)
+    monkeypatch.setattr(_tifffile, "_join_writers", join_writers)
+    stream = create_stream(_fail_settings(tmp_path, t=2, mode="redundant"))
+    try:
+        for _ in range(4):
+            stream.append(FRAME)
+        with pytest.raises(TimeoutError, match=r"_p001\.ome\.tiff") as e:
+            stream.close()
+        assert re.search(r"OME-XML not written to .*_p000", str(e.value))
+        assert isinstance(e.value.__cause__, OSError)
+    finally:
+        resume.set()
+    for thread in threading.enumerate():
+        if thread.name.startswith("TiffWriterThread"):
+            thread.join()
 
 
 @pytest.mark.parametrize("all_files", [False, True])
