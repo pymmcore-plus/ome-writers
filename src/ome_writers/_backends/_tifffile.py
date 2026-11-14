@@ -169,7 +169,7 @@ class TiffBackend(ArrayBackend):
         # Extract index keys, excluding Y and X, example: ['t', 'c', 'z']
         self._index_keys = [d.name for d in storage_dims[:-2]]
         self._dtype = settings.dtype
-        self._frame_shape = tuple(d.count or 1 for d in self._storage_dims[-2:])
+        self._frame_shape = settings.frame_shape
 
         # Extract and validate compression
         compression = None

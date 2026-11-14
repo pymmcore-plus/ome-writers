@@ -11,6 +11,7 @@ from typing import (
     Any,
     Literal,
     TypeAlias,
+    cast,
     get_args,
 )
 
@@ -606,6 +607,11 @@ def _validate_dims_list(dims: tuple[Dimension, ...]) -> tuple[Dimension, ...]:
             raise ValueError(
                 "The last two dimensions must be spatial dimensions (type='space')."
             )
+        if dim.count is None:
+            raise ValueError(
+                "The last two dimensions must have a count: they are the frame "
+                f"shape, but {dim.name!r} is unbounded (count=None)."
+            )
         if dim.type is None:
             if dim.name.lower() not in {"x", "y"}:
                 warnings.warn(
@@ -1076,6 +1082,12 @@ class AcquisitionSettings(_BaseModel):
         """In-frame dimensions, currently always last two dims (usually (Y,X))."""
         self._require_dimensions("frame_dimensions")
         return self.dimensions[-2:]
+
+    @property
+    def frame_shape(self) -> tuple[int, ...]:
+        """Shape of one frame: the counts of `frame_dimensions` (usually (Y, X))."""
+        # cast: frame dimensions are validated to have a count (never unbounded)
+        return tuple(cast("int", d.count) for d in self.frame_dimensions)
 
     @property
     def index_dimensions(self) -> tuple[Dimension, ...]:
