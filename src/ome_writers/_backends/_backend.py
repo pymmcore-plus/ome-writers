@@ -50,7 +50,7 @@ Example Usage
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -76,6 +76,10 @@ class ArrayBackend(ABC):
     3. Call `write(pos_key, idx, frame)` for each frame
     4. Call `finalize()` to flush and close
     """
+
+    # If True, `write` takes buffers of any size, appended in order to a flat stream
+    # per position, and `OMEStream.append` splits buffers into frames by byte count.
+    accepts_partial_frames: ClassVar[bool] = False
 
     # -------------------------------------------------------------------------
     # Compatibility checking

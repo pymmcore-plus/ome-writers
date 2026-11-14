@@ -30,6 +30,8 @@ class AcquireZarrBackend(YaozarrsBackend):
     - Root path must end with .zarr
     """
 
+    accepts_partial_frames = True
+
     def __init__(self) -> None:
         super().__init__()
         self._stream: az.ZarrStream | None = None
