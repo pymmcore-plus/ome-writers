@@ -48,6 +48,11 @@ class AcquireZarrBackend(YaozarrsBackend):
             self._resolve_compression(settings.compression)
         except ValueError as e:
             return str(e)
+        if settings.dtype.upper() not in az.DataType.__members__:
+            supported = [t.lower() for t in az.DataType.__members__]
+            return (
+                f"data type '{settings.dtype}' is not supported. Supported: {supported}"
+            )
         return False
 
     def _get_yaozarrs_writer(self) -> Callable[..., _ArrayPlaceholder]:

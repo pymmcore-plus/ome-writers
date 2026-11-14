@@ -12,7 +12,7 @@ import ome_types
 import ome_types.model as ome
 import tifffile
 
-from ome_writers._schema import OmeTiffFormat
+from ome_writers._schema import OME_TIFF_PIXEL_TYPES, OmeTiffFormat
 from ome_writers._units import ngff_to_ome_unit
 from ome_writers._util import spatial_role_indices
 
@@ -409,7 +409,7 @@ def _build_full_model(
             size_c=size_c,
             size_t=size_t,
             **physical_sizes,
-            type=settings.dtype,
+            type=OME_TIFF_PIXEL_TYPES[settings.dtype],
             # big_endian=False,
             channels=channels,
             tiff_data_blocks=[tiff_data],
